@@ -1,0 +1,54 @@
+name: Release
+
+# v* 태그 푸시 시 Windows(exe)·macOS(dmg+zip) 빌드 → 단일 GitHub Release 초안에 업로드.
+# 초안 확인 후 수동으로 Publish하면 배포 + 자동 업데이트 감지 시작.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            script: build:win
+          - os: macos-latest
+            script: build:mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.script }} -- --publish never
+      # 필요한 산출물만 수집 (latest-mac.yml·zip blockmap 등 잡파일 제외)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+            dist/*.dmg
+            dist/*-mac.zip
+          if-no-files-found: ignore
+
+  # 두 빌드를 모아 초안 릴리즈 하나로 (병렬 publish 시 초안 2개 생기는 레이스 방지)
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*
