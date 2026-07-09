@@ -253,6 +253,10 @@ function SceneGrid(): React.JSX.Element {
   const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const clearReserveAll = useScenesStore((s) => s.clearReserveAll)
   const reorder = useScenesStore((s) => s.reorder)
+  // 새 씬 기본 해상도 (커스텀 — 툴바 노출용)
+  const presets = useScenesStore((s) => s.presets)
+  const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
+  const activePreset = presets.find((p) => p.id === activePresetId) ?? null
 
   // 커스텀 확장 (NAIS2 Custom): 큐 반복 / 씬별 캐릭터 추가
   const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
@@ -452,6 +456,25 @@ function SceneGrid(): React.JSX.Element {
         </Tooltip>
 
         <div className="flex-1" />
+
+        {/* 새 씬 기본 해상도 (커스텀 — 프리셋 드롭다운에만 있던 걸 툴바로 노출).
+            여기서 바꾸면 이후 "+ 씬 추가"로 만드는 씬이 이 해상도로 생성된다 */}
+        {activePreset && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <ResolutionPicker
+                  className="h-8 w-36"
+                  width={activePreset.defaultWidth ?? 832}
+                  height={activePreset.defaultHeight ?? 1216}
+                  onPick={(w, h) => void setPresetDefaultResolution(activePreset.id, w, h)}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>새 씬 기본 해상도 — 씬 추가 시 이 해상도로 생성</TooltipContent>
+          </Tooltip>
+        )}
+        <div className="mx-1 h-5 w-px bg-line" />
 
         <IconBtn
           icon={<CalendarPlus size={16} />}
