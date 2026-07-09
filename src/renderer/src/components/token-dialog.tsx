@@ -15,7 +15,6 @@ import {
   Upload
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import discordSvg from '../assets/discord.svg'
 import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { THEME_PRESETS } from '../lib/theme-presets'
@@ -254,7 +253,6 @@ function StorageSection(): React.JSX.Element {
   const [autoSave, setAutoSave] = useState(true)
   const [format, setFormat] = useState('png')
   const [dateFolders, setDateFolders] = useState(true)
-  const [exportPerScene, setExportPerScene] = useState(false)
 
   useEffect(() => {
     void window.nais
@@ -266,9 +264,6 @@ function StorageSection(): React.JSX.Element {
     void window.nais
       .invoke('settings:get', { key: 'date_folders' })
       .then(({ value }) => setDateFolders(value !== '0'))
-    void window.nais
-      .invoke('settings:get', { key: 'export_per_scene_folder' })
-      .then(({ value }) => setExportPerScene(value === '1'))
   }, [])
 
   return (
@@ -289,18 +284,6 @@ function StorageSection(): React.JSX.Element {
             onCheckedChange={(v) => {
               setDateFolders(v)
               void window.nais.invoke('settings:set', { key: 'date_folders', value: v ? '1' : '0' })
-            }}
-          />
-        </Row>
-        <Row label="폴더로 내보낼 때 씬별 폴더" hint="켜면 씬 이름 폴더로 나눔, 끄면 이미지만 한곳에">
-          <Switch
-            checked={exportPerScene}
-            onCheckedChange={(v) => {
-              setExportPerScene(v)
-              void window.nais.invoke('settings:set', {
-                key: 'export_per_scene_folder',
-                value: v ? '1' : '0'
-              })
             }}
           />
         </Row>
@@ -705,30 +688,7 @@ function AboutSection(): React.JSX.Element {
         )}
       </div>
 
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() => window.open('https://discord.gg/bFxP5Qvaz', '_blank')}
-          className="inline-flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
-        >
-          <img src={discordSvg} className="size-4" alt="" /> Discord
-        </button>
-        <button
-          onClick={() => window.open('https://www.patreon.com/c/sunakgo', '_blank')}
-          className="inline-flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
-        >
-          <PatreonIcon /> Patreon
-        </button>
-      </div>
     </div>
-  )
-}
-
-/** Patreon 로고 (currentColor) */
-function PatreonIcon(): React.JSX.Element {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21M2 21.6h3.5V2.41H2V21.6z" />
-    </svg>
   )
 }
 

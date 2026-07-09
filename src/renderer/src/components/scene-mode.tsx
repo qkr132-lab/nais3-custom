@@ -302,12 +302,21 @@ function SceneGrid(): React.JSX.Element {
   async function exportZip(mode: 'favorites' | 'sceneTop'): Promise<void> {
     await window.nais.invoke('scenes:exportZip', { mode })
   }
+  // ZIP — 현재 프리셋 전체 이미지 (씬 id 전체를 bulkExportZip으로)
+  async function exportPresetZip(): Promise<void> {
+    const ids = scenes.map((s) => s.id)
+    if (ids.length === 0) {
+      toast('내보낼 씬이 없습니다', 'info')
+      return
+    }
+    await window.nais.invoke('scenes:bulkExportZip', { ids })
+  }
 
   // 폴더로 내보내기 (커스텀) — 편집 모드 없이 상단 툴바에서 바로.
   // 현재 프리셋에서 이미지가 있는 씬 전부를 지정 폴더에 원본 그대로 싹 복사한다.
   const folderExport = useFolderExport()
   function exportAllToFolder(): void {
-    void folderExport.run(scenes.filter((s) => (s.imageCount ?? 0) > 0).map((s) => s.id))
+    void folderExport.run({ ids: scenes.filter((s) => (s.imageCount ?? 0) > 0).map((s) => s.id) })
   }
 
   return (
@@ -330,15 +339,40 @@ function SceneGrid(): React.JSX.Element {
             <TooltipContent>이미지 내보내기</TooltipContent>
           </Tooltip>
           <PopoverContent align="start" className="w-64 p-1">
-            {/* 폴더로 내보내기 (커스텀) — ZIP 없이 지정 폴더에 원본 그대로 */}
+            {/* 폴더로 보내기 (커스텀) — ZIP 없이 지정 폴더에 원본 그대로 */}
+            <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1 text-[11px] font-semibold text-muted">
+              <FolderOpen size={12} /> 폴더로 보내기
+            </p>
             <MenuItem
-              icon={<FolderOpen size={13} />}
-              label="폴더로 — 현재 프리셋 전체 이미지"
+              icon={<ImageIcon size={13} />}
+              label="현재 프리셋 전체 이미지"
               onClick={exportAllToFolder}
             />
+            <MenuItem
+              icon={<Star size={13} />}
+              label="즐겨찾기 이미지"
+              onClick={() => void folderExport.run({ mode: 'favorites' })}
+            />
+            <MenuItem
+              icon={<ImageOff size={13} />}
+              label="각 씬 최상단 이미지"
+              onClick={() => void folderExport.run({ mode: 'sceneTop' })}
+            />
             <div className="my-1 h-px bg-line" />
-            <p className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-faint">ZIP 압축으로</p>
-            <MenuItem icon={<Star size={13} />} label="즐겨찾기 이미지" onClick={() => void exportZip('favorites')} />
+            {/* ZIP으로 보내기 */}
+            <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1 text-[11px] font-semibold text-muted">
+              <FolderArchive size={12} /> ZIP으로 보내기
+            </p>
+            <MenuItem
+              icon={<ImageIcon size={13} />}
+              label="현재 프리셋 전체 이미지"
+              onClick={() => void exportPresetZip()}
+            />
+            <MenuItem
+              icon={<Star size={13} />}
+              label="즐겨찾기 이미지"
+              onClick={() => void exportZip('favorites')}
+            />
             <MenuItem
               icon={<ImageOff size={13} />}
               label="각 씬 최상단 이미지"
@@ -544,31 +578,35 @@ function SceneGrid(): React.JSX.Element {
   )
 }
 
+/** 폴더 내보내기 대상 (커스텀). ids=씬들의 모든 이미지, mode=즐겨찾기/각 씬 최상단(전역) */
+type FolderExportScope = { ids?: number[]; mode?: 'favorites' | 'sceneTop' }
+
 /**
- * 폴더로 내보내기 로직 (커스텀) — 상단 툴바(전체 프리셋)와 편집 모드(선택 씬)에서 공유.
- * 선택한 씬들의 원본 이미지를 지정 폴더에 그대로 복사한다. 이름 충돌 시 미리보기 다이얼로그로 물어본다.
+ * 폴더로 내보내기 로직 (커스텀) — 상단 툴바와 편집 모드에서 공유.
+ * 선택 이미지(씬 ids 또는 즐겨찾기/각 씬 최상단)를 지정 폴더에 원본 그대로 복사한다.
+ * 이름 충돌 시 미리보기 다이얼로그로 물어본다.
  */
 function useFolderExport(): {
-  run: (ids: number[]) => Promise<void>
+  run: (scope: FolderExportScope) => Promise<void>
   dialog: React.JSX.Element
 } {
   type Conflict = { name: string; existingThumb: string; incomingThumb: string }
   const [conflict, setConflict] = useState<{
-    ids: number[]
+    scope: FolderExportScope
     dir: string
     items: Conflict[]
     total: number
   } | null>(null)
 
-  const run = async (ids: number[]): Promise<void> => {
-    if (ids.length === 0) {
+  const run = async (scope: FolderExportScope): Promise<void> => {
+    if (!scope.mode && (scope.ids?.length ?? 0) === 0) {
       toast('내보낼 이미지가 없습니다', 'info')
       return
     }
-    const res = await window.nais.invoke('scenes:exportToFolder', { ids })
+    const res = await window.nais.invoke('scenes:exportToFolder', scope)
     if (res.canceled) return
     if (res.conflicts && res.conflicts.length > 0 && res.dir) {
-      setConflict({ ids, dir: res.dir, items: res.conflicts, total: res.total ?? 0 })
+      setConflict({ scope, dir: res.dir, items: res.conflicts, total: res.total ?? 0 })
       return
     }
     if ((res.copied ?? 0) === 0) {
@@ -580,9 +618,9 @@ function useFolderExport(): {
 
   const resolveConflict = async (policy: 'overwrite' | 'rename' | 'skip'): Promise<void> => {
     if (!conflict) return
-    const { ids, dir } = conflict
+    const { scope, dir } = conflict
     setConflict(null)
-    const res = await window.nais.invoke('scenes:exportToFolder', { ids, dir, policy })
+    const res = await window.nais.invoke('scenes:exportToFolder', { ...scope, dir, policy })
     toast(
       `이미지 ${res.copied ?? 0}개 내보냄${res.skipped ? ` · ${res.skipped}개 건너뜀` : ''}`,
       'success'
@@ -714,7 +752,7 @@ function BulkBar({
         size="sm"
         variant="ghost"
         disabled={disabled}
-        onClick={() => void folderExport.run([...selection])}
+        onClick={() => void folderExport.run({ ids: [...selection] })}
       >
         <FolderOpen size={13} /> 폴더로
       </Button>

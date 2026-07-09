@@ -8,7 +8,7 @@ import { getDb } from '../db'
 import { getSetting } from '../db/settings'
 import { libraryRoot } from '../images/storage'
 import { trashFile } from '../trash'
-import { assignExportName, safeName } from './export-name'
+import { assignExportName } from './export-name'
 
 interface Row {
   id: number
@@ -599,20 +599,41 @@ export interface ExportFolderResult {
   skipped?: number
 }
 
-/** 대상 폴더로 이미지들을 복사한다. 설정(export_per_scene_folder)에 따라 씬별 하위폴더로 나눔.
+/** 내보내기 대상 선택 (커스텀). ids=씬들의 모든 이미지, mode=즐겨찾기/각 씬 최상단(전역) */
+export type ExportScope = { ids?: number[]; mode?: 'favorites' | 'sceneTop' }
+type ExportRow = { file_path: string; thumbnail: Buffer | null; scene_name: string | null }
+
+/** scope에 맞는 이미지 행(파일경로·썸네일·씬이름)을 최신순으로 반환. 폴더/ZIP 내보내기 공용 */
+function collectExportRows(scope: ExportScope): ExportRow[] {
+  const db = getDb()
+  const select = `SELECT i.file_path, i.thumbnail, s.name AS scene_name FROM images i
+       LEFT JOIN gen_scenes s ON s.id = i.scene_id`
+  if (scope.mode === 'favorites') {
+    return db.prepare(`${select} WHERE i.favorite = 1 ORDER BY i.id DESC`).all() as ExportRow[]
+  }
+  if (scope.mode === 'sceneTop') {
+    return db
+      .prepare(
+        `${select} WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL GROUP BY scene_id)
+         ORDER BY i.id DESC`
+      )
+      .all() as ExportRow[]
+  }
+  const ids = scope.ids ?? []
+  if (ids.length === 0) return []
+  return db
+    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)}) ORDER BY i.id DESC`)
+    .all(...ids) as ExportRow[]
+}
+
+/** 대상 폴더로 이미지들을 원본 그대로 복사한다 (한 폴더에 모아, 파일명=씬 이름).
  *  policy 미지정 + 이름 충돌 있으면 복사 없이 conflicts를 반환(렌더러가 물어봄). */
 export async function exportToFolder(
-  ids: number[],
+  scope: ExportScope,
   opts: { dir?: string; policy?: ExportPolicy } = {}
 ): Promise<ExportFolderResult> {
-  if (ids.length === 0) return { copied: 0 }
-  const rows = getDb()
-    .prepare(
-      `SELECT i.file_path, i.thumbnail, s.name AS scene_name FROM images i
-       LEFT JOIN gen_scenes s ON s.id = i.scene_id
-       WHERE i.scene_id IN (${placeholders(ids.length)}) ORDER BY i.id DESC`
-    )
-    .all(...ids) as { file_path: string; thumbnail: Buffer | null; scene_name: string | null }[]
+  const rows = collectExportRows(scope)
+  if (rows.length === 0) return { copied: 0 }
 
   let dir = opts.dir
   if (!dir) {
@@ -625,16 +646,13 @@ export async function exportToFolder(
     dir = r.filePaths[0]
   }
 
-  const perScene = getSetting('export_per_scene_folder') === '1'
-  // 파일명은 씬 이름 그대로 (디스크명의 _번호 제거). 같은 씬 여러 장이면 " (2)"부터
+  // 파일명은 씬 이름 그대로 (디스크명의 _번호 제거). 같은 씬 여러 장이면 " (2)"부터. 한 폴더에 모아 저장.
   const usedNames = new Set<string>()
   const plan = rows
     .filter((r) => existsSync(r.file_path))
     .map((r) => {
-      const sub = perScene && r.scene_name ? safeName(r.scene_name) || '씬' : ''
-      const targetDir = sub ? join(dir!, sub) : dir!
-      const name = assignExportName(r.scene_name, r.file_path, usedNames, sub || '.')
-      return { src: r.file_path, thumb: r.thumbnail, targetDir, rel: sub ? `${sub}/${name}` : name }
+      const name = assignExportName(r.scene_name, r.file_path, usedNames)
+      return { src: r.file_path, thumb: r.thumbnail, targetDir: dir!, rel: name }
     })
 
   // policy 미지정: 기존 파일과 충돌하는 것들을 미리보기와 함께 반환
