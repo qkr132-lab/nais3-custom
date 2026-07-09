@@ -7,6 +7,7 @@ import {
   FileDown,
   FileUp,
   FolderArchive,
+  FolderDown,
   FolderOpen,
   ImageOff,
   Images as ImageIcon,
@@ -302,6 +303,13 @@ function SceneGrid(): React.JSX.Element {
     await window.nais.invoke('scenes:exportZip', { mode })
   }
 
+  // 폴더로 내보내기 (커스텀) — 편집 모드 없이 상단 툴바에서 바로.
+  // 현재 프리셋에서 이미지가 있는 씬 전부를 지정 폴더에 원본 그대로 싹 복사한다.
+  const folderExport = useFolderExport()
+  function exportAllToFolder(): void {
+    void folderExport.run(scenes.filter((s) => (s.imageCount ?? 0) > 0).map((s) => s.id))
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
       {/* 툴바 — 한 행: 프리셋 드롭다운 + 아이콘(툴팁) */}
@@ -315,13 +323,21 @@ function SceneGrid(): React.JSX.Element {
             <TooltipTrigger asChild>
               <PopoverTrigger asChild>
                 <button className="grid size-8 place-items-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg">
-                  <FolderArchive size={16} />
+                  <FolderDown size={16} />
                 </button>
               </PopoverTrigger>
             </TooltipTrigger>
-            <TooltipContent>ZIP 내보내기</TooltipContent>
+            <TooltipContent>이미지 내보내기</TooltipContent>
           </Tooltip>
-          <PopoverContent align="start" className="w-52 p-1">
+          <PopoverContent align="start" className="w-64 p-1">
+            {/* 폴더로 내보내기 (커스텀) — ZIP 없이 지정 폴더에 원본 그대로 */}
+            <MenuItem
+              icon={<FolderOpen size={13} />}
+              label="폴더로 — 현재 프리셋 전체 이미지"
+              onClick={exportAllToFolder}
+            />
+            <div className="my-1 h-px bg-line" />
+            <p className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-faint">ZIP 압축으로</p>
             <MenuItem icon={<Star size={13} />} label="즐겨찾기 이미지" onClick={() => void exportZip('favorites')} />
             <MenuItem
               icon={<ImageOff size={13} />}
@@ -522,8 +538,65 @@ function SceneGrid(): React.JSX.Element {
         }
         onClose={() => setAdditionSceneIds(null)}
       />
+      {/* 폴더로 내보내기 이름 충돌 다이얼로그 (커스텀, 상단 툴바용) */}
+      {folderExport.dialog}
     </div>
   )
+}
+
+/**
+ * 폴더로 내보내기 로직 (커스텀) — 상단 툴바(전체 프리셋)와 편집 모드(선택 씬)에서 공유.
+ * 선택한 씬들의 원본 이미지를 지정 폴더에 그대로 복사한다. 이름 충돌 시 미리보기 다이얼로그로 물어본다.
+ */
+function useFolderExport(): {
+  run: (ids: number[]) => Promise<void>
+  dialog: React.JSX.Element
+} {
+  type Conflict = { name: string; existingThumb: string; incomingThumb: string }
+  const [conflict, setConflict] = useState<{
+    ids: number[]
+    dir: string
+    items: Conflict[]
+    total: number
+  } | null>(null)
+
+  const run = async (ids: number[]): Promise<void> => {
+    if (ids.length === 0) {
+      toast('내보낼 이미지가 없습니다', 'info')
+      return
+    }
+    const res = await window.nais.invoke('scenes:exportToFolder', { ids })
+    if (res.canceled) return
+    if (res.conflicts && res.conflicts.length > 0 && res.dir) {
+      setConflict({ ids, dir: res.dir, items: res.conflicts, total: res.total ?? 0 })
+      return
+    }
+    if ((res.copied ?? 0) === 0) {
+      toast('내보낼 이미지가 없습니다', 'info')
+      return
+    }
+    toast(`이미지 ${res.copied ?? 0}개 내보냄`, 'success')
+  }
+
+  const resolveConflict = async (policy: 'overwrite' | 'rename' | 'skip'): Promise<void> => {
+    if (!conflict) return
+    const { ids, dir } = conflict
+    setConflict(null)
+    const res = await window.nais.invoke('scenes:exportToFolder', { ids, dir, policy })
+    toast(
+      `이미지 ${res.copied ?? 0}개 내보냄${res.skipped ? ` · ${res.skipped}개 건너뜀` : ''}`,
+      'success'
+    )
+  }
+
+  const dialog = (
+    <ExportConflictDialog
+      data={conflict}
+      onResolve={resolveConflict}
+      onCancel={() => setConflict(null)}
+    />
+  )
+  return { run, dialog }
 }
 
 /** 편집 모드 일괄 작업 바 */
@@ -552,37 +625,8 @@ function BulkBar({
   const n = selection.size
   const disabled = n === 0
 
-  // 폴더로 내보내기 — 충돌 있으면 미리보기 다이얼로그로 물어봄 (커스텀)
-  type Conflict = { name: string; existingThumb: string; incomingThumb: string }
-  const [conflict, setConflict] = useState<{
-    ids: number[]
-    dir: string
-    items: Conflict[]
-    total: number
-  } | null>(null)
-
-  const exportToFolder = async (): Promise<void> => {
-    const ids = [...selection]
-    if (ids.length === 0) return
-    const res = await window.nais.invoke('scenes:exportToFolder', { ids })
-    if (res.canceled) return
-    if (res.conflicts && res.conflicts.length > 0 && res.dir) {
-      setConflict({ ids, dir: res.dir, items: res.conflicts, total: res.total ?? 0 })
-      return
-    }
-    toast(`이미지 ${res.copied ?? 0}개 내보냄`, 'success')
-  }
-
-  const resolveConflict = async (policy: 'overwrite' | 'rename' | 'skip'): Promise<void> => {
-    if (!conflict) return
-    const { ids, dir } = conflict
-    setConflict(null)
-    const res = await window.nais.invoke('scenes:exportToFolder', { ids, dir, policy })
-    toast(
-      `이미지 ${res.copied ?? 0}개 내보냄${res.skipped ? ` · ${res.skipped}개 건너뜀` : ''}`,
-      'success'
-    )
-  }
+  // 폴더로 내보내기 — 충돌 있으면 미리보기 다이얼로그로 물어봄 (커스텀, 상단 툴바와 공유)
+  const folderExport = useFolderExport()
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-surface-2 px-3 py-2 text-[13px]">
@@ -666,7 +710,12 @@ function BulkBar({
       </Select>
 
       {/* 폴더로 내보내기 (원본 파일 그대로) — 폴더 아이콘 유지 */}
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void exportToFolder()}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void folderExport.run([...selection])}
+      >
         <FolderOpen size={13} /> 폴더로
       </Button>
       {/* ZIP으로 내보내기 — 압축 아이콘 유지 */}
@@ -739,11 +788,7 @@ function BulkBar({
       </Button>
 
       {/* 폴더 내보내기 이름 충돌 다이얼로그 (커스텀) */}
-      <ExportConflictDialog
-        data={conflict}
-        onResolve={resolveConflict}
-        onCancel={() => setConflict(null)}
-      />
+      {folderExport.dialog}
     </div>
   )
 }
