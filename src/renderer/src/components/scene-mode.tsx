@@ -665,18 +665,14 @@ function BulkBar({
         </SelectContent>
       </Select>
 
-      {/* 내보내기 — ZIP / 폴더로 (커스텀) */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button size="sm" variant="ghost" disabled={disabled}>
-            <FolderArchive size={13} /> 내보내기
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-52 p-1">
-          <MenuItem icon={<FolderOpen size={13} />} label="폴더로 (원본 파일)" onClick={() => void exportToFolder()} />
-          <MenuItem icon={<FolderArchive size={13} />} label="ZIP 파일로" onClick={() => void bulkExportZip()} />
-        </PopoverContent>
-      </Popover>
+      {/* 폴더로 내보내기 (원본 파일 그대로) — 폴더 아이콘 유지 */}
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void exportToFolder()}>
+        <FolderOpen size={13} /> 폴더로
+      </Button>
+      {/* ZIP으로 내보내기 — 압축 아이콘 유지 */}
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkExportZip()}>
+        <FolderArchive size={13} /> ZIP
+      </Button>
       <Button
         size="sm"
         variant="ghost"

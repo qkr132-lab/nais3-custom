@@ -53,17 +53,17 @@ function UpdateButton(): React.JSX.Element | null {
 function AnlasChips({ balance, cost }: { balance: number | null; cost: number }): React.JSX.Element | null {
   if (balance === null) return null
   return (
-    <div className="no-drag mx-1 flex items-center gap-1">
+    <div className="no-drag mx-1 flex items-center gap-1.5">
       <span
-        className="flex items-center gap-1 rounded-md bg-surface-2 px-2 py-0.5 font-mono text-[11.5px] text-muted"
+        className="flex items-center gap-1.5 rounded-lg bg-[#c9a34f]/15 px-2.5 py-1 font-mono text-[14px] font-semibold text-[#9a7c2e] dark:text-[#e0c169]"
         title="Anlas 잔액 (생성할 때마다 갱신)"
       >
-        <Coins size={12} className="text-[#c9a34f]" />
+        <Coins size={15} className="text-[#c9a34f]" />
         {balance.toLocaleString()}
       </span>
       {cost > 0 && (
         <span
-          className="rounded-md bg-danger px-2 py-0.5 font-mono text-[11.5px] font-medium text-white"
+          className="rounded-lg bg-danger px-2.5 py-1 font-mono text-[14px] font-bold text-white"
           title="이번 생성에 소모될 Anlas (고해상도 · 캐릭터 레퍼런스 · 미인코딩 바이브 포함)"
         >
           -{cost}

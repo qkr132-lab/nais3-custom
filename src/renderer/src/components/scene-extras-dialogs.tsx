@@ -1,6 +1,18 @@
-import { Eye, EyeOff, ImageOff, Link2, Plus, Trash2, User, Users, Waves } from 'lucide-react'
-import { useEffect } from 'react'
-import type { CharRefItem, CharacterCard, VibeItem } from '@shared/types'
+import {
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  ImageOff,
+  Link2,
+  Plus,
+  Trash2,
+  User,
+  Users,
+  Waves
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { CharRefItem, CharacterCard, ListFolder, VibeItem } from '@shared/types'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import {
@@ -140,6 +152,16 @@ function CharacterPicker({
     )
   }
 
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggleFolder = (key: string): void =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+
+  const showFolders = folders.length > 0
+
   return (
     <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper p-1">
       {items.length === 0 && (
@@ -147,80 +169,139 @@ function CharacterPicker({
       )}
       {groups.map((g) => (
         <div key={g.key} className="space-y-0.5">
-          {/* 폴더 헤더 (미분류는 폴더가 하나라도 있을 때만 구분선 표시) */}
-          {g.name != null ? (
-            <div className="flex items-center gap-1.5 px-1.5 pt-1 text-[10.5px] font-semibold text-muted">
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: g.color ?? 'var(--faint)' }}
-              />
-              <span className="truncate">{g.name}</span>
-              <span className="text-faint">({g.chars.length})</span>
-            </div>
-          ) : (
-            folders.length > 0 && (
-              <div className="px-1.5 pt-1 text-[10.5px] font-semibold text-faint">미분류</div>
-            )
+          {/* 폴더 헤더 — 클릭하면 접기/펴기 (폴더가 있을 때만) */}
+          {showFolders && (
+            <FolderHeader
+              name={g.name ?? '미분류'}
+              color={g.color}
+              count={g.chars.length}
+              collapsed={collapsed.has(g.key)}
+              onToggle={() => toggleFolder(g.key)}
+            />
           )}
-          {g.chars.map((c) => renderChar(c, items.indexOf(c)))}
+          {!collapsed.has(g.key) && g.chars.map((c) => renderChar(c, items.indexOf(c)))}
         </div>
       ))}
     </div>
   )
 }
 
-/** 바이브/캐릭레퍼 이미지 그리드 멀티 선택 */
+/** 접기/펴기 폴더 헤더 (커스텀 — 선택 다이얼로그 공용) */
+function FolderHeader({
+  name,
+  color,
+  count,
+  collapsed,
+  onToggle
+}: {
+  name: string
+  color: string | null
+  count: number
+  collapsed: boolean
+  onToggle: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      onClick={onToggle}
+      className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11.5px] font-semibold text-muted transition-colors hover:bg-surface-2"
+    >
+      {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color ?? 'var(--faint)' }} />
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <span className="shrink-0 text-faint">({count})</span>
+    </button>
+  )
+}
+
+/** 바이브/캐릭레퍼 이미지 그리드 멀티 선택 (폴더별 그룹 + 접기/펴기) */
 function RefPicker({
   items,
+  folders,
   selected,
   onChange,
   emptyLabel
 }: {
   items: (VibeItem | CharRefItem)[]
+  folders: ListFolder[]
   selected: number[]
   onChange: (ids: number[]) => void
   emptyLabel: string
 }): React.JSX.Element {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggleFolder = (key: string): void =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+
+  const groups = [
+    ...folders.map((f) => ({
+      key: `f-${f.id}`,
+      name: f.name,
+      color: f.color,
+      list: items.filter((it) => it.folderId === f.id)
+    })),
+    {
+      key: 'ungrouped',
+      name: '미분류',
+      color: null as string | null,
+      list: items.filter((it) => it.folderId == null || !folders.some((f) => f.id === it.folderId))
+    }
+  ].filter((g) => g.list.length > 0)
+  const showFolders = folders.length > 0
+
+  const tile = (item: VibeItem | CharRefItem): React.JSX.Element => {
+    const checked = selected.includes(item.id)
+    return (
+      <button
+        key={item.id}
+        onClick={() => onChange(toggleId(selected, item.id))}
+        className={cn(
+          'relative aspect-square overflow-hidden rounded-md border transition',
+          checked
+            ? 'border-accent ring-2 ring-accent/40'
+            : 'border-line opacity-55 grayscale hover:opacity-90 hover:grayscale-0'
+        )}
+        title={item.name}
+      >
+        {item.thumbnail ? (
+          <img src={`data:image/webp;base64,${item.thumbnail}`} className="h-full w-full object-cover" alt="" />
+        ) : (
+          <span className="grid h-full w-full place-items-center bg-surface-2 text-faint">
+            <ImageOff size={16} />
+          </span>
+        )}
+        {checked && (
+          <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-accent text-[10px] leading-none text-white">
+            ✓
+          </span>
+        )}
+      </button>
+    )
+  }
+
   return (
-    <div className="max-h-64 overflow-y-auto rounded-md border border-line bg-paper p-1.5">
+    <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-line bg-paper p-1.5">
       {items.length === 0 ? (
         <p className="py-6 text-center text-[12px] text-faint">{emptyLabel}</p>
       ) : (
-        <div className="grid grid-cols-3 gap-1.5">
-          {items.map((item) => {
-            const checked = selected.includes(item.id)
-            return (
-              <button
-                key={item.id}
-                onClick={() => onChange(toggleId(selected, item.id))}
-                className={cn(
-                  'relative aspect-square overflow-hidden rounded-md border transition',
-                  checked
-                    ? 'border-accent ring-2 ring-accent/40'
-                    : 'border-line opacity-55 grayscale hover:opacity-90 hover:grayscale-0'
-                )}
-                title={item.name}
-              >
-                {item.thumbnail ? (
-                  <img
-                    src={`data:image/webp;base64,${item.thumbnail}`}
-                    className="h-full w-full object-cover"
-                    alt=""
-                  />
-                ) : (
-                  <span className="grid h-full w-full place-items-center bg-surface-2 text-faint">
-                    <ImageOff size={16} />
-                  </span>
-                )}
-                {checked && (
-                  <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-accent text-[10px] leading-none text-white">
-                    ✓
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+        groups.map((g) => (
+          <div key={g.key} className="space-y-1">
+            {showFolders && (
+              <FolderHeader
+                name={g.name}
+                color={g.color}
+                count={g.list.length}
+                collapsed={collapsed.has(g.key)}
+                onToggle={() => toggleFolder(g.key)}
+              />
+            )}
+            {!collapsed.has(g.key) && (
+              <div className="grid grid-cols-3 gap-1.5">{g.list.map(tile)}</div>
+            )}
+          </div>
+        ))
       )}
     </div>
   )
@@ -239,7 +320,9 @@ function SelectionPanel({
   onPatch: (patch: { characterIds?: number[]; charRefIds?: number[]; vibeIds?: number[] }) => void
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
+  const vibeFolders = useVibesStore((s) => s.folders)
   const crefs = useCharRefsStore((s) => s.items)
+  const crefFolders = useCharRefsStore((s) => s.folders)
   return (
     <div className="grid grid-cols-3 gap-3">
       <div className="space-y-1.5">
@@ -250,6 +333,7 @@ function SelectionPanel({
         <SectionTitle icon={<Users size={13} />} title="캐릭터 레퍼런스" count={charRefIds.length} />
         <RefPicker
           items={crefs}
+          folders={crefFolders}
           selected={charRefIds}
           onChange={(ids) => onPatch({ charRefIds: ids })}
           emptyLabel="캐릭레퍼가 없습니다"
@@ -259,6 +343,7 @@ function SelectionPanel({
         <SectionTitle icon={<Waves size={13} />} title="바이브" count={vibeIds.length} />
         <RefPicker
           items={vibes}
+          folders={vibeFolders}
           selected={vibeIds}
           onChange={(ids) => onPatch({ vibeIds: ids })}
           emptyLabel="바이브가 없습니다"
