@@ -83,6 +83,8 @@ interface ScenesState {
   bulkClearReserve: () => Promise<void>
   /** 선택 씬 variety+ 일괄 적용/해제 — 커스텀 */
   bulkSetVariety: (v: boolean) => Promise<void>
+  /** 내보내기 번호 매기기 (커스텀) — 선택 씬 목록 순서대로 start부터. null = 제거 */
+  bulkAssignNumbers: (start: number | null) => Promise<void>
   /** 선택 씬 일괄 복제 — 커스텀 */
   bulkDuplicate: () => Promise<void>
   bulkSetResolution: (width: number, height: number) => Promise<void>
@@ -440,6 +442,15 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     for (const id of ids) {
       void window.nais.invoke('scenes:update', { id, patch: { varietyPlus: v } })
     }
+  },
+  // 내보내기 번호 매기기 (커스텀) — 선택 씬을 화면(목록) 순서대로 start부터 순번. null = 번호 제거
+  bulkAssignNumbers: async (start) => {
+    const ids = get()
+      .scenes.filter((s) => get().selection.has(s.id))
+      .map((s) => s.id)
+    if (ids.length === 0) return
+    await window.nais.invoke('scenes:assignExportNumbers', { ids, start })
+    await get().load()
   },
   bulkDuplicate: async () => {
     // 목록 순서대로 복제 (선택 순서 아님)

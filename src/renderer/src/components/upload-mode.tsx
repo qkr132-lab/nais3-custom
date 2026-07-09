@@ -10,9 +10,11 @@ import {
   Image as ImageIcon,
   Loader2,
   LogOut,
+  Pencil,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Star,
   X,
   XCircle
 } from 'lucide-react'
@@ -41,6 +43,13 @@ function formatBytes(n: number): string {
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)$/i
+
+/** R2 폴더 즐겨찾기 (커스텀) — 버킷+경로에 별명을 붙여 원클릭 이동. settings KV에 저장 */
+interface R2Fav {
+  name: string
+  bucket: string
+  prefix: string
+}
 
 export function UploadMode(): React.JSX.Element {
   const [checked, setChecked] = useState(false)
@@ -201,6 +210,39 @@ function R2Browser({
     return window.nais.on('r2:progress', setStatus)
   }, [])
 
+  // 즐겨찾기 (커스텀) — 버킷+경로에 별명. 클릭 한 번으로 이동
+  const [favs, setFavs] = useState<R2Fav[]>([])
+  useEffect(() => {
+    void window.nais.invoke('settings:get', { key: 'r2_favorites' }).then(({ value }) => {
+      try {
+        setFavs(value ? (JSON.parse(value) as R2Fav[]) : [])
+      } catch {
+        setFavs([])
+      }
+    })
+  }, [])
+  const saveFavs = (next: R2Fav[]): void => {
+    setFavs(next)
+    void window.nais.invoke('settings:set', { key: 'r2_favorites', value: JSON.stringify(next) })
+  }
+  const isFav = favs.some((f) => f.bucket === bucket && f.prefix === prefix)
+  const toggleFav = async (): Promise<void> => {
+    if (!bucket) return
+    if (isFav) {
+      saveFavs(favs.filter((f) => !(f.bucket === bucket && f.prefix === prefix)))
+      return
+    }
+    const segs = prefix.split('/').filter(Boolean)
+    const name = await askText('즐겨찾기 이름', segs[segs.length - 1] ?? bucket)
+    if (!name) return
+    saveFavs([...favs, { name, bucket, prefix }])
+  }
+  const renameFav = async (fav: R2Fav): Promise<void> => {
+    const name = await askText('즐겨찾기 이름', fav.name)
+    if (!name) return
+    saveFavs(favs.map((f) => (f === fav ? { ...f, name } : f)))
+  }
+
   const loadBuckets = useCallback(async (): Promise<void> => {
     try {
       const { buckets } = await window.nais.invoke('r2:listBuckets', undefined)
@@ -344,6 +386,15 @@ function R2Browser({
           ))}
         </div>
 
+        {/* 즐겨찾기 토글 (커스텀) — 현재 위치를 별명으로 저장 */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="sm" variant="ghost" disabled={!bucket} onClick={() => void toggleFav()}>
+              <Star size={14} className={cn(isFav && 'fill-[#c9a34f] text-[#c9a34f]')} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{isFav ? '즐겨찾기 해제' : '현재 위치 즐겨찾기'}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -380,6 +431,49 @@ function R2Browser({
           <TooltipContent>연결 해제 ({accountId.slice(0, 8)}…)</TooltipContent>
         </Tooltip>
       </div>
+
+      {/* 즐겨찾기 바 (커스텀) — 클릭: 이동 · 연필: 이름 변경 · ×: 삭제 */}
+      {favs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-line bg-surface-2/40 px-2 py-1">
+          <Star size={12} className="shrink-0 fill-[#c9a34f] text-[#c9a34f]" />
+          {favs.map((f, i) => (
+            <span
+              key={`${f.bucket}/${f.prefix}/${i}`}
+              className={cn(
+                'group flex items-center gap-0.5 rounded-full border py-0.5 pl-2 pr-1 text-[12px]',
+                f.bucket === bucket && f.prefix === prefix
+                  ? 'border-accent/60 bg-accent/10 text-accent'
+                  : 'border-line bg-surface text-muted'
+              )}
+            >
+              <button
+                className="hover:text-accent"
+                title={`${f.bucket}/${f.prefix || ''}`}
+                onClick={() => {
+                  setBucket(f.bucket)
+                  setPrefix(f.prefix)
+                }}
+              >
+                {f.name}
+              </button>
+              <button
+                className="grid size-4 place-items-center rounded-full text-faint opacity-0 hover:text-ink group-hover:opacity-100"
+                title="이름 변경"
+                onClick={() => void renameFav(f)}
+              >
+                <Pencil size={10} />
+              </button>
+              <button
+                className="grid size-4 place-items-center rounded-full text-faint opacity-0 hover:text-danger group-hover:opacity-100"
+                title="즐겨찾기 삭제"
+                onClick={() => saveFavs(favs.filter((x) => x !== f))}
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* 목록 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-2">

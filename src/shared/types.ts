@@ -138,16 +138,16 @@ export interface ListFolder {
 }
 export type CharacterFolder = ListFolder
 
-/** 무채색 테마에 어울리는 채도 낮은 폴더 색 프리셋 */
+/** 폴더 색 프리셋 — 한눈에 구분되는 선명한 색 */
 export const FOLDER_COLORS = [
-  '#c47a72', // red
-  '#c9a34f', // amber
-  '#6f9e78', // green
-  '#6a9e9e', // teal
-  '#7089b5', // blue
-  '#9080b5', // purple
-  '#b57a9e', // pink
-  '#8a8a90' // gray
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#a855f7', // purple
+  '#ec4899' // pink
 ] as const
 
 export type CharacterCardPatch = Partial<
@@ -284,6 +284,8 @@ export interface Scene {
   reserveCount: number
   /** 씬별 variety+ 강제 적용 (커스텀. false = 메인 설정 따름) */
   varietyPlus: boolean
+  /** 내보내기 번호 (커스텀) — 지정 시 내보내는 파일명이 "01" 등 번호가 됨. null = 씬 이름 사용 */
+  exportNo: number | null
   /** 목록 카드용: 최신 생성 이미지 썸네일 (없으면 '') */
   thumbnail: string
   /** 최신 생성 이미지의 원본 파일 경로 (카드에 풀해상도로 선명하게 표시. 없으면 '') */
@@ -491,12 +493,21 @@ export interface IpcInvokeMap {
       patch: Partial<
         Pick<
           Scene,
-          'name' | 'prompt' | 'negativePrompt' | 'width' | 'height' | 'reserveCount' | 'varietyPlus'
+          | 'name'
+          | 'prompt'
+          | 'negativePrompt'
+          | 'width'
+          | 'height'
+          | 'reserveCount'
+          | 'varietyPlus'
+          | 'exportNo'
         >
       >
     }
     res: void
   }
+  /** 씬 내보내기 번호 일괄 부여 (커스텀) — ids 순서대로 start부터 순번. start=null이면 번호 제거 */
+  'scenes:assignExportNumbers': { req: { ids: number[]; start: number | null }; res: void }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
   'scenes:delete': { req: { id: number }; res: void }
   'scenes:reorder': { req: { ids: number[] }; res: void }

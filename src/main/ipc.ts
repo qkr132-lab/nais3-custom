@@ -73,6 +73,7 @@ import {
   duplicateScene,
   deleteScene,
   reorderScenes,
+  assignExportNumbers,
   setReserveAll,
   adjustReserveAll,
   bulkMove,
@@ -318,6 +319,9 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('scenes:reorder', ({ ids }) => {
     reorderScenes(ids)
+  })
+  handle('scenes:assignExportNumbers', ({ ids, start }) => {
+    assignExportNumbers(ids, start)
   })
   handle('scenes:setReserveAll', ({ presetId, count }) => {
     setReserveAll(presetId, count)

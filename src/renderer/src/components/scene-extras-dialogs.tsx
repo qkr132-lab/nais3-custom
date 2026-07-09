@@ -57,6 +57,31 @@ function toggleId(ids: number[], id: number): number[] {
   return ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id]
 }
 
+/**
+ * 선택창 폴더 접기 상태 (커스텀) — 기본은 "접힘". 펼친 폴더만 localStorage에 저장해
+ * 앱을 껐다 켜도 마지막 접기/펼치기 상태가 유지된다.
+ */
+function usePickerCollapse(storageKey: string): {
+  isCollapsed: (key: string) => boolean
+  toggle: (key: string) => void
+} {
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(storageKey) ?? '[]') as string[])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggle = (key: string): void =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      localStorage.setItem(storageKey, JSON.stringify([...next]))
+      return next
+    })
+  return { isCollapsed: (key) => !expanded.has(key), toggle }
+}
+
 function charLabel(c: CharacterCard, index: number): string {
   return c.name || c.prompt.split(',')[0]?.trim() || `캐릭터 ${index + 1}`
 }
@@ -99,7 +124,12 @@ function CharacterPicker({
   const folders = useCharactersStore((s) => s.folders)
 
   // 폴더 순서대로 그룹핑 + 미분류는 맨 끝. 빈 폴더는 표시 안 함
-  const groups: { key: string; name: string | null; color: string | null; chars: CharacterCard[] }[] = [
+  const groups: {
+    key: string
+    name: string | null
+    color: string | null
+    chars: CharacterCard[]
+  }[] = [
     ...folders.map((f) => ({
       key: `f-${f.id}`,
       name: f.name,
@@ -158,13 +188,8 @@ function CharacterPicker({
     )
   }
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggleFolder = (key: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+  // 기본 접힘 + 상태 영속 (커스텀)
+  const { isCollapsed, toggle } = usePickerCollapse('picker_open_chars')
 
   const showFolders = folders.length > 0
 
@@ -181,11 +206,12 @@ function CharacterPicker({
               name={g.name ?? '미분류'}
               color={g.color}
               count={g.chars.length}
-              collapsed={collapsed.has(g.key)}
-              onToggle={() => toggleFolder(g.key)}
+              collapsed={isCollapsed(g.key)}
+              onToggle={() => toggle(g.key)}
             />
           )}
-          {!collapsed.has(g.key) && g.chars.map((c) => renderChar(c, items.indexOf(c)))}
+          {(!showFolders || !isCollapsed(g.key)) &&
+            g.chars.map((c) => renderChar(c, items.indexOf(c)))}
         </div>
       ))}
     </div>
@@ -211,8 +237,15 @@ function FolderHeader({
       onClick={onToggle}
       className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11.5px] font-semibold text-muted transition-colors hover:bg-surface-2"
     >
-      {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
-      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color ?? 'var(--faint)' }} />
+      {collapsed ? (
+        <ChevronRight size={13} className="shrink-0" />
+      ) : (
+        <ChevronDown size={13} className="shrink-0" />
+      )}
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color ?? 'var(--faint)' }}
+      />
       <span className="min-w-0 flex-1 truncate">{name}</span>
       <span className="shrink-0 text-faint">({count})</span>
     </button>
@@ -225,21 +258,19 @@ function RefPicker({
   folders,
   selected,
   onChange,
-  emptyLabel
+  emptyLabel,
+  collapseKey
 }: {
   items: (VibeItem | CharRefItem)[]
   folders: ListFolder[]
   selected: number[]
   onChange: (ids: number[]) => void
   emptyLabel: string
+  /** 접기 상태 저장 키 (바이브/캐릭레퍼 각각 독립) */
+  collapseKey: string
 }): React.JSX.Element {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggleFolder = (key: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+  // 기본 접힘 + 상태 영속 (커스텀)
+  const { isCollapsed, toggle } = usePickerCollapse(collapseKey)
 
   const groups = [
     ...folders.map((f) => ({
@@ -272,7 +303,11 @@ function RefPicker({
         title={item.name}
       >
         {item.thumbnail ? (
-          <img src={`data:image/webp;base64,${item.thumbnail}`} className="h-full w-full object-cover" alt="" />
+          <img
+            src={`data:image/webp;base64,${item.thumbnail}`}
+            className="h-full w-full object-cover"
+            alt=""
+          />
         ) : (
           <span className="grid h-full w-full place-items-center bg-surface-2 text-faint">
             <ImageOff size={16} />
@@ -299,11 +334,11 @@ function RefPicker({
                 name={g.name}
                 color={g.color}
                 count={g.list.length}
-                collapsed={collapsed.has(g.key)}
-                onToggle={() => toggleFolder(g.key)}
+                collapsed={isCollapsed(g.key)}
+                onToggle={() => toggle(g.key)}
               />
             )}
-            {!collapsed.has(g.key) && (
+            {(!showFolders || !isCollapsed(g.key)) && (
               <div className="grid grid-cols-3 gap-1.5">{g.list.map(tile)}</div>
             )}
           </div>
@@ -352,13 +387,18 @@ function SelectionPanel({
           />
         </div>
         <div className="space-y-1.5">
-          <SectionTitle icon={<Users size={13} />} title="캐릭터 레퍼런스" count={charRefIds.length} />
+          <SectionTitle
+            icon={<Users size={13} />}
+            title="캐릭터 레퍼런스"
+            count={charRefIds.length}
+          />
           <RefPicker
             items={crefs}
             folders={crefFolders}
             selected={charRefIds}
             onChange={(ids) => onPatch({ charRefIds: ids })}
             emptyLabel="캐릭레퍼가 없습니다"
+            collapseKey="picker_open_crefs"
           />
         </div>
         <div className="space-y-1.5">
@@ -369,6 +409,7 @@ function SelectionPanel({
             selected={vibeIds}
             onChange={(ids) => onPatch({ vibeIds: ids })}
             emptyLabel="바이브가 없습니다"
+            collapseKey="picker_open_vibes"
           />
         </div>
       </div>
@@ -418,7 +459,9 @@ function PositionPanel({
       </div>
       {useCoords &&
         (chars.length === 0 ? (
-          <p className="mt-2 text-[11.5px] text-faint">캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.</p>
+          <p className="mt-2 text-[11.5px] text-faint">
+            캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.
+          </p>
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
             {chars.map((c, i) => {
@@ -497,8 +540,8 @@ export function SequenceDialog({
         <div className="border-b border-line px-4 py-3">
           <DialogTitle>캐릭터 / 레퍼런스 큐 반복</DialogTitle>
           <DialogDescription className="mt-0.5">
-            항목의 캐릭터·레퍼런스를 바꿔가며 예약 전체를 반복 생성합니다. 반복 중에는 메인
-            설정의 캐릭터/레퍼런스가 적용되지 않습니다.
+            항목의 캐릭터·레퍼런스를 바꿔가며 예약 전체를 반복 생성합니다. 반복 중에는 메인 설정의
+            캐릭터/레퍼런스가 적용되지 않습니다.
           </DialogDescription>
         </div>
 

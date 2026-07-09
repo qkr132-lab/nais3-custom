@@ -9,6 +9,7 @@ import {
   FolderArchive,
   FolderDown,
   FolderOpen,
+  Hash,
   ImageOff,
   Images as ImageIcon,
   Loader2,
@@ -24,7 +25,8 @@ import {
   Star,
   Trash2,
   UserPlus,
-  Users
+  Users,
+  X
 } from 'lucide-react'
 import {
   closestCenter,
@@ -53,7 +55,13 @@ import { SceneDetail } from './scene-detail'
 import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
 import { Button } from './ui/button'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger
+} from './ui/context-menu'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -112,7 +120,10 @@ function PresetDropdown(): React.JSX.Element {
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1">
         <div className="max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar">
           {/* 드래그로 순서 변경 */}
-          <SortableList ids={presets.map((p) => p.id)} onReorder={(ids) => void reorderPresets(ids)}>
+          <SortableList
+            ids={presets.map((p) => p.id)}
+            onReorder={(ids) => void reorderPresets(ids)}
+          >
             {presets.map((p) => (
               <SortableRow key={p.id} id={p.id} className="group gap-1" onTap={() => choose(p.id)}>
                 <div
@@ -442,14 +453,30 @@ function SceneGrid(): React.JSX.Element {
 
         <div className="flex-1" />
 
-        <IconBtn icon={<CalendarPlus size={16} />} tip="전체 예약 +1" onClick={() => void adjustReserveAll(1)} />
-        <IconBtn icon={<CalendarX size={16} />} tip="전체 예약 취소" onClick={() => void clearReserveAll()} />
+        <IconBtn
+          icon={<CalendarPlus size={16} />}
+          tip="전체 예약 +1"
+          onClick={() => void adjustReserveAll(1)}
+        />
+        <IconBtn
+          icon={<CalendarX size={16} />}
+          tip="전체 예약 취소"
+          onClick={() => void clearReserveAll()}
+        />
         <div className="mx-1 h-5 w-px bg-line" />
         {/* 카드 비율: 세로/가로 (해상도와 무관하게 고정) */}
         <IconBtn
-          icon={cardOrientation === 'portrait' ? <RectangleVertical size={16} /> : <RectangleHorizontal size={16} />}
+          icon={
+            cardOrientation === 'portrait' ? (
+              <RectangleVertical size={16} />
+            ) : (
+              <RectangleHorizontal size={16} />
+            )
+          }
           tip={cardOrientation === 'portrait' ? '세로 카드 (클릭: 가로)' : '가로 카드 (클릭: 세로)'}
-          onClick={() => setCardOrientation(cardOrientation === 'portrait' ? 'landscape' : 'portrait')}
+          onClick={() =>
+            setCardOrientation(cardOrientation === 'portrait' ? 'landscape' : 'portrait')
+          }
         />
         {/* 열 수 (2~5) */}
         <div className="flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5">
@@ -498,7 +525,10 @@ function SceneGrid(): React.JSX.Element {
           onDragCancel={() => setDragScene(null)}
           onDragEnd={onDragEnd}
         >
-          <SortableContext items={scenes.map((s) => `scene-${s.id}`)} strategy={rectSortingStrategy}>
+          <SortableContext
+            items={scenes.map((s) => `scene-${s.id}`)}
+            strategy={rectSortingStrategy}
+          >
             <div
               className="grid gap-3"
               style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
@@ -659,9 +689,23 @@ function BulkBar({
   const bulkClearFavorites = useScenesStore((s) => s.bulkClearFavorites)
   const bulkClearImages = useScenesStore((s) => s.bulkClearImages)
   const bulkExportZip = useScenesStore((s) => s.bulkExportZip)
+  const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
 
   const n = selection.size
   const disabled = n === 0
+
+  // 내보내기 번호 매기기 (커스텀) — 시작 번호 입력 후 목록 순서대로 순번
+  const assignNumbers = async (): Promise<void> => {
+    const raw = await askText('시작 번호', '1', '예: 1 → 01, 02… / 100 → 100, 101…')
+    if (raw == null) return
+    const start = Number(raw.trim())
+    if (!Number.isInteger(start) || start < 0) {
+      toast('숫자를 입력하세요', 'info')
+      return
+    }
+    await bulkAssignNumbers(start)
+    toast(`${n}개 씬에 번호 부여 (${String(start).padStart(2, '0')}부터)`, 'success')
+  }
 
   // 폴더로 내보내기 — 충돌 있으면 미리보기 다이얼로그로 물어봄 (커스텀, 상단 툴바와 공유)
   const folderExport = useFolderExport()
@@ -678,20 +722,40 @@ function BulkBar({
       <div className="mx-1 h-4 w-px bg-line" />
 
       {/* 선택 예약 (커스텀) — 누를 때마다 선택 씬들만 배치 수 단위로 증감 */}
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkAdjustReserve(1)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void bulkAdjustReserve(1)}
+      >
         <CalendarPlus size={13} /> 예약 +
       </Button>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkAdjustReserve(-1)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void bulkAdjustReserve(-1)}
+      >
         <Minus size={13} /> 예약 −
       </Button>
       <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkClearReserve()}>
         <CalendarX size={13} /> 예약 취소
       </Button>
       {/* 씬별 variety+ 일괄 (커스텀) */}
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkSetVariety(true)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void bulkSetVariety(true)}
+      >
         <Sparkles size={13} /> V+ 적용
       </Button>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkSetVariety(false)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void bulkSetVariety(false)}
+      >
         V+ 해제
       </Button>
       {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
@@ -747,6 +811,33 @@ function BulkBar({
         </SelectContent>
       </Select>
 
+      {/* 내보내기 번호 매기기 (커스텀) — 파일명이 01, 02… 번호로 나감 (클라우드 업로드용) */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost" disabled={disabled}>
+            <Hash size={13} /> 번호
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-60 p-1">
+          <MenuItem
+            icon={<Hash size={13} />}
+            label="번호 매기기 — 목록 순서대로"
+            onClick={() => void assignNumbers()}
+          />
+          <MenuItem
+            icon={<X size={13} />}
+            label="번호 제거 (씬 이름으로 내보냄)"
+            onClick={async () => {
+              await bulkAssignNumbers(null)
+              toast('번호 제거됨', 'info')
+            }}
+          />
+          <p className="px-2 py-1.5 text-[11px] leading-relaxed text-faint">
+            번호가 있으면 내보내기 파일명이 01, 02… 번호만으로 나가고, 번호↔씬 이름 표
+            (_이미지목록.md)가 함께 저장됩니다.
+          </p>
+        </PopoverContent>
+      </Popover>
       {/* 폴더로 내보내기 (원본 파일 그대로) — 폴더 아이콘 유지 */}
       <Button
         size="sm"
@@ -837,7 +928,11 @@ function ExportConflictDialog({
   onResolve,
   onCancel
 }: {
-  data: { dir: string; items: { name: string; existingThumb: string; incomingThumb: string }[]; total: number } | null
+  data: {
+    dir: string
+    items: { name: string; existingThumb: string; incomingThumb: string }[]
+    total: number
+  } | null
   onResolve: (policy: 'overwrite' | 'rename' | 'skip') => void
   onCancel: () => void
 }): React.JSX.Element {
@@ -847,12 +942,17 @@ function ExportConflictDialog({
         <div className="border-b border-line px-4 py-3">
           <DialogTitle>이름이 겹치는 이미지가 있어요</DialogTitle>
           <DialogDescription className="mt-0.5">
-            {data ? `${data.items.length}개가 대상 폴더의 기존 파일과 이름이 같습니다. 어떻게 할까요?` : ''}
+            {data
+              ? `${data.items.length}개가 대상 폴더의 기존 파일과 이름이 같습니다. 어떻게 할까요?`
+              : ''}
           </DialogDescription>
         </div>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
           {data?.items.map((c) => (
-            <div key={c.name} className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 p-2">
+            <div
+              key={c.name}
+              className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 p-2"
+            >
               <ConflictThumb label="기존" thumb={c.existingThumb} />
               <ArrowRight size={16} className="shrink-0 text-faint" />
               <ConflictThumb label="내보낼 것" thumb={c.incomingThumb} accent />
@@ -899,14 +999,20 @@ function ConflictThumb({
         )}
       >
         {thumb ? (
-          <img src={`data:image/webp;base64,${thumb}`} className="h-full w-full object-cover" alt="" />
+          <img
+            src={`data:image/webp;base64,${thumb}`}
+            className="h-full w-full object-cover"
+            alt=""
+          />
         ) : (
           <div className="grid h-full w-full place-items-center text-faint">
             <ImageOff size={16} />
           </div>
         )}
       </div>
-      <div className={cn('mt-0.5 text-[10.5px]', accent ? 'text-accent' : 'text-faint')}>{label}</div>
+      <div className={cn('mt-0.5 text-[10.5px]', accent ? 'text-accent' : 'text-faint')}>
+        {label}
+      </div>
     </div>
   )
 }
@@ -959,8 +1065,7 @@ const SceneCard = memo(function SceneCard({
   const queueRemaining = useGenerationStore(
     (s) =>
       s.queue?.items.filter(
-        (i) =>
-          (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
+        (i) => (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
       ).length ?? 0
   )
   const badgeCount = scene.reserveCount + queueRemaining
@@ -998,189 +1103,222 @@ const SceneCard = memo(function SceneCard({
 
   return (
     <ContextMenu>
-    <ContextMenuTrigger asChild>
-    <div
-      ref={sortable.setNodeRef}
-      {...sortable.attributes}
-      {...sortable.listeners}
-      className={cn(
-        'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
-        editMode && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
-        sortable.isDragging && 'shadow-xl'
-      )}
-      style={{ aspectRatio: CARD_ASPECT[cardOrientation], ...dndStyle(sortable) }}
-      onClick={(e) =>
-        editMode
-          ? e.shiftKey
-            ? selectRangeTo(scene.id) // Shift+클릭: 기준점부터 범위 선택 (커스텀)
-            : toggleSelected(scene.id)
-          : select(scene.id)
-      }
-    >
-      {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
-      {src ? (
-        <img src={src} className="h-full w-full cursor-pointer object-cover" draggable={false} alt="" />
-      ) : (
-        <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
-          <ImageOff size={26} strokeWidth={1.3} />
-        </div>
-      )}
-
-      {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
-      {generating && !live && (
-        <div className="absolute inset-0 grid place-items-center bg-black/40">
-          <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
-        </div>
-      )}
-
-      {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
-      {badgeCount > 0 && (
-        <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
-          {badgeCount}
-        </span>
-      )}
-
-      {/* 씬별 variety+ 적용 표시 (커스텀) */}
-      {scene.varietyPlus && (
-        <span
+      <ContextMenuTrigger asChild>
+        <div
+          ref={sortable.setNodeRef}
+          {...sortable.attributes}
+          {...sortable.listeners}
           className={cn(
-            'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
-            badgeCount > 0 ? 'left-9' : 'left-1.5'
+            'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
+            editMode && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
+            sortable.isDragging && 'shadow-xl'
           )}
-          title="이 씬은 Variety+가 적용됩니다"
+          style={{ aspectRatio: CARD_ASPECT[cardOrientation], ...dndStyle(sortable) }}
+          onClick={(e) =>
+            editMode
+              ? e.shiftKey
+                ? selectRangeTo(scene.id) // Shift+클릭: 기준점부터 범위 선택 (커스텀)
+                : toggleSelected(scene.id)
+              : select(scene.id)
+          }
         >
-          <Sparkles size={10} /> V+
-        </span>
-      )}
+          {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
+          {src ? (
+            <img
+              src={src}
+              className="h-full w-full cursor-pointer object-cover"
+              draggable={false}
+              alt=""
+            />
+          ) : (
+            <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
+              <ImageOff size={26} strokeWidth={1.3} />
+            </div>
+          )}
 
-      {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
-      {additionsEnabled && !editMode && (
-        <button
-          className={cn(
-            'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
-            badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
-            additionCount > 0
-              ? 'bg-accent text-white hover:bg-accent/85'
-              : 'bg-black/60 text-white/90 hover:bg-black/80'
+          {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
+          {generating && !live && (
+            <div className="absolute inset-0 grid place-items-center bg-black/40">
+              <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
+            </div>
           )}
-          onClick={(e) => {
-            e.stopPropagation()
-            onOpenAddition([scene.id])
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
-        >
-          <UserPlus size={14} />
-          {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
-        </button>
-      )}
 
-      {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
-      {editMode ? (
-        <span
-          className={cn(
-            'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
-            checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
+          {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
+          {badgeCount > 0 && (
+            <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
+              {badgeCount}
+            </span>
           )}
-        >
-          {checked && <span className="text-[11px] leading-none">✓</span>}
-        </span>
-      ) : (
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
+
+          {/* 씬별 variety+ 적용 표시 (커스텀) */}
+          {scene.varietyPlus && (
+            <span
+              className={cn(
+                'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
+                badgeCount > 0 ? 'left-9' : 'left-1.5'
+              )}
+              title="이 씬은 Variety+가 적용됩니다"
             >
-              <MoreVertical size={14} />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-40 p-1" onClick={(e) => e.stopPropagation()}>
-            <MenuItem icon={<Pencil size={13} />} label="이름 변경" onClick={() => void renameScene()} />
-            <MenuItem icon={<Copy size={13} />} label="복제" onClick={() => void duplicate(scene.id)} />
-            <MenuItem icon={<FolderOpen size={13} />} label="폴더 열기" onClick={() => void openFolder()} />
-            <MenuItem icon={<Trash2 size={13} />} label="삭제" danger onClick={() => void removeScene()} />
-          </PopoverContent>
-        </Popover>
-      )}
+              <Sparkles size={10} /> V+
+            </span>
+          )}
 
-      {/* 하단 그라디언트 + 이름 + 예약 +/- */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
-        <div className="pointer-events-auto flex items-end justify-between gap-1">
-          <div className="min-w-0">
-            {editMode ? (
-              <input
-                className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
-                value={scene.name}
+          {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
+          {additionsEnabled && !editMode && (
+            <button
+              className={cn(
+                'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
+                badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
+                additionCount > 0
+                  ? 'bg-accent text-white hover:bg-accent/85'
+                  : 'bg-black/60 text-white/90 hover:bg-black/80'
+              )}
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenAddition([scene.id])
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
+            >
+              <UserPlus size={14} />
+              {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
+            </button>
+          )}
+
+          {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
+          {editMode ? (
+            <span
+              className={cn(
+                'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
+                checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
+              )}
+            >
+              {checked && <span className="text-[11px] leading-none">✓</span>}
+            </span>
+          ) : (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <MoreVertical size={14} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-40 p-1" onClick={(e) => e.stopPropagation()}>
+                <MenuItem
+                  icon={<Pencil size={13} />}
+                  label="이름 변경"
+                  onClick={() => void renameScene()}
+                />
+                <MenuItem
+                  icon={<Copy size={13} />}
+                  label="복제"
+                  onClick={() => void duplicate(scene.id)}
+                />
+                <MenuItem
+                  icon={<FolderOpen size={13} />}
+                  label="폴더 열기"
+                  onClick={() => void openFolder()}
+                />
+                <MenuItem
+                  icon={<Trash2 size={13} />}
+                  label="삭제"
+                  danger
+                  onClick={() => void removeScene()}
+                />
+              </PopoverContent>
+            </Popover>
+          )}
+
+          {/* 하단 그라디언트 + 이름 + 예약 +/- */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
+            <div className="pointer-events-auto flex items-end justify-between gap-1">
+              <div className="min-w-0">
+                {editMode ? (
+                  <input
+                    className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
+                    value={scene.name}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onChange={(e) => void update(scene.id, { name: e.target.value })}
+                  />
+                ) : (
+                  <div className="truncate text-[13px] font-semibold text-white drop-shadow">
+                    {scene.name}
+                  </div>
+                )}
+                {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
+                {(scene.imageCount > 0 || scene.exportNo != null) && (
+                  <div className="mt-1 flex items-center gap-1">
+                    {scene.exportNo != null && (
+                      <span className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow">
+                        {String(scene.exportNo).padStart(2, '0')}
+                      </span>
+                    )}
+                    {scene.imageCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
+                        <ImageIcon size={12} />
+                        {scene.imageCount}장
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* 예약 +/- */}
+              <div
+                className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) => void update(scene.id, { name: e.target.value })}
-              />
-            ) : (
-              <div className="truncate text-[13px] font-semibold text-white drop-shadow">{scene.name}</div>
-            )}
-            {/* 이미지 장수 (커스텀) — 생성된 게 있을 때만, 잘 보이게 */}
-            {scene.imageCount > 0 && (
-              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
-                <ImageIcon size={12} />
-                {scene.imageCount}장
+              >
+                <button
+                  className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
+                  disabled={scene.reserveCount === 0}
+                  onClick={() => void adjustReserve(scene.id, -1)}
+                >
+                  <Minus size={13} />
+                </button>
+                <span className="min-w-4 text-center text-[12px] font-medium text-white">
+                  {scene.reserveCount}
+                </span>
+                <button
+                  className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
+                  onClick={() => void adjustReserve(scene.id, 1)}
+                >
+                  <Plus size={13} />
+                </button>
               </div>
-            )}
-          </div>
-          {/* 예약 +/- */}
-          <div
-            className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <button
-              className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
-              disabled={scene.reserveCount === 0}
-              onClick={() => void adjustReserve(scene.id, -1)}
-            >
-              <Minus size={13} />
-            </button>
-            <span className="min-w-4 text-center text-[12px] font-medium text-white">
-              {scene.reserveCount}
-            </span>
-            <button
-              className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
-              onClick={() => void adjustReserve(scene.id, 1)}
-            >
-              <Plus size={13} />
-            </button>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-    </ContextMenuTrigger>
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => void renameScene()}>
-        <Pencil size={13} /> 이름 변경
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={() => void duplicate(scene.id)}>
-        <Copy size={13} /> 복제
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={() => void openFolder()}>
-        <FolderOpen size={13} className="text-amber-400" /> 폴더 열기
-      </ContextMenuItem>
-      {additionsEnabled && (
-        <ContextMenuItem onSelect={() => onOpenAddition([scene.id])}>
-          <UserPlus size={13} /> 씬별 캐릭터 추가
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => void renameScene()}>
+          <Pencil size={13} /> 이름 변경
         </ContextMenuItem>
-      )}
-      <ContextMenuItem
-        onSelect={() => void update(scene.id, { varietyPlus: !scene.varietyPlus })}
-      >
-        <Sparkles size={13} className={scene.varietyPlus ? 'text-violet-400' : undefined} />
-        Variety+ {scene.varietyPlus ? '끄기' : '켜기'}
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem danger onSelect={() => void removeScene()}>
-        <Trash2 size={13} /> 삭제
-      </ContextMenuItem>
-    </ContextMenuContent>
+        <ContextMenuItem onSelect={() => void duplicate(scene.id)}>
+          <Copy size={13} /> 복제
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void openFolder()}>
+          <FolderOpen size={13} className="text-amber-400" /> 폴더 열기
+        </ContextMenuItem>
+        {additionsEnabled && (
+          <ContextMenuItem onSelect={() => onOpenAddition([scene.id])}>
+            <UserPlus size={13} /> 씬별 캐릭터 추가
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem
+          onSelect={() => void update(scene.id, { varietyPlus: !scene.varietyPlus })}
+        >
+          <Sparkles size={13} className={scene.varietyPlus ? 'text-violet-400' : undefined} />
+          Variety+ {scene.varietyPlus ? '끄기' : '켜기'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem danger onSelect={() => void removeScene()}>
+          <Trash2 size={13} /> 삭제
+        </ContextMenuItem>
+      </ContextMenuContent>
     </ContextMenu>
   )
 })
@@ -1239,7 +1377,9 @@ function SceneTrashDialog({
           </DialogTitle>
           <DialogDescription className="mt-0.5">
             삭제한 씬을 되살릴 수 있습니다.
-            {retention === '0' ? ' 자동 삭제 없이 계속 보관합니다.' : ` ${retention}일이 지나면 자동으로 영구 삭제됩니다.`}
+            {retention === '0'
+              ? ' 자동 삭제 없이 계속 보관합니다.'
+              : ` ${retention}일이 지나면 자동으로 영구 삭제됩니다.`}
           </DialogDescription>
         </div>
         {/* 보관 기간 설정 (커스텀) */}

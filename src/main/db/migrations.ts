@@ -300,5 +300,10 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE gen_scenes ADD COLUMN deleted_at TEXT;
       CREATE INDEX idx_gen_scenes_deleted ON gen_scenes(deleted_at);
     `)
+  },
+
+  // v15 (커스텀): 씬 내보내기 번호 — 내보낼 때 파일명이 "01" 등 번호로 (클라우드 업로드용 ASCII)
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN export_no INTEGER;`)
   }
 ]

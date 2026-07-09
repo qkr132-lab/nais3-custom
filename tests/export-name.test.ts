@@ -51,3 +51,28 @@ describe('assignExportName — 씬 이름 그대로, _번호 제거', () => {
     expect(safeName('normal name')).toBe('normal name')
   })
 })
+
+describe('assignExportName — 내보내기 번호 (씬 이름 대신 번호만)', () => {
+  it('번호가 있으면 파일명은 번호만 (2자리 zero-pad), 씬 이름 미포함', () => {
+    const used = new Set<string>()
+    expect(assignExportName('감동', '/a/감동_4.png', used, '.', 1)).toBe('01.png')
+    expect(assignExportName('슬픔', '/a/슬픔_9.png', used, '.', 2)).toBe('02.png')
+  })
+
+  it('100 이상은 그대로 3자리', () => {
+    const used = new Set<string>()
+    expect(assignExportName('감동', '/a/감동_1.png', used, '.', 100)).toBe('100.png')
+    expect(assignExportName('슬픔', '/a/슬픔_2.webp', used, '.', 130)).toBe('130.webp')
+  })
+
+  it('같은 씬 여러 장이면 " (2)"부터 붙는다', () => {
+    const used = new Set<string>()
+    expect(assignExportName('감동', '/a/감동_1.png', used, '.', 1)).toBe('01.png')
+    expect(assignExportName('감동', '/a/감동_2.png', used, '.', 1)).toBe('01 (2).png')
+  })
+
+  it('번호 null이면 씬 이름 사용 (기존 동작)', () => {
+    const used = new Set<string>()
+    expect(assignExportName('감동', '/a/감동_1.png', used, '.', null)).toBe('감동.png')
+  })
+})

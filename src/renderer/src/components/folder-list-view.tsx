@@ -93,9 +93,12 @@ function FolderRow({
   const [editing, setEditing] = useState(false)
   const sortable = useSortable({ id: `f-${folder.id}`, disabled: searching || editing })
 
-  // 색이 지정되면 행 배경을 그 색으로 틴트 (surface-2 위에 얹음)
+  // 색이 지정되면 행 배경을 그 색으로 틴트 (surface-2 위에 얹음) + 왼쪽 색 띠로 확실히 구분
   const tintStyle = folder.color
-    ? { backgroundColor: `color-mix(in srgb, ${folder.color} 26%, var(--surface-2))` }
+    ? {
+        backgroundColor: `color-mix(in srgb, ${folder.color} 38%, var(--surface-2))`,
+        boxShadow: `inset 3px 0 0 0 ${folder.color}`
+      }
     : undefined
 
   return (

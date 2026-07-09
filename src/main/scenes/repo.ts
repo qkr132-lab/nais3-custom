@@ -1,5 +1,13 @@
 import { BrowserWindow, dialog, shell } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync
+} from 'fs'
 import { basename, extname, isAbsolute, join, relative } from 'path'
 import sharp from 'sharp'
 import JSZip from 'jszip'
@@ -20,6 +28,7 @@ interface Row {
   height: number
   reserve_count: number
   variety_plus: number
+  export_no: number | null
 }
 
 function toScene(
@@ -35,6 +44,7 @@ function toScene(
     height: r.height,
     reserveCount: r.reserve_count,
     varietyPlus: r.variety_plus === 1,
+    exportNo: r.export_no,
     thumbnail: r.thumb ? r.thumb.toString('base64') : '',
     thumbnailPath: r.thumb_path ?? '',
     imageCount: r.image_count
@@ -90,13 +100,17 @@ export function deletePreset(id: number): void {
 export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb_path
        FROM gen_scenes s WHERE s.preset_id = ? AND s.deleted_at IS NULL ORDER BY s.sort_order, s.id`
     )
-    .all(presetId) as (Row & { image_count: number; thumb: Buffer | null; thumb_path: string | null })[]
+    .all(presetId) as (Row & {
+    image_count: number
+    thumb: Buffer | null
+    thumb_path: string | null
+  })[]
   return rows.map(toScene)
 }
 
@@ -104,7 +118,7 @@ export function listScenes(presetId: number): Scene[] {
 export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: string })[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id) AS image_count,
@@ -130,14 +144,14 @@ export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: s
 export function restoreScenes(ids: number[]): void {
   if (ids.length === 0) return
   const db = getDb()
-  const firstPreset = (db.prepare('SELECT id FROM scene_presets ORDER BY sort_order, id LIMIT 1').get() as
-    | { id: number }
-    | undefined)?.id
+  const firstPreset = (
+    db.prepare('SELECT id FROM scene_presets ORDER BY sort_order, id LIMIT 1').get() as
+      { id: number } | undefined
+  )?.id
   const tx = db.transaction(() => {
     for (const id of ids) {
       const row = db.prepare('SELECT preset_id FROM gen_scenes WHERE id = ?').get(id) as
-        | { preset_id: number }
-        | undefined
+        { preset_id: number } | undefined
       if (!row) continue
       const presetExists = db.prepare('SELECT 1 FROM scene_presets WHERE id = ?').get(row.preset_id)
       db.prepare('UPDATE gen_scenes SET deleted_at = NULL, preset_id = ? WHERE id = ?').run(
@@ -168,7 +182,9 @@ export async function purgeOldTrash(): Promise<void> {
   const days = Number.isFinite(raw) ? raw : 30
   if (days <= 0) return // 무제한 보관
   const rows = getDb()
-    .prepare(`SELECT id FROM gen_scenes WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`)
+    .prepare(
+      `SELECT id FROM gen_scenes WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
+    )
     .all(`-${days} days`) as { id: number }[]
   if (rows.length > 0) await purgeScenes(rows.map((r) => r.id))
 }
@@ -185,15 +201,14 @@ export function reorderPresets(ids: number[]): void {
 /** 씬 저장 폴더 계층용 프리셋 이름 */
 export function getPresetName(id: number): string | null {
   const r = getDb().prepare('SELECT name FROM scene_presets WHERE id = ?').get(id) as
-    | { name: string }
-    | undefined
+    { name: string } | undefined
   return r?.name ?? null
 }
 
 export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
-      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus,
+      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = ?) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
@@ -252,7 +267,8 @@ const FIELDS: Record<string, string> = {
   width: 'width',
   height: 'height',
   reserveCount: 'reserve_count',
-  varietyPlus: 'variety_plus'
+  varietyPlus: 'variety_plus',
+  exportNo: 'export_no'
 }
 
 export function updateScene(id: number, patch: Record<string, unknown>): void {
@@ -282,9 +298,21 @@ export function reorderScenes(ids: number[]): void {
   db.transaction(() => ids.forEach((id, i) => stmt.run(i, id)))()
 }
 
+/** 씬 내보내기 번호 일괄 부여 (커스텀) — ids 순서대로 start부터 순번. start=null이면 번호 제거 */
+export function assignExportNumbers(ids: number[], start: number | null): void {
+  if (ids.length === 0) return
+  const db = getDb()
+  const stmt = db.prepare('UPDATE gen_scenes SET export_no = ? WHERE id = ?')
+  db.transaction(() => {
+    ids.forEach((id, i) => stmt.run(start === null ? null : start + i, id))
+  })()
+}
+
 /** 프리셋 내 전체 씬 예약 수를 count로 설정 (전체 취소 0 등) */
 export function setReserveAll(presetId: number, count: number): void {
-  getDb().prepare('UPDATE gen_scenes SET reserve_count = ? WHERE preset_id = ?').run(count, presetId)
+  getDb()
+    .prepare('UPDATE gen_scenes SET reserve_count = ? WHERE preset_id = ?')
+    .run(count, presetId)
 }
 
 /** 프리셋 내 전체 씬 예약 수를 delta만큼 증감 (최소 0) */
@@ -319,7 +347,9 @@ export function bulkDelete(ids: number[]): void {
 export function bulkSetResolution(ids: number[], width: number, height: number): void {
   if (ids.length === 0) return
   getDb()
-    .prepare(`UPDATE gen_scenes SET width = ?, height = ? WHERE id IN (${placeholders(ids.length)})`)
+    .prepare(
+      `UPDATE gen_scenes SET width = ?, height = ? WHERE id IN (${placeholders(ids.length)})`
+    )
     .run(width, height, ...ids)
 }
 
@@ -337,7 +367,9 @@ export function bulkClearImages(ids: number[], keepFavorites = false): number {
   const db = getDb()
   const favClause = keepFavorites ? ' AND favorite = 0' : ''
   const rows = db
-    .prepare(`SELECT file_path FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`)
+    .prepare(
+      `SELECT file_path FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`
+    )
     .all(...ids) as { file_path: string }[]
   db.prepare(`DELETE FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`).run(
     ...ids
@@ -357,9 +389,9 @@ export function sceneImages(
   const db = getDb()
   const fav = favoritesOnly ? ' AND favorite = 1' : ''
   const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS c FROM images WHERE scene_id = ?${fav}`)
-      .get(sceneId) as { c: number }
+    db.prepare(`SELECT COUNT(*) AS c FROM images WHERE scene_id = ?${fav}`).get(sceneId) as {
+      c: number
+    }
   ).c
   const rows = db
     .prepare(
@@ -431,8 +463,7 @@ export function clearAllImages(): number {
 export function deleteImage(id: number, deleteFile: boolean): void {
   const db = getDb()
   const r = db.prepare('SELECT file_path FROM images WHERE id = ?').get(id) as
-    | { file_path: string }
-    | undefined
+    { file_path: string } | undefined
   db.prepare('DELETE FROM images WHERE id = ?').run(id)
   if (!r) return
   if (deleteFile) {
@@ -511,9 +542,21 @@ export async function importScenesJson(presetId: number): Promise<number> {
   return scenes.length
 }
 
-type ZipRow = { file_path: string; scene_name: string | null }
+/** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */
+export async function exportZip(mode: 'favorites' | 'sceneTop'): Promise<number> {
+  return zipFiles(
+    collectExportRows({ mode }),
+    mode === 'favorites' ? 'nais3-favorites.zip' : 'nais3-scenes.zip'
+  )
+}
 
-async function zipFiles(rows: ZipRow[], defaultName: string): Promise<number> {
+/** 선택한 씬들의 모든 이미지를 ZIP으로 */
+export async function bulkExportZip(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0
+  return zipFiles(collectExportRows({ ids }), 'nais3-scenes-selected.zip')
+}
+
+async function zipFiles(rows: ExportRow[], defaultName: string): Promise<number> {
   if (rows.length === 0) return 0
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showSaveDialog(win, {
@@ -524,6 +567,9 @@ async function zipFiles(rows: ZipRow[], defaultName: string): Promise<number> {
   if (result.canceled || !result.filePath) return 0
   const zip = new JSZip()
   const used = new Set<string>()
+  // 씬 순서 = 시간 순서 (커스텀): 첫 씬이 가장 오래된 날짜, 마지막 씬이 최신
+  const baseTime = Date.now() - rows.length * TIME_STEP_MS
+  const manifest: { file: string; scene: string }[] = []
   let added = 0
   for (const r of rows) {
     let buf: Buffer
@@ -532,48 +578,32 @@ async function zipFiles(rows: ZipRow[], defaultName: string): Promise<number> {
     } catch {
       continue // 파일 없으면 건너뜀
     }
-    // 파일명 = 씬 이름 그대로 (커스텀). 같은 씬 여러 장이면 " (2)"부터
-    const name = assignExportName(r.scene_name, r.file_path, used)
-    zip.file(name, buf)
+    // 파일명 = 번호(지정 시) 또는 씬 이름 (커스텀). 같은 씬 여러 장이면 " (2)"부터
+    const name = assignExportName(r.scene_name, r.file_path, used, '.', r.export_no)
+    zip.file(name, buf, { date: new Date(baseTime + added * TIME_STEP_MS) })
+    if (r.export_no != null) manifest.push({ file: name, scene: r.scene_name ?? '' })
     added++
   }
+  if (manifest.length > 0) zip.file('_이미지목록.md', buildManifest(manifest))
   writeFileSync(result.filePath, await zip.generateAsync({ type: 'nodebuffer' }))
   return added
 }
 
-/** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */
-export async function exportZip(mode: 'favorites' | 'sceneTop'): Promise<number> {
-  const db = getDb()
-  const rows =
-    mode === 'favorites'
-      ? (db
-          .prepare(
-            `SELECT i.file_path, s.name AS scene_name FROM images i
-             LEFT JOIN gen_scenes s ON s.id = i.scene_id
-             WHERE i.favorite = 1 ORDER BY i.id DESC`
-          )
-          .all() as ZipRow[])
-      : (db
-          .prepare(
-            `SELECT i.file_path, s.name AS scene_name FROM images i
-             LEFT JOIN gen_scenes s ON s.id = i.scene_id
-             WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL GROUP BY scene_id)`
-          )
-          .all() as ZipRow[])
-  return zipFiles(rows, mode === 'favorites' ? 'nais3-favorites.zip' : 'nais3-scenes.zip')
-}
+/** 파일 시간 간격 (FAT 타임스탬프 해상도 2초 고려) */
+const TIME_STEP_MS = 2000
 
-/** 선택한 씬들의 모든 이미지를 ZIP으로 */
-export async function bulkExportZip(ids: number[]): Promise<number> {
-  if (ids.length === 0) return 0
-  const rows = getDb()
-    .prepare(
-      `SELECT i.file_path, s.name AS scene_name FROM images i
-       LEFT JOIN gen_scenes s ON s.id = i.scene_id
-       WHERE i.scene_id IN (${placeholders(ids.length)}) ORDER BY i.id DESC`
-    )
-    .all(...ids) as ZipRow[]
-  return zipFiles(rows, 'nais3-scenes-selected.zip')
+/** 번호 ↔ 씬 이름 매핑 설명서 (커스텀) — AI 지침 작성용 */
+function buildManifest(items: { file: string; scene: string }[]): string {
+  const lines = [
+    '# 이미지 목록',
+    '',
+    '각 이미지 번호가 어떤 씬인지 매핑한 표입니다.',
+    '',
+    '| 파일 | 씬 이름 |',
+    '| --- | --- |'
+  ]
+  for (const it of items) lines.push(`| ${it.file} | ${it.scene} |`)
+  return lines.join('\n') + '\n'
 }
 
 // ── 폴더로 내보내기 (커스텀 — ZIP 대신 파일 그대로 복사) ──────────────
@@ -601,28 +631,37 @@ export interface ExportFolderResult {
 
 /** 내보내기 대상 선택 (커스텀). ids=씬들의 모든 이미지, mode=즐겨찾기/각 씬 최상단(전역) */
 export type ExportScope = { ids?: number[]; mode?: 'favorites' | 'sceneTop' }
-type ExportRow = { file_path: string; thumbnail: Buffer | null; scene_name: string | null }
+type ExportRow = {
+  file_path: string
+  thumbnail: Buffer | null
+  scene_name: string | null
+  export_no: number | null
+}
 
-/** scope에 맞는 이미지 행(파일경로·썸네일·씬이름)을 최신순으로 반환. 폴더/ZIP 내보내기 공용 */
+/** scope에 맞는 이미지 행을 **씬 순서대로** 반환 (커스텀) — 첫 씬부터 마지막 씬까지.
+ *  같은 씬 안에서는 생성 순(오래된 것부터). 씬 없는 이미지는 맨 뒤. 폴더/ZIP 내보내기 공용 */
 function collectExportRows(scope: ExportScope): ExportRow[] {
   const db = getDb()
-  const select = `SELECT i.file_path, i.thumbnail, s.name AS scene_name FROM images i
+  const select = `SELECT i.file_path, i.thumbnail, s.name AS scene_name, s.export_no FROM images i
        LEFT JOIN gen_scenes s ON s.id = i.scene_id`
+  // 씬 순서(프리셋 순 → 씬 순) → 이미지 생성 순. 씬 없는(고아) 이미지는 맨 뒤
+  const order = ` ORDER BY (s.id IS NULL),
+       (SELECT sort_order FROM scene_presets WHERE id = s.preset_id), s.preset_id,
+       s.sort_order, s.id, i.id`
   if (scope.mode === 'favorites') {
-    return db.prepare(`${select} WHERE i.favorite = 1 ORDER BY i.id DESC`).all() as ExportRow[]
+    return db.prepare(`${select} WHERE i.favorite = 1${order}`).all() as ExportRow[]
   }
   if (scope.mode === 'sceneTop') {
     return db
       .prepare(
-        `${select} WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL GROUP BY scene_id)
-         ORDER BY i.id DESC`
+        `${select} WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL GROUP BY scene_id)${order}`
       )
       .all() as ExportRow[]
   }
   const ids = scope.ids ?? []
   if (ids.length === 0) return []
   return db
-    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)}) ORDER BY i.id DESC`)
+    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)})${order}`)
     .all(...ids) as ExportRow[]
 }
 
@@ -646,13 +685,20 @@ export async function exportToFolder(
     dir = r.filePaths[0]
   }
 
-  // 파일명은 씬 이름 그대로 (디스크명의 _번호 제거). 같은 씬 여러 장이면 " (2)"부터. 한 폴더에 모아 저장.
+  // 파일명 = 번호(지정 시) 또는 씬 이름. 같은 씬 여러 장이면 " (2)"부터. 한 폴더에 모아 저장.
   const usedNames = new Set<string>()
   const plan = rows
     .filter((r) => existsSync(r.file_path))
     .map((r) => {
-      const name = assignExportName(r.scene_name, r.file_path, usedNames)
-      return { src: r.file_path, thumb: r.thumbnail, targetDir: dir!, rel: name }
+      const name = assignExportName(r.scene_name, r.file_path, usedNames, '.', r.export_no)
+      return {
+        src: r.file_path,
+        thumb: r.thumbnail,
+        targetDir: dir!,
+        rel: name,
+        sceneName: r.scene_name ?? '',
+        exportNo: r.export_no
+      }
     })
 
   // policy 미지정: 기존 파일과 충돌하는 것들을 미리보기와 함께 반환
@@ -682,9 +728,13 @@ export async function exportToFolder(
   // 실제 복사
   const policy: ExportPolicy = opts.policy ?? 'rename'
   const written = new Set<string>()
+  // 씬 순서 = 시간 순서 (커스텀): 첫 씬 파일이 가장 오래된 수정 날짜, 마지막 씬이 최신
+  const baseTime = Date.now() - plan.length * TIME_STEP_MS
+  const manifest: { file: string; scene: string }[] = []
   let copied = 0
   let skipped = 0
-  for (const p of plan) {
+  for (let i = 0; i < plan.length; i++) {
+    const p = plan[i]
     mkdirSync(p.targetDir, { recursive: true })
     const name = basename(p.rel)
     let target = join(p.targetDir, name)
@@ -709,10 +759,26 @@ export async function exportToFolder(
     }
     try {
       copyFileSync(p.src, target)
+      // 씬 순서대로 수정 시간 부여 — 탐색기 날짜 정렬 = 씬 순서
+      const t = new Date(baseTime + i * TIME_STEP_MS)
+      try {
+        utimesSync(target, t, t)
+      } catch {
+        // 시간 설정 실패해도 복사는 유효
+      }
       written.add(target)
+      if (p.exportNo != null) manifest.push({ file: basename(target), scene: p.sceneName })
       copied++
     } catch {
       skipped++
+    }
+  }
+  // 번호로 내보낸 경우: 번호 ↔ 씬 이름 설명서 동봉 (AI 지침 작성용, 커스텀)
+  if (manifest.length > 0) {
+    try {
+      writeFileSync(join(dir, '_이미지목록.md'), buildManifest(manifest), 'utf-8')
+    } catch {
+      // 설명서 실패는 치명적이지 않음
     }
   }
   if (copied > 0) void shell.openPath(dir)
