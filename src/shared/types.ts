@@ -239,6 +239,8 @@ export interface ScenePreset {
   /** 새 씬 기본 해상도 (null = 832×1216) */
   defaultWidth: number | null
   defaultHeight: number | null
+  /** 이 프리셋의 씬 개수 (커스텀 — 드롭다운 표시용). listPresets에서만 채워짐 */
+  sceneCount?: number
 }
 
 /** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외) */

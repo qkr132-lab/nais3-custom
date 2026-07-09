@@ -43,7 +43,9 @@ function toScene(
 export function listPresets(): ScenePreset[] {
   return getDb()
     .prepare(
-      'SELECT id, name, default_width AS defaultWidth, default_height AS defaultHeight FROM scene_presets ORDER BY sort_order, id'
+      `SELECT id, name, default_width AS defaultWidth, default_height AS defaultHeight,
+              (SELECT COUNT(*) FROM gen_scenes WHERE preset_id = scene_presets.id AND deleted_at IS NULL) AS sceneCount
+       FROM scene_presets ORDER BY sort_order, id`
     )
     .all() as ScenePreset[]
 }

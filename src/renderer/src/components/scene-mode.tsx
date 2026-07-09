@@ -8,6 +8,7 @@ import {
   FolderArchive,
   FolderOpen,
   ImageOff,
+  Images as ImageIcon,
   Loader2,
   Minus,
   MoreVertical,
@@ -98,6 +99,11 @@ function PresetDropdown(): React.JSX.Element {
       <PopoverTrigger asChild>
         <button className="flex h-8 min-w-52 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-[13px] font-medium hover:bg-surface-2">
           <span className="min-w-0 flex-1 truncate text-left">{active?.name ?? '프리셋'}</span>
+          {active && (
+            <span className="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10.5px] font-normal text-faint">
+              씬 {active.sceneCount ?? 0}
+            </span>
+          )}
           <ChevronDown size={14} className="shrink-0 text-muted" />
         </button>
       </PopoverTrigger>
@@ -115,6 +121,10 @@ function PresetDropdown(): React.JSX.Element {
                   )}
                 >
                   <span className="truncate">{p.name}</span>
+                  {/* 프리셋별 씬 개수 (커스텀) */}
+                  <span className="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10.5px] font-normal text-faint">
+                    씬 {p.sceneCount ?? 0}
+                  </span>
                 </div>
                 <button
                   className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
@@ -873,6 +883,13 @@ const SceneCard = memo(function SceneCard({
               />
             ) : (
               <div className="truncate text-[13px] font-semibold text-white drop-shadow">{scene.name}</div>
+            )}
+            {/* 이미지 장수 (커스텀) — 생성된 게 있을 때만 */}
+            {scene.imageCount > 0 && (
+              <div className="mt-0.5 flex items-center gap-1 text-[10.5px] text-white/75 drop-shadow">
+                <ImageIcon size={10} />
+                {scene.imageCount}장
+              </div>
             )}
           </div>
           {/* 예약 +/- */}
