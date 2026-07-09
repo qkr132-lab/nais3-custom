@@ -10,7 +10,7 @@ import {
   useSceneExtrasStore,
   type SequenceEntry
 } from './scene-extras-store'
-import { toastUndo } from './toast-store'
+import { toast, toastUndo } from './toast-store'
 import { pushUndo } from './undo-store'
 
 const PAGE = 80 // 씬 상세 이미지 페이지 크기 (수만 장 대비: 한 번에 전부 로드 금지)
@@ -369,6 +369,21 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     if (!scene) return
     // 예약은 배치 생성 개수 단위로 (배치 3이면 +3/-3 — NAIS2 워크플로)
     const step = delta * (useGenerationStore.getState().batchCount || 1)
+    // 생성 중에 +를 누르면 예약만 쌓지 않고 즉시 큐에 이어붙인다 (커스텀).
+    // 안 그러면 이미 돌던 큐만 처리하고 새 예약은 다음 생성 때까지 무시됨.
+    const q = useGenerationStore.getState().queue
+    const generating =
+      q?.items.some((i) => i.state === 'pending' || i.state === 'generating') ?? false
+    if (delta > 0 && generating) {
+      await ensureExtrasData()
+      const requests: GenerationRequest[] = []
+      for (let i = 0; i < step; i++) {
+        requests.push({ ...buildSceneRequest(scene), seed: sceneSeed(i) })
+      }
+      await window.nais.invoke('queue:enqueueMany', { requests })
+      toast(`"${scene.name}" ${step}장 생성 큐에 추가됨`, 'success')
+      return
+    }
     const reserveCount = Math.max(0, scene.reserveCount + step)
     set({ scenes: get().scenes.map((s) => (s.id === id ? { ...s, reserveCount } : s)) })
     await window.nais.invoke('scenes:update', { id, patch: { reserveCount } })
