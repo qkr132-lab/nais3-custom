@@ -1,11 +1,13 @@
 import {
   ChevronDown,
   ChevronRight,
+  Crosshair,
   Eye,
   EyeOff,
   ImageOff,
   Link2,
   Plus,
+  RotateCcw,
   Trash2,
   User,
   Users,
@@ -18,13 +20,17 @@ import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import {
   hasAddition,
   useSceneExtrasStore,
+  type CharPositions,
   type SceneAddition,
   type SequenceEntry
 } from '../stores/scene-extras-store'
 import { askConfirm } from '../stores/dialog-store'
 import { cn } from '../lib/utils'
+import { PositionPicker } from './position-picker'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
+import { Switch } from './ui/switch'
 
 /**
  * 씬 모드 커스텀 확장 다이얼로그 (NAIS2 Custom 이식):
@@ -307,48 +313,165 @@ function RefPicker({
   )
 }
 
-/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 (두 다이얼로그 공용) */
+type SelectionPatch = {
+  characterIds?: number[]
+  charRefIds?: number[]
+  vibeIds?: number[]
+  useCoords?: boolean
+  positions?: CharPositions
+}
+
+/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 + 캐릭터 위치 지정 (두 다이얼로그 공용) */
 function SelectionPanel({
   characterIds,
   charRefIds,
   vibeIds,
+  useCoords,
+  positions,
   onPatch
 }: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
-  onPatch: (patch: { characterIds?: number[]; charRefIds?: number[]; vibeIds?: number[] }) => void
+  useCoords?: boolean
+  positions?: CharPositions
+  onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
   const crefs = useCharRefsStore((s) => s.items)
   const crefFolders = useCharRefsStore((s) => s.folders)
   return (
-    <div className="grid grid-cols-3 gap-3">
-      <div className="space-y-1.5">
-        <SectionTitle icon={<User size={13} />} title="캐릭터" count={characterIds.length} />
-        <CharacterPicker selected={characterIds} onChange={(ids) => onPatch({ characterIds: ids })} />
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <SectionTitle icon={<User size={13} />} title="캐릭터" count={characterIds.length} />
+          <CharacterPicker
+            selected={characterIds}
+            onChange={(ids) => onPatch({ characterIds: ids })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <SectionTitle icon={<Users size={13} />} title="캐릭터 레퍼런스" count={charRefIds.length} />
+          <RefPicker
+            items={crefs}
+            folders={crefFolders}
+            selected={charRefIds}
+            onChange={(ids) => onPatch({ charRefIds: ids })}
+            emptyLabel="캐릭레퍼가 없습니다"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <SectionTitle icon={<Waves size={13} />} title="바이브" count={vibeIds.length} />
+          <RefPicker
+            items={vibes}
+            folders={vibeFolders}
+            selected={vibeIds}
+            onChange={(ids) => onPatch({ vibeIds: ids })}
+            emptyLabel="바이브가 없습니다"
+          />
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <SectionTitle icon={<Users size={13} />} title="캐릭터 레퍼런스" count={charRefIds.length} />
-        <RefPicker
-          items={crefs}
-          folders={crefFolders}
-          selected={charRefIds}
-          onChange={(ids) => onPatch({ charRefIds: ids })}
-          emptyLabel="캐릭레퍼가 없습니다"
-        />
+      <PositionPanel
+        characterIds={characterIds}
+        useCoords={useCoords}
+        positions={positions}
+        onPatch={onPatch}
+      />
+    </div>
+  )
+}
+
+/** 캐릭터 위치 지정 (커스텀) — 위치 적용 on/off + 선택 캐릭터별 5x5 격자 오버라이드 */
+function PositionPanel({
+  characterIds,
+  useCoords,
+  positions,
+  onPatch
+}: {
+  characterIds: number[]
+  useCoords?: boolean
+  positions?: CharPositions
+  onPatch: (patch: SelectionPatch) => void
+}): React.JSX.Element {
+  const items = useCharactersStore((s) => s.items)
+  const chars = characterIds
+    .map((id) => items.find((c) => c.id === id))
+    .filter((c): c is CharacterCard => !!c)
+
+  const setPos = (id: number, c: { x: number; y: number }): void =>
+    onPatch({ positions: { ...(positions ?? {}), [id]: c } })
+  const resetPos = (id: number): void => {
+    const next = { ...(positions ?? {}) }
+    delete next[id]
+    onPatch({ positions: next })
+  }
+
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Crosshair size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">위치 적용</span>
+        <span className="text-[11px] text-faint">캐릭터 배치 좌표 (NAI 다중 캐릭터)</span>
+        <div className="flex-1" />
+        <Switch checked={!!useCoords} onCheckedChange={(v) => onPatch({ useCoords: v })} />
       </div>
-      <div className="space-y-1.5">
-        <SectionTitle icon={<Waves size={13} />} title="바이브" count={vibeIds.length} />
-        <RefPicker
-          items={vibes}
-          folders={vibeFolders}
-          selected={vibeIds}
-          onChange={(ids) => onPatch({ vibeIds: ids })}
-          emptyLabel="바이브가 없습니다"
-        />
-      </div>
+      {useCoords &&
+        (chars.length === 0 ? (
+          <p className="mt-2 text-[11.5px] text-faint">캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.</p>
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {chars.map((c, i) => {
+              const pos = positions?.[c.id]
+              const center = pos ?? c.center ?? { x: 0.5, y: 0.5 }
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-1.5 py-1"
+                >
+                  {c.thumbnail ? (
+                    <img
+                      src={`data:image/webp;base64,${c.thumbnail}`}
+                      className="size-6 shrink-0 rounded object-cover"
+                      alt=""
+                    />
+                  ) : (
+                    <span className="grid size-6 shrink-0 place-items-center rounded bg-paper text-faint">
+                      <User size={12} />
+                    </span>
+                  )}
+                  <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
+                        title="위치 지정"
+                      >
+                        <Crosshair size={11} />
+                        {center.x},{center.y}
+                        {!pos && <span className="text-faint">(기본)</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto">
+                      <PositionPicker center={center} onPick={(nc) => setPos(c.id, nc)} />
+                    </PopoverContent>
+                  </Popover>
+                  {pos && (
+                    <button
+                      className="grid size-5 place-items-center rounded text-faint hover:text-fg"
+                      title="카드 기본 위치로"
+                      onClick={() => resetPos(c.id)}
+                    >
+                      <RotateCcw size={11} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
     </div>
   )
 }
@@ -478,6 +601,8 @@ function EntryEditor({
           characterIds={entry.characterIds}
           charRefIds={entry.charRefIds}
           vibeIds={entry.vibeIds}
+          useCoords={entry.useCoords}
+          positions={entry.positions}
           onPatch={onPatch}
         />
       </div>
@@ -547,6 +672,8 @@ export function AdditionDialog({
             characterIds={current.characterIds}
             charRefIds={current.charRefIds}
             vibeIds={current.vibeIds}
+            useCoords={current.useCoords}
+            positions={current.positions}
             onPatch={patch}
           />
         </div>

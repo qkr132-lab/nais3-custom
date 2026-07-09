@@ -8,6 +8,9 @@ import { create } from 'zustand'
  * 영속: settings KV(JSON) — 백업/복원에 함께 포함된다.
  */
 
+/** 캐릭터 배치 좌표 (커스텀). charId → {x,y}. 이 큐/씬에서만 카드 기본 위치를 덮어씀 */
+export type CharPositions = Record<number, { x: number; y: number }>
+
 export interface SequenceEntry {
   id: string
   name: string
@@ -15,12 +18,20 @@ export interface SequenceEntry {
   charRefIds: number[]
   vibeIds: number[]
   enabled: boolean
+  /** 위치 적용 on/off (커스텀). undefined = 메인 설정(전역 useCoords) 따름 */
+  useCoords?: boolean
+  /** 캐릭터별 위치 오버라이드 (커스텀) */
+  positions?: CharPositions
 }
 
 export interface SceneAddition {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
+  /** 위치 적용 on/off (커스텀). undefined = 메인 설정 따름 */
+  useCoords?: boolean
+  /** 캐릭터별 위치 오버라이드 (커스텀) */
+  positions?: CharPositions
 }
 
 /** presetId → sceneId → 추가 선택 */
@@ -150,10 +161,19 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     const rSet = new Set(charRefIds ?? [])
     const vSet = new Set(vibeIds ?? [])
     if (cSet.size === 0 && rSet.size === 0 && vSet.size === 0) return
+    // 삭제된 캐릭터의 위치 오버라이드도 함께 제거 (useCoords 등 나머지는 보존)
+    const stripPositions = (pos?: CharPositions): CharPositions | undefined => {
+      if (!pos) return pos
+      const next: CharPositions = {}
+      for (const [id, c] of Object.entries(pos)) if (!cSet.has(Number(id))) next[Number(id)] = c
+      return next
+    }
     const filterAdd = (a: SceneAddition): SceneAddition => ({
+      ...a,
       characterIds: a.characterIds.filter((id) => !cSet.has(id)),
       charRefIds: a.charRefIds.filter((id) => !rSet.has(id)),
-      vibeIds: a.vibeIds.filter((id) => !vSet.has(id))
+      vibeIds: a.vibeIds.filter((id) => !vSet.has(id)),
+      positions: stripPositions(a.positions)
     })
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
@@ -166,7 +186,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
         ...e,
         characterIds: e.characterIds.filter((id) => !cSet.has(id)),
         charRefIds: e.charRefIds.filter((id) => !rSet.has(id)),
-        vibeIds: e.vibeIds.filter((id) => !vSet.has(id))
+        vibeIds: e.vibeIds.filter((id) => !vSet.has(id)),
+        positions: stripPositions(e.positions)
       })),
       additions: nextAdditions
     })

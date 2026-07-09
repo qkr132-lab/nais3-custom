@@ -142,6 +142,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     ...(entry ? entry.characterIds : enabledCharacters().map((c) => c.id)),
     ...(add?.characterIds ?? [])
   ])
+  // 위치(좌표): 씬별 추가 > 큐 항목 > 카드 기본 순으로 오버라이드 (커스텀)
   const characterPrompts = useCharactersStore
     .getState()
     .items.filter((c) => charIds.has(c.id) && c.prompt.trim())
@@ -149,9 +150,11 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     .map((c) => ({
       prompt: c.prompt,
       negativePrompt: c.negativePrompt,
-      center: c.center,
+      center: add?.positions?.[c.id] ?? entry?.positions?.[c.id] ?? c.center,
       enabled: true as const
     }))
+  // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 메인 설정(전역 useCoords) 순 (커스텀)
+  const useCoordsOverride = add?.useCoords ?? entry?.useCoords
   // 포함된 캐릭터에 연결된 캐릭레퍼는 자동 적용 (커스텀)
   const linked = linkedCharRefIds(charIds)
 
@@ -184,6 +187,8 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     height: src ? src.height : scene.height,
     // 씬별 variety+ 오버라이드 (커스텀) — 켜져 있으면 강제 on, 아니면 메인 설정 따름
     variety: scene.varietyPlus ? true : base.variety,
+    // 위치 적용 오버라이드 (커스텀) — 큐/씬별 설정이 있으면 그걸, 없으면 메인 설정
+    useCoords: useCoordsOverride ?? base.useCoords,
     characterPrompts,
     vibeIds,
     charRefIds,
