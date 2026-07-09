@@ -254,6 +254,7 @@ function StorageSection(): React.JSX.Element {
   const [autoSave, setAutoSave] = useState(true)
   const [format, setFormat] = useState('png')
   const [dateFolders, setDateFolders] = useState(true)
+  const [exportPerScene, setExportPerScene] = useState(false)
 
   useEffect(() => {
     void window.nais
@@ -265,6 +266,9 @@ function StorageSection(): React.JSX.Element {
     void window.nais
       .invoke('settings:get', { key: 'date_folders' })
       .then(({ value }) => setDateFolders(value !== '0'))
+    void window.nais
+      .invoke('settings:get', { key: 'export_per_scene_folder' })
+      .then(({ value }) => setExportPerScene(value === '1'))
   }, [])
 
   return (
@@ -285,6 +289,18 @@ function StorageSection(): React.JSX.Element {
             onCheckedChange={(v) => {
               setDateFolders(v)
               void window.nais.invoke('settings:set', { key: 'date_folders', value: v ? '1' : '0' })
+            }}
+          />
+        </Row>
+        <Row label="폴더로 내보낼 때 씬별 폴더" hint="켜면 씬 이름 폴더로 나눔, 끄면 이미지만 한곳에">
+          <Switch
+            checked={exportPerScene}
+            onCheckedChange={(v) => {
+              setExportPerScene(v)
+              void window.nais.invoke('settings:set', {
+                key: 'export_per_scene_folder',
+                value: v ? '1' : '0'
+              })
             }}
           />
         </Row>

@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   CalendarPlus,
   CalendarX,
   ChevronDown,
@@ -551,6 +552,38 @@ function BulkBar({
   const n = selection.size
   const disabled = n === 0
 
+  // 폴더로 내보내기 — 충돌 있으면 미리보기 다이얼로그로 물어봄 (커스텀)
+  type Conflict = { name: string; existingThumb: string; incomingThumb: string }
+  const [conflict, setConflict] = useState<{
+    ids: number[]
+    dir: string
+    items: Conflict[]
+    total: number
+  } | null>(null)
+
+  const exportToFolder = async (): Promise<void> => {
+    const ids = [...selection]
+    if (ids.length === 0) return
+    const res = await window.nais.invoke('scenes:exportToFolder', { ids })
+    if (res.canceled) return
+    if (res.conflicts && res.conflicts.length > 0 && res.dir) {
+      setConflict({ ids, dir: res.dir, items: res.conflicts, total: res.total ?? 0 })
+      return
+    }
+    toast(`이미지 ${res.copied ?? 0}개 내보냄`, 'success')
+  }
+
+  const resolveConflict = async (policy: 'overwrite' | 'rename' | 'skip'): Promise<void> => {
+    if (!conflict) return
+    const { ids, dir } = conflict
+    setConflict(null)
+    const res = await window.nais.invoke('scenes:exportToFolder', { ids, dir, policy })
+    toast(
+      `이미지 ${res.copied ?? 0}개 내보냄${res.skipped ? ` · ${res.skipped}개 건너뜀` : ''}`,
+      'success'
+    )
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-surface-2 px-3 py-2 text-[13px]">
       <span className="font-medium text-fg">{n}개 선택</span>
@@ -632,9 +665,18 @@ function BulkBar({
         </SelectContent>
       </Select>
 
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkExportZip()}>
-        <FolderArchive size={13} /> ZIP
-      </Button>
+      {/* 내보내기 — ZIP / 폴더로 (커스텀) */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost" disabled={disabled}>
+            <FolderArchive size={13} /> 내보내기
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-52 p-1">
+          <MenuItem icon={<FolderOpen size={13} />} label="폴더로 (원본 파일)" onClick={() => void exportToFolder()} />
+          <MenuItem icon={<FolderArchive size={13} />} label="ZIP 파일로" onClick={() => void bulkExportZip()} />
+        </PopoverContent>
+      </Popover>
       <Button
         size="sm"
         variant="ghost"
@@ -699,6 +741,93 @@ function BulkBar({
       >
         <Trash2 size={13} /> 삭제
       </Button>
+
+      {/* 폴더 내보내기 이름 충돌 다이얼로그 (커스텀) */}
+      <ExportConflictDialog
+        data={conflict}
+        onResolve={resolveConflict}
+        onCancel={() => setConflict(null)}
+      />
+    </div>
+  )
+}
+
+/** 폴더 내보내기 시 이름이 겹치는 이미지들을 미리보기로 보여주고 처리 방법을 묻는다 (커스텀) */
+function ExportConflictDialog({
+  data,
+  onResolve,
+  onCancel
+}: {
+  data: { dir: string; items: { name: string; existingThumb: string; incomingThumb: string }[]; total: number } | null
+  onResolve: (policy: 'overwrite' | 'rename' | 'skip') => void
+  onCancel: () => void
+}): React.JSX.Element {
+  return (
+    <Dialog open={data != null} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="flex max-h-[84vh] max-w-[720px] flex-col">
+        <div className="border-b border-line px-4 py-3">
+          <DialogTitle>이름이 겹치는 이미지가 있어요</DialogTitle>
+          <DialogDescription className="mt-0.5">
+            {data ? `${data.items.length}개가 대상 폴더의 기존 파일과 이름이 같습니다. 어떻게 할까요?` : ''}
+          </DialogDescription>
+        </div>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+          {data?.items.map((c) => (
+            <div key={c.name} className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 p-2">
+              <ConflictThumb label="기존" thumb={c.existingThumb} />
+              <ArrowRight size={16} className="shrink-0 text-faint" />
+              <ConflictThumb label="내보낼 것" thumb={c.incomingThumb} accent />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12.5px] font-medium text-ink">{c.name}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-3">
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            취소
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onResolve('skip')}>
+            건너뛰기
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onResolve('rename')}>
+            다른 이름으로 (둘 다 보관)
+          </Button>
+          <Button size="sm" variant="accent" onClick={() => onResolve('overwrite')}>
+            덮어쓰기
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConflictThumb({
+  label,
+  thumb,
+  accent
+}: {
+  label: string
+  thumb: string
+  accent?: boolean
+}): React.JSX.Element {
+  return (
+    <div className="shrink-0 text-center">
+      <div
+        className={cn(
+          'size-16 overflow-hidden rounded-md border bg-paper',
+          accent ? 'border-accent' : 'border-line'
+        )}
+      >
+        {thumb ? (
+          <img src={`data:image/webp;base64,${thumb}`} className="h-full w-full object-cover" alt="" />
+        ) : (
+          <div className="grid h-full w-full place-items-center text-faint">
+            <ImageOff size={16} />
+          </div>
+        )}
+      </div>
+      <div className={cn('mt-0.5 text-[10.5px]', accent ? 'text-accent' : 'text-faint')}>{label}</div>
     </div>
   )
 }

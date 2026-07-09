@@ -533,6 +533,18 @@ export interface IpcInvokeMap {
   'scenes:importJson': { req: { presetId: number }; res: { count: number } }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */
   'scenes:exportZip': { req: { mode: 'favorites' | 'sceneTop' }; res: { count: number } }
+  /** 선택 씬 이미지를 폴더로 그대로 복사 (커스텀). policy 미지정+충돌 시 conflicts 반환 */
+  'scenes:exportToFolder': {
+    req: { ids: number[]; dir?: string; policy?: 'overwrite' | 'rename' | 'skip' }
+    res: {
+      canceled?: true
+      dir?: string
+      conflicts?: { name: string; existingThumb: string; incomingThumb: string }[]
+      total?: number
+      copied?: number
+      skipped?: number
+    }
+  }
   'vibes:list': { req: void; res: { folders: ListFolder[]; items: VibeItem[] } }
   /** 파일 다이얼로그(다중)로 추가 */
   'vibes:add': { req: { folderId: number | null }; res: { count: number } }

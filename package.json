@@ -1,6 +1,6 @@
 {
   "name": "nais3-custom",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "NAIS3 Custom - NovelAI Image Studio 3 커스텀판 (NAIS2 기능 이식 + 한글 태그 + 휴지통/백업 등)",
   "main": "./out/main/index.js",
   "author": "sunanakgo",

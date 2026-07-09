@@ -1,6 +1,7 @@
-import { BrowserWindow, dialog } from 'electron'
-import { readFileSync, unlinkSync, writeFileSync } from 'fs'
-import { basename, extname, isAbsolute, relative } from 'path'
+import { BrowserWindow, dialog, shell } from 'electron'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import { basename, extname, isAbsolute, join, relative } from 'path'
+import sharp from 'sharp'
 import JSZip from 'jszip'
 import type { Scene, SceneImage, ScenePreset } from '../../shared/types'
 import { getDb } from '../db'
@@ -522,20 +523,17 @@ async function zipFiles(rows: ZipRow[], defaultName: string): Promise<number> {
   if (result.canceled || !result.filePath) return 0
   const zip = new JSZip()
   const used = new Set<string>()
-  const counters = new Map<string, number>() // 씬별 연번
   for (const r of rows) {
     try {
-      // 씬 이미지는 씬 이름_N 으로 (NAIS2 방식), 씬 없는 이미지는 원본 파일명
-      let name: string
-      if (r.scene_name) {
-        const safe = r.scene_name.replace(/[/\\:*?"<>|]/g, '_').trim() || '씬'
-        const n = (counters.get(safe) ?? 0) + 1
-        counters.set(safe, n)
-        name = `${safe}_${n}${extname(r.file_path) || '.png'}`
-      } else {
-        name = basename(r.file_path)
+      // 원본 파일명 그대로 사용 (커스텀). 같은 이름이 겹칠 때만 " (2)" 접미사
+      let name = basename(r.file_path)
+      if (used.has(name)) {
+        const ext = extname(name)
+        const base = basename(name, ext)
+        let n = 2
+        while (used.has(`${base} (${n})${ext}`)) n++
+        name = `${base} (${n})${ext}`
       }
-      while (used.has(name)) name = `_${name}`
       used.add(name)
       zip.file(name, readFileSync(r.file_path))
     } catch {
@@ -579,4 +577,129 @@ export async function bulkExportZip(ids: number[]): Promise<number> {
     )
     .all(...ids) as ZipRow[]
   return zipFiles(rows, 'nais3-scenes-selected.zip')
+}
+
+// ── 폴더로 내보내기 (커스텀 — ZIP 대신 파일 그대로 복사) ──────────────
+export interface ExportConflict {
+  /** 대상 폴더 기준 상대 경로 (씬별 폴더면 "씬이름/파일명") */
+  name: string
+  /** 기존 파일 미리보기 (base64 webp) */
+  existingThumb: string
+  /** 내보낼 파일 미리보기 (base64 webp) */
+  incomingThumb: string
+}
+
+export type ExportPolicy = 'overwrite' | 'rename' | 'skip'
+
+export interface ExportFolderResult {
+  canceled?: true
+  dir?: string
+  /** 이름 충돌들 (policy 미지정 시, 복사 전에 반환) */
+  conflicts?: ExportConflict[]
+  /** 전체 대상 파일 수 */
+  total?: number
+  copied?: number
+  skipped?: number
+}
+
+const safeName = (s: string): string => s.replace(/[/\\:*?"<>|]/g, '_').trim()
+
+/** 대상 폴더로 이미지들을 복사한다. 설정(export_per_scene_folder)에 따라 씬별 하위폴더로 나눔.
+ *  policy 미지정 + 이름 충돌 있으면 복사 없이 conflicts를 반환(렌더러가 물어봄). */
+export async function exportToFolder(
+  ids: number[],
+  opts: { dir?: string; policy?: ExportPolicy } = {}
+): Promise<ExportFolderResult> {
+  if (ids.length === 0) return { copied: 0 }
+  const rows = getDb()
+    .prepare(
+      `SELECT i.file_path, i.thumbnail, s.name AS scene_name FROM images i
+       LEFT JOIN gen_scenes s ON s.id = i.scene_id
+       WHERE i.scene_id IN (${placeholders(ids.length)}) ORDER BY i.id DESC`
+    )
+    .all(...ids) as { file_path: string; thumbnail: Buffer | null; scene_name: string | null }[]
+
+  let dir = opts.dir
+  if (!dir) {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const r = await dialog.showOpenDialog(win, {
+      title: '이미지 내보낼 폴더 선택',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (r.canceled || !r.filePaths[0]) return { canceled: true }
+    dir = r.filePaths[0]
+  }
+
+  const perScene = getSetting('export_per_scene_folder') === '1'
+  const plan = rows
+    .filter((r) => existsSync(r.file_path))
+    .map((r) => {
+      const sub = perScene && r.scene_name ? safeName(r.scene_name) || '씬' : ''
+      const targetDir = sub ? join(dir!, sub) : dir!
+      const name = basename(r.file_path)
+      return { src: r.file_path, thumb: r.thumbnail, targetDir, rel: sub ? `${sub}/${name}` : name }
+    })
+
+  // policy 미지정: 기존 파일과 충돌하는 것들을 미리보기와 함께 반환
+  if (!opts.policy) {
+    const conflicts: ExportConflict[] = []
+    for (const p of plan) {
+      const target = join(p.targetDir, basename(p.rel))
+      if (existsSync(target)) {
+        let existingThumb = ''
+        try {
+          existingThumb = (
+            await sharp(target).resize(256, 256, { fit: 'inside' }).webp({ quality: 80 }).toBuffer()
+          ).toString('base64')
+        } catch {
+          // 미리보기 실패해도 충돌 자체는 보고
+        }
+        conflicts.push({
+          name: p.rel,
+          existingThumb,
+          incomingThumb: p.thumb ? p.thumb.toString('base64') : ''
+        })
+      }
+    }
+    if (conflicts.length > 0) return { dir, conflicts, total: plan.length }
+  }
+
+  // 실제 복사
+  const policy: ExportPolicy = opts.policy ?? 'rename'
+  const written = new Set<string>()
+  let copied = 0
+  let skipped = 0
+  for (const p of plan) {
+    mkdirSync(p.targetDir, { recursive: true })
+    const name = basename(p.rel)
+    let target = join(p.targetDir, name)
+    const clash = existsSync(target) || written.has(target)
+    if (clash) {
+      // 이번 실행에서 방금 쓴 파일과 겹치면 policy 무관하게 이름 변경 (서로 덮어쓰기 방지)
+      const mustRename = written.has(target) || policy === 'rename'
+      if (policy === 'skip' && !written.has(target)) {
+        skipped++
+        continue
+      }
+      if (mustRename) {
+        const ext = extname(name)
+        const base = basename(name, ext)
+        let n = 2
+        do {
+          target = join(p.targetDir, `${base} (${n})${ext}`)
+          n++
+        } while (existsSync(target) || written.has(target))
+      }
+      // overwrite: target 그대로 (기존 파일 덮어씀)
+    }
+    try {
+      copyFileSync(p.src, target)
+      written.add(target)
+      copied++
+    } catch {
+      skipped++
+    }
+  }
+  if (copied > 0) void shell.openPath(dir)
+  return { dir, copied, skipped }
 }

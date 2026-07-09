@@ -81,6 +81,7 @@ import {
   bulkClearFavorites,
   bulkClearImages,
   bulkExportZip,
+  exportToFolder,
   sceneImages,
   deleteNonFavorites,
   setImageFavorite,
@@ -342,6 +343,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:exportJson', async ({ presetId }) => ({ saved: await exportScenesJson(presetId) }))
   handle('scenes:importJson', async ({ presetId }) => ({ count: await importScenesJson(presetId) }))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
+  handle('scenes:exportToFolder', ({ ids, dir, policy }) => exportToFolder(ids, { dir, policy }))
 
   handle('settings:get', ({ key }) => ({ value: getSetting(key) }))
   handle('settings:set', ({ key, value }) => {
