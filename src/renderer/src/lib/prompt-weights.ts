@@ -8,6 +8,8 @@
  *   음수도 가능. 내부의 중괄호는 곱으로 누적된다.
  */
 
+import { commentStart } from '@shared/nai-presets'
+
 export interface WeightSegment {
   start: number
   end: number
@@ -96,12 +98,12 @@ const FRAGMENT_BG = 'rgba(92, 190, 125, 0.3)'
 /** 주석 줄(#로 시작) — 전송에서 제외됨을 회색 배경으로 표시 */
 const COMMENT_BG = 'rgba(128, 128, 136, 0.28)'
 
-/** #부터 그 줄 끝까지의 [시작, 끝) 구간 (removeComments와 동일 규칙) */
+/** #부터 그 줄 끝까지의 [시작, 끝) 구간 (removeComments와 동일 규칙 — 토큰 중간 #은 제외) */
 function commentSpans(text: string): { start: number; end: number }[] {
   const spans: { start: number; end: number }[] = []
   let offset = 0
   for (const line of text.split('\n')) {
-    const i = line.indexOf('#')
+    const i = commentStart(line)
     if (i !== -1) spans.push({ start: offset + i, end: offset + line.length })
     offset += line.length + 1 // '\n'
   }

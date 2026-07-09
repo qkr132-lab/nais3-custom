@@ -83,6 +83,8 @@ export function CharacterOverlay(): React.JSX.Element {
 
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  // 레퍼런스 연결 다이얼로그 — 카드 서브트리가 아니라 오버레이 최상단에서 단 하나만 렌더 (커스텀)
+  const [linkCharId, setLinkCharId] = useState<number | null>(null)
   /** 썸네일 호버 미리보기 — 카드 오른쪽 바깥에 고정 위치로 (카드 내용을 가리지 않게) */
   const [hoverPreview, setHoverPreview] = useState<{
     src: string
@@ -243,7 +245,7 @@ export function CharacterOverlay(): React.JSX.Element {
         onValueChange={(v) => updateCard(char.id, { negativePrompt: v })}
       />
       {/* 캐릭레퍼 연결 (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */}
-      <RefLinkRow char={char} onLink={(refId) => updateCard(char.id, { charRefId: refId })} />
+      <RefLinkRow char={char} onOpen={() => setLinkCharId(char.id)} />
     </div>
   )
 
@@ -382,6 +384,16 @@ export function CharacterOverlay(): React.JSX.Element {
           />,
           document.body
         )}
+
+      {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
+      <CharRefLinkDialog
+        open={linkCharId != null}
+        onOpenChange={(o) => !o && setLinkCharId(null)}
+        char={linkCharId != null ? (items.find((c) => c.id === linkCharId) ?? null) : null}
+        onLink={(refId) => {
+          if (linkCharId != null) updateCard(linkCharId, { charRefId: refId })
+        }}
+      />
     </div>
   )
 }
@@ -432,55 +444,48 @@ const REF_TYPE_LABELS: { value: string; label: string }[] = [
   { value: 'delta', label: '델타' }
 ]
 
-/** 캐릭레퍼 연결 행 (커스텀) — 카드 확장 영역 하단. 클릭하면 큰 연결 창이 열린다 */
+/** 캐릭레퍼 연결 요약 행 (커스텀) — 카드 확장 영역 하단. 클릭하면 오버레이 최상단의 큰 연결 창을 연다.
+ *  다이얼로그 자체는 여기(드래그 정렬+높이 애니메이션이 걸린 카드 서브트리) 안에 두지 않는다 —
+ *  그러면 레퍼 변경으로 카드가 리렌더될 때 다이얼로그가 언마운트돼 "캐릭터탭이 사라지는" 버그가 난다. */
 function RefLinkRow({
   char,
-  onLink
+  onOpen
 }: {
   char: CharacterCard
-  onLink: (refId: number | null) => void
+  onOpen: () => void
 }): React.JSX.Element {
   const refs = useCharRefsStore((s) => s.items)
   const linked = char.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
-  const [dialogOpen, setDialogOpen] = useState(false)
   const typeLabel = linked
     ? (REF_TYPE_LABELS.find((t) => t.value === linked.refType)?.label ?? linked.refType)
     : ''
 
   return (
-    <>
-      <button
-        className="flex w-full items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5 text-left transition-colors hover:bg-surface-2/70"
-        onClick={() => setDialogOpen(true)}
-        title="클릭하면 레퍼런스 연결 창이 열립니다"
-      >
-        <Link2 size={13} className={linked ? 'text-accent' : 'text-muted'} />
-        <span className="text-[12px] text-muted">레퍼런스 연결</span>
-        <div className="flex-1" />
-        {linked ? (
-          <>
-            <span className="truncate text-[11px] text-muted">
-              {typeLabel} · 강도 {linked.strength.toFixed(2)} · 충실도 {linked.fidelity.toFixed(2)}
-            </span>
-            {linked.thumbnail && (
-              <img
-                src={`data:image/webp;base64,${linked.thumbnail}`}
-                className="size-8 shrink-0 rounded-md object-cover"
-                alt=""
-              />
-            )}
-          </>
-        ) : (
-          <span className="text-[11px] text-faint">없음 — 클릭해서 선택</span>
-        )}
-      </button>
-      <CharRefLinkDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        char={char}
-        onLink={onLink}
-      />
-    </>
+    <button
+      className="flex w-full items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5 text-left transition-colors hover:bg-surface-2/70"
+      onClick={onOpen}
+      title="클릭하면 레퍼런스 연결 창이 열립니다"
+    >
+      <Link2 size={13} className={linked ? 'text-accent' : 'text-muted'} />
+      <span className="text-[12px] text-muted">레퍼런스 연결</span>
+      <div className="flex-1" />
+      {linked ? (
+        <>
+          <span className="truncate text-[11px] text-muted">
+            {typeLabel} · 강도 {linked.strength.toFixed(2)} · 충실도 {linked.fidelity.toFixed(2)}
+          </span>
+          {linked.thumbnail && (
+            <img
+              src={`data:image/webp;base64,${linked.thumbnail}`}
+              className="size-8 shrink-0 rounded-md object-cover"
+              alt=""
+            />
+          )}
+        </>
+      ) : (
+        <span className="text-[11px] text-faint">없음 — 클릭해서 선택</span>
+      )}
+    </button>
   )
 }
 
@@ -493,12 +498,12 @@ function CharRefLinkDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  char: CharacterCard
+  char: CharacterCard | null
   onLink: (refId: number | null) => void
 }): React.JSX.Element {
   const refs = useCharRefsStore((s) => s.items)
   const update = useCharRefsStore((s) => s.update)
-  const linked = char.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
+  const linked = char?.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
 
   /** 파일 선택 → 라이브러리에 추가 → 전역 적용은 끄고 이 캐릭터에 연결 */
   const addFromFile = async (): Promise<void> => {
@@ -521,7 +526,7 @@ function CharRefLinkDialog({
         <div className="border-b border-line px-4 py-3">
           <DialogTitle className="flex items-center gap-2">
             <Link2 size={15} /> 레퍼런스 연결
-            {char.name ? ` — ${char.name}` : ''}
+            {char?.name ? ` — ${char.name}` : ''}
           </DialogTitle>
           <DialogDescription className="mt-0.5">
             이 캐릭터가 생성에 포함되면 연결된 레퍼런스가 자동으로 함께 적용됩니다.
@@ -550,12 +555,12 @@ function CharRefLinkDialog({
                       key={r.id}
                       className={cn(
                         'group relative aspect-square overflow-hidden rounded-lg border transition',
-                        r.id === char.charRefId
+                        r.id === char?.charRefId
                           ? 'border-accent ring-2 ring-accent/40'
                           : 'border-line opacity-75 hover:opacity-100 hover:border-accent/50'
                       )}
                       title={r.name}
-                      onClick={() => onLink(r.id === char.charRefId ? null : r.id)}
+                      onClick={() => onLink(r.id === char?.charRefId ? null : r.id)}
                     >
                       {r.thumbnail ? (
                         <img
@@ -573,7 +578,7 @@ function CharRefLinkDialog({
                           {r.name}
                         </span>
                       )}
-                      {r.id === char.charRefId && (
+                      {r.id === char?.charRefId && (
                         <span className="absolute right-1.5 top-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">
                           연결됨
                         </span>

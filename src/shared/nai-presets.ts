@@ -21,11 +21,23 @@ export const UC_PRESETS_V45_FULL: Record<UcPresetIndex, string> = {
   4: ''
 }
 
+/**
+ * 한 줄에서 주석이 시작되는 '#' 위치 (없으면 -1).
+ * 규칙: '#'이 줄 맨 앞이거나 바로 앞이 공백일 때만 주석. 'target#mating press'처럼
+ * 토큰 중간의 '#'(NAI V4 액션 태그)은 주석으로 보지 않는다.
+ */
+export function commentStart(line: string): number {
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '#' && (i === 0 || /\s/.test(line[i - 1]))) return i
+  }
+  return -1
+}
+
 /** 주석 제거 — #부터 그 줄 끝(줄바꿈 전)까지. # 앞 내용은 유지, 줄 전체가 주석이면 줄 삭제 */
 export function removeComments(prompt: string): string {
   const out: string[] = []
   for (const line of prompt.split('\n')) {
-    const i = line.indexOf('#')
+    const i = commentStart(line)
     if (i === -1) {
       out.push(line)
       continue

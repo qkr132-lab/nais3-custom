@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { cn } from '../lib/utils'
 import { caretCoords } from '../lib/caret'
 import { highlightRanges } from '../lib/prompt-weights'
+import { commentStart } from '@shared/nai-presets'
 import { fragmentPaths } from '../stores/fragments-store'
 
 /**
@@ -134,9 +135,10 @@ export function PromptEditor({
     const seq = ++searchSeqRef.current // 이 시점 이전에 발사된 검색 결과는 전부 무효
     const before = text.slice(0, cursor)
 
-    // 주석 구간(# 뒤)에서는 추천 안 함 — 어차피 전송 안 되는 텍스트
+    // 주석 구간(# 뒤)에서는 추천 안 함 — 어차피 전송 안 되는 텍스트.
+    // 단 'target#action'처럼 토큰 중간의 #은 주석이 아니므로 commentStart 규칙을 따른다
     const lineStart = before.lastIndexOf('\n') + 1
-    if (before.slice(lineStart).includes('#')) {
+    if (commentStart(before.slice(lineStart)) !== -1) {
       setSuggestions([])
       return
     }
