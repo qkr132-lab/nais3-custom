@@ -8,6 +8,7 @@ import { getDb } from '../db'
 import { getSetting } from '../db/settings'
 import { libraryRoot } from '../images/storage'
 import { trashFile } from '../trash'
+import { assignExportName, safeName } from './export-name'
 
 interface Row {
   id: number
@@ -523,25 +524,21 @@ async function zipFiles(rows: ZipRow[], defaultName: string): Promise<number> {
   if (result.canceled || !result.filePath) return 0
   const zip = new JSZip()
   const used = new Set<string>()
+  let added = 0
   for (const r of rows) {
+    let buf: Buffer
     try {
-      // 원본 파일명 그대로 사용 (커스텀). 같은 이름이 겹칠 때만 " (2)" 접미사
-      let name = basename(r.file_path)
-      if (used.has(name)) {
-        const ext = extname(name)
-        const base = basename(name, ext)
-        let n = 2
-        while (used.has(`${base} (${n})${ext}`)) n++
-        name = `${base} (${n})${ext}`
-      }
-      used.add(name)
-      zip.file(name, readFileSync(r.file_path))
+      buf = readFileSync(r.file_path)
     } catch {
-      // 파일 없으면 건너뜀
+      continue // 파일 없으면 건너뜀
     }
+    // 파일명 = 씬 이름 그대로 (커스텀). 같은 씬 여러 장이면 " (2)"부터
+    const name = assignExportName(r.scene_name, r.file_path, used)
+    zip.file(name, buf)
+    added++
   }
   writeFileSync(result.filePath, await zip.generateAsync({ type: 'nodebuffer' }))
-  return used.size
+  return added
 }
 
 /** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */
@@ -602,8 +599,6 @@ export interface ExportFolderResult {
   skipped?: number
 }
 
-const safeName = (s: string): string => s.replace(/[/\\:*?"<>|]/g, '_').trim()
-
 /** 대상 폴더로 이미지들을 복사한다. 설정(export_per_scene_folder)에 따라 씬별 하위폴더로 나눔.
  *  policy 미지정 + 이름 충돌 있으면 복사 없이 conflicts를 반환(렌더러가 물어봄). */
 export async function exportToFolder(
@@ -631,12 +626,14 @@ export async function exportToFolder(
   }
 
   const perScene = getSetting('export_per_scene_folder') === '1'
+  // 파일명은 씬 이름 그대로 (디스크명의 _번호 제거). 같은 씬 여러 장이면 " (2)"부터
+  const usedNames = new Set<string>()
   const plan = rows
     .filter((r) => existsSync(r.file_path))
     .map((r) => {
       const sub = perScene && r.scene_name ? safeName(r.scene_name) || '씬' : ''
       const targetDir = sub ? join(dir!, sub) : dir!
-      const name = basename(r.file_path)
+      const name = assignExportName(r.scene_name, r.file_path, usedNames, sub || '.')
       return { src: r.file_path, thumb: r.thumbnail, targetDir, rel: sub ? `${sub}/${name}` : name }
     })
 
