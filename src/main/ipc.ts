@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
+import { removeComments } from '../shared/nai-presets'
 import {
   createCharacter,
   createFolder,
@@ -25,6 +26,7 @@ import {
   deleteFragmentFolder,
   exportTxtFragment,
   exportAllFragmentsZip,
+  fragmentSource,
   importTxtFragments,
   listFragments,
   renameFragmentFolder,
@@ -33,7 +35,7 @@ import {
   setFragmentFolderColor,
   updateFragment
 } from './fragments/repo'
-import { resetSequentialCounters } from './fragments/processor'
+import { processWildcards, resetSequentialCounters } from './fragments/processor'
 import {
   deleteNaiToken,
   getNaiToken,
@@ -468,7 +470,17 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
 
   handle('tags:search', ({ query, limit }) => ({ items: searchTags(query, limit) }))
   handle('tags:lookup', ({ tags }) => ({ items: lookupTags(tags) }))
-  handle('tokens:count', ({ texts }) => ({ counts: texts.map(countTokens) }))
+  // 토큰 수는 실제 전송될 프롬프트 기준 (커스텀) — 주석(#) 제거 + 조각(<a1> 등) 확장 후 센다.
+  // 랜덤 조각은 뽑기마다 길이가 달라지므로 항상 첫 줄 기준(rng=0)으로 세서 숫자가 흔들리지 않고,
+  // peek 모드라 <*순차> 조각의 진행 카운터도 건드리지 않는다.
+  handle('tokens:count', ({ texts }) => {
+    const src = fragmentSource()
+    return {
+      counts: texts.map((t) =>
+        countTokens(processWildcards(removeComments(t), src, () => 0, { peek: true }))
+      )
+    }
+  })
 
   handle('images:showInFolder', ({ filePath }) => {
     if (isUnderImagesRoot(filePath)) shell.showItemInFolder(filePath)
