@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { imageUrl } from '../lib/constants'
+import { imageDragOutProps } from '../lib/drag-out'
 import { ImageContextMenu } from './image-context-menu'
 
 /** 이미지 전체 화면 뷰어 (씬 상세/히스토리 공용). filePaths 배열 + 현재 인덱스로 좌우 이동 */
@@ -58,12 +59,8 @@ export function Lightbox({
           src={imageUrl(filePaths[index])}
           className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
           onClick={(e) => e.stopPropagation()}
-          // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
-          draggable
-          onDragStart={(e) => {
-            e.preventDefault()
-            void window.nais.invoke('images:startDrag', { filePath: filePaths[index] })
-          }}
+          // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
+          {...imageDragOutProps(filePaths[index])}
           alt=""
         />
       </ImageContextMenu>

@@ -42,6 +42,8 @@ interface SceneExtrasState {
   setAdditionsEnabled: (v: boolean) => void
   updateAddition: (presetId: number, sceneId: number, addition: SceneAddition) => void
   clearAddition: (presetId: number, sceneId: number) => void
+  /** 삭제된 캐릭터/레퍼/바이브 id를 모든 씬별 추가·큐 반복 항목에서 제거 (커스텀 — 정합성) */
+  purgeIds: (ids: { characterIds?: number[]; charRefIds?: number[]; vibeIds?: number[] }) => void
 }
 
 const SETTINGS_KEY = 'scene_extras'
@@ -141,6 +143,33 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     const preset = { ...(get().additions[presetId] ?? {}) }
     delete preset[sceneId]
     set({ additions: { ...get().additions, [presetId]: preset } })
+    persist()
+  },
+  purgeIds: ({ characterIds, charRefIds, vibeIds }) => {
+    const cSet = new Set(characterIds ?? [])
+    const rSet = new Set(charRefIds ?? [])
+    const vSet = new Set(vibeIds ?? [])
+    if (cSet.size === 0 && rSet.size === 0 && vSet.size === 0) return
+    const filterAdd = (a: SceneAddition): SceneAddition => ({
+      characterIds: a.characterIds.filter((id) => !cSet.has(id)),
+      charRefIds: a.charRefIds.filter((id) => !rSet.has(id)),
+      vibeIds: a.vibeIds.filter((id) => !vSet.has(id))
+    })
+    const nextAdditions: AdditionsMap = {}
+    for (const [presetId, scenes] of Object.entries(get().additions)) {
+      const nextScenes: Record<number, SceneAddition> = {}
+      for (const [sceneId, add] of Object.entries(scenes)) nextScenes[Number(sceneId)] = filterAdd(add)
+      nextAdditions[Number(presetId)] = nextScenes
+    }
+    set({
+      entries: get().entries.map((e) => ({
+        ...e,
+        characterIds: e.characterIds.filter((id) => !cSet.has(id)),
+        charRefIds: e.charRefIds.filter((id) => !rSet.has(id)),
+        vibeIds: e.vibeIds.filter((id) => !vSet.has(id))
+      })),
+      additions: nextAdditions
+    })
     persist()
   }
 }))

@@ -69,7 +69,7 @@ function SectionTitle({
   )
 }
 
-/** 캐릭터 체크 리스트 (썸네일 + 이름 + 프롬프트 미리보기) */
+/** 캐릭터 체크 리스트 (폴더별 그룹 + 썸네일 + 이름 + 프롬프트 미리보기) */
 function CharacterPicker({
   selected,
   onChange
@@ -78,55 +78,93 @@ function CharacterPicker({
   onChange: (ids: number[]) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
+  const folders = useCharactersStore((s) => s.folders)
+
+  // 폴더 순서대로 그룹핑 + 미분류는 맨 끝. 빈 폴더는 표시 안 함
+  const groups: { key: string; name: string | null; color: string | null; chars: CharacterCard[] }[] = [
+    ...folders.map((f) => ({
+      key: `f-${f.id}`,
+      name: f.name,
+      color: f.color,
+      chars: items.filter((c) => c.folderId === f.id)
+    })),
+    {
+      key: 'ungrouped',
+      name: null,
+      color: null,
+      chars: items.filter((c) => c.folderId == null || !folders.some((f) => f.id === c.folderId))
+    }
+  ].filter((g) => g.chars.length > 0)
+
+  const renderChar = (c: CharacterCard, i: number): React.JSX.Element => {
+    const checked = selected.includes(c.id)
+    const full = !checked && selected.length >= MAX_CHARS
+    return (
+      <button
+        key={c.id}
+        disabled={full}
+        onClick={() => onChange(toggleId(selected, c.id))}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors',
+          checked ? 'bg-accent/10' : 'hover:bg-surface-2',
+          full && 'opacity-40'
+        )}
+      >
+        <span
+          className={cn(
+            'grid size-4 shrink-0 place-items-center rounded border text-[10px] leading-none',
+            checked ? 'border-accent bg-accent text-white' : 'border-line bg-surface'
+          )}
+        >
+          {checked && '✓'}
+        </span>
+        {c.thumbnail ? (
+          <img
+            src={`data:image/webp;base64,${c.thumbnail}`}
+            className="size-7 shrink-0 rounded object-cover"
+            alt=""
+          />
+        ) : (
+          <span className="grid size-7 shrink-0 place-items-center rounded bg-surface-2 text-faint">
+            <User size={13} />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] font-medium">{charLabel(c, i)}</span>
+          <span className="block truncate text-[11px] text-faint">{c.prompt}</span>
+        </span>
+        {c.charRefId != null && (
+          <Link2 size={11} className="shrink-0 text-accent" aria-label="레퍼런스 연결됨" />
+        )}
+      </button>
+    )
+  }
+
   return (
     <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper p-1">
       {items.length === 0 && (
         <p className="py-6 text-center text-[12px] text-faint">캐릭터 라이브러리가 비어 있습니다</p>
       )}
-      {items.map((c, i) => {
-        const checked = selected.includes(c.id)
-        const full = !checked && selected.length >= MAX_CHARS
-        return (
-          <button
-            key={c.id}
-            disabled={full}
-            onClick={() => onChange(toggleId(selected, c.id))}
-            className={cn(
-              'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors',
-              checked ? 'bg-accent/10' : 'hover:bg-surface-2',
-              full && 'opacity-40'
-            )}
-          >
-            <span
-              className={cn(
-                'grid size-4 shrink-0 place-items-center rounded border text-[10px] leading-none',
-                checked ? 'border-accent bg-accent text-white' : 'border-line bg-surface'
-              )}
-            >
-              {checked && '✓'}
-            </span>
-            {c.thumbnail ? (
-              <img
-                src={`data:image/webp;base64,${c.thumbnail}`}
-                className="size-7 shrink-0 rounded object-cover"
-                alt=""
+      {groups.map((g) => (
+        <div key={g.key} className="space-y-0.5">
+          {/* 폴더 헤더 (미분류는 폴더가 하나라도 있을 때만 구분선 표시) */}
+          {g.name != null ? (
+            <div className="flex items-center gap-1.5 px-1.5 pt-1 text-[10.5px] font-semibold text-muted">
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: g.color ?? 'var(--faint)' }}
               />
-            ) : (
-              <span className="grid size-7 shrink-0 place-items-center rounded bg-surface-2 text-faint">
-                <User size={13} />
-              </span>
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-medium">{charLabel(c, i)}</span>
-              <span className="block truncate text-[11px] text-faint">{c.prompt}</span>
-            </span>
-            {/* 연결된 캐릭레퍼가 있으면 표시 — 이 캐릭터 선택 시 레퍼런스도 자동 적용 */}
-            {c.charRefId != null && (
-              <Link2 size={11} className="shrink-0 text-accent" aria-label="레퍼런스 연결됨" />
-            )}
-          </button>
-        )
-      })}
+              <span className="truncate">{g.name}</span>
+              <span className="text-faint">({g.chars.length})</span>
+            </div>
+          ) : (
+            folders.length > 0 && (
+              <div className="px-1.5 pt-1 text-[10.5px] font-semibold text-faint">미분류</div>
+            )
+          )}
+          {g.chars.map((c) => renderChar(c, items.indexOf(c)))}
+        </div>
+      ))}
     </div>
   )
 }

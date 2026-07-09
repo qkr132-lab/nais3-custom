@@ -1,6 +1,7 @@
 import { ImageIcon, Loader2, Lock, LockOpen } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { imageUrl } from '../lib/constants'
+import { imageDragOutProps } from '../lib/drag-out'
 import { useGenerationStore } from '../stores/generation-store'
 import { useMetadataStore } from '../stores/metadata-store'
 import { cn } from '../lib/utils'
@@ -111,12 +112,8 @@ export function PreviewPane(): React.JSX.Element {
             <img
               src={src}
               className="h-full w-full rounded-md object-contain"
-              // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
-              draggable
-              onDragStart={(e) => {
-                e.preventDefault()
-                void window.nais.invoke('images:startDrag', { filePath: viewingFilePath })
-              }}
+              // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
+              {...imageDragOutProps(viewingFilePath)}
               // 파일이 밖에서 지워진 경우 깨진 이미지 대신 빈 상태로 (B8)
               onError={() => view(null)}
               alt=""

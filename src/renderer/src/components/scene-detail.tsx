@@ -2,6 +2,7 @@ import { ArrowLeft, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-reac
 import { useEffect, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
 import { imageUrl } from '../lib/constants'
+import { imageDragOutProps } from '../lib/drag-out'
 import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore, appendPrompt } from '../stores/scenes-store'
@@ -306,12 +307,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                   src={imageUrl(img.filePath)}
                   className="h-full w-full cursor-pointer object-cover"
                   loading="lazy"
-                  // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
-                  draggable
-                  onDragStart={(e) => {
-                    e.preventDefault()
-                    void window.nais.invoke('images:startDrag', { filePath: img.filePath })
-                  }}
+                  // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
+                  {...imageDragOutProps(img.filePath)}
                   onClick={() => setLightboxIdx(newTop ? i + 1 : i)}
                   alt=""
                 />

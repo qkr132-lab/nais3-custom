@@ -89,6 +89,10 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   removeCard: (id) => {
     set({ items: get().items.filter((c) => c.id !== id) })
     void window.nais.invoke('chars:delete', { id })
+    // 씬별 추가·큐 반복에 남은 이 캐릭터 참조 정리 (커스텀 — 정합성)
+    void import('./scene-extras-store').then((m) =>
+      m.useSceneExtrasStore.getState().purgeIds({ characterIds: [id] })
+    )
   },
 
   duplicateCard: async (id) => {

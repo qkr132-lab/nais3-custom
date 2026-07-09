@@ -1,6 +1,7 @@
 import { History, Trash2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { KindBadge } from '../lib/kind-icon'
+import { imageDragOutProps } from '../lib/drag-out'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { askConfirm } from '../stores/dialog-store'
@@ -78,12 +79,8 @@ export function HistoryPanel(): React.JSX.Element {
                     <img
                       src={`data:image/webp;base64,${item.thumbnail}`}
                       className="size-full object-cover"
-                      // OS 네이티브 드래그 — 탐색기로 끌어 저장 + 프리뷰에 놓으면 메타데이터 (NAIS2 기능)
-                      draggable
-                      onDragStart={(e) => {
-                        e.preventDefault()
-                        void window.nais.invoke('images:startDrag', { filePath: item.filePath })
-                      }}
+                      // OS 네이티브 드래그 — 16px 이상 끌어야 발동 (실수 드래그 방지)
+                      {...imageDragOutProps(item.filePath)}
                       alt=""
                     />
                   )}

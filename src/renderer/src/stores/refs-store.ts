@@ -64,6 +64,21 @@ function makeRefsStore<T extends { id: number; folderId: number | null }>(ns: st
     remove: (id) => {
       set({ items: get().items.filter((c) => c.id !== id) })
       void window.nais.invoke(ch.delete, { id })
+      // 씬별 추가·큐 반복·캐릭터 연결에 남은 이 레퍼/바이브 참조 정리 (커스텀 — 정합성)
+      const isVibe = ns === 'vibes'
+      void import('./scene-extras-store').then((m) =>
+        m.useSceneExtrasStore
+          .getState()
+          .purgeIds(isVibe ? { vibeIds: [id] } : { charRefIds: [id] })
+      )
+      if (!isVibe) {
+        // 이 캐릭레퍼에 연결돼 있던 캐릭터 카드의 연결 해제
+        void import('./characters-store').then((m) => {
+          for (const c of m.useCharactersStore.getState().items) {
+            if (c.charRefId === id) m.useCharactersStore.getState().updateCard(c.id, { charRefId: null })
+          }
+        })
+      }
     },
     createFolder: async (name) => {
       const { id } = await window.nais.invoke(ch.folderCreate, { name })
