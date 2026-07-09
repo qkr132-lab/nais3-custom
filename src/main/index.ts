@@ -1,5 +1,4 @@
 import { app, shell, BrowserWindow, dialog, net, protocol } from 'electron'
-import { copyFileSync, cpSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -21,8 +20,14 @@ import { GenerationQueue } from './queue/generation-queue'
 import { getPresetName, getScene, purgeOldTrash } from './scenes/repo'
 
 // 앱 이름 (dev 메뉴바·dock에서 'Electron' 대신 표시). 패키징 앱은 productName 사용
-// NAIS3 Custom — 공식 NAIS3와 userData가 분리된 별도 앱
 app.setName('NAIS3 Custom')
+
+// 데이터 폴더는 기존 NAIS3(%APPDATA%\NAIS3)를 "그대로" 공유한다 (커스텀).
+// 예전 커스텀 빌드가 이 폴더에 데이터를 쌓았고, 사용자가 폴더·토큰·설정을 끊김 없이
+// 이어 쓰길 원하므로 별도 폴더로 분리하지 않는다. 설치 프로그램만 별도(appId 분리)이고
+// 데이터는 한 곳을 본다 → 업데이트해도 토큰/설정이 초기화되지 않는다.
+// userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
+app.setPath('userData', join(app.getPath('appData'), 'NAIS3'))
 
 // 중복 실행 방지 (특히 Windows) — 두 번째 실행은 기존 창을 앞으로
 if (!app.requestSingleInstanceLock()) {
@@ -92,10 +97,6 @@ app.whenReady().then(() => {
     }
     return net.fetch(pathToFileURL(filePath).toString())
   })
-
-  // 첫 실행 시 공식 NAIS3 데이터 자동 이관 (커스텀) — DB + 내부 라이브러리 폴더 복사.
-  // 원본은 건드리지 않으므로 공식 NAIS3도 그대로 쓸 수 있다.
-  migrateFromOfficialNais3()
 
   let dbVersion: number
   try {
@@ -277,36 +278,6 @@ app.on('window-all-closed', () => {
 app.on('quit', () => {
   closeDb()
 })
-
-/**
- * 공식 NAIS3 → NAIS3 Custom 데이터 이관 (커스텀).
- * 새 userData에 DB가 없고 공식 NAIS3 폴더에 DB가 있으면 복사해온다 (1회성).
- * WAL/SHM 동반 복사 — 공식 앱이 켜져 있어도 최근 커밋까지 최대한 보존.
- */
-function migrateFromOfficialNais3(): void {
-  try {
-    const newDir = app.getPath('userData') // .../NAIS3 Custom
-    const oldDir = join(app.getPath('appData'), 'NAIS3')
-    const newDb = join(newDir, 'nais3.db')
-    const oldDb = join(oldDir, 'nais3.db')
-    if (existsSync(newDb) || !existsSync(oldDb)) return
-
-    mkdirSync(newDir, { recursive: true })
-    copyFileSync(oldDb, newDb)
-    for (const suffix of ['-wal', '-shm']) {
-      if (existsSync(oldDb + suffix)) copyFileSync(oldDb + suffix, newDb + suffix)
-    }
-    // 내부 라이브러리 (자동 저장 OFF 보관 이미지 + 라이브러리 참조 이미지)
-    const oldLib = join(oldDir, 'library')
-    if (existsSync(oldLib)) {
-      cpSync(oldLib, join(newDir, 'library'), { recursive: true, force: false })
-    }
-    console.log('NAIS3 Custom: 공식 NAIS3 데이터 이관 완료')
-  } catch (e) {
-    // 이관 실패해도 빈 상태로 시작은 가능 — 사용자가 백업 가져오기로 복구 가능
-    console.error('NAIS3 데이터 이관 실패:', e)
-  }
-}
 
 /**
  * NAI 인페인트 마스크 정규화 (NAIS2 검증):
