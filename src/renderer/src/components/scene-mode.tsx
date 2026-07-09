@@ -100,7 +100,7 @@ function PresetDropdown(): React.JSX.Element {
         <button className="flex h-8 min-w-52 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-[13px] font-medium hover:bg-surface-2">
           <span className="min-w-0 flex-1 truncate text-left">{active?.name ?? '프리셋'}</span>
           {active && (
-            <span className="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10.5px] font-normal text-faint">
+            <span className="shrink-0 rounded-full bg-accent/12 px-2 py-0.5 text-[12px] font-medium text-accent">
               씬 {active.sceneCount ?? 0}
             </span>
           )}
@@ -122,7 +122,14 @@ function PresetDropdown(): React.JSX.Element {
                 >
                   <span className="truncate">{p.name}</span>
                   {/* 프리셋별 씬 개수 (커스텀) */}
-                  <span className="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10.5px] font-normal text-faint">
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium',
+                      p.id === activePresetId
+                        ? 'bg-accent/15 text-accent'
+                        : 'bg-surface-2 text-muted'
+                    )}
+                  >
                     씬 {p.sceneCount ?? 0}
                   </span>
                 </div>
@@ -884,10 +891,10 @@ const SceneCard = memo(function SceneCard({
             ) : (
               <div className="truncate text-[13px] font-semibold text-white drop-shadow">{scene.name}</div>
             )}
-            {/* 이미지 장수 (커스텀) — 생성된 게 있을 때만 */}
+            {/* 이미지 장수 (커스텀) — 생성된 게 있을 때만, 잘 보이게 */}
             {scene.imageCount > 0 && (
-              <div className="mt-0.5 flex items-center gap-1 text-[10.5px] text-white/75 drop-shadow">
-                <ImageIcon size={10} />
+              <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
+                <ImageIcon size={12} />
                 {scene.imageCount}장
               </div>
             )}
