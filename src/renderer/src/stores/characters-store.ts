@@ -58,7 +58,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
       thumbnail: '',
       enabled: true,
       center: { x: 0.5, y: 0.5 },
-      folderId
+      folderId,
+      charRefId: null
     }
     const { folders, items } = get()
     const next = canonicalize(folders, [...items, card])
@@ -155,7 +156,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
         thumbnail: '',
         enabled: true,
         center: ch.center ?? { x: 0.5, y: 0.5 },
-        folderId: null
+        folderId: null,
+        charRefId: null
       }
       set({ items: canonicalize(get().folders, [...get().items, card]) })
       get().updateCard(id, {
@@ -182,4 +184,15 @@ export const MAX_CHARACTERS = 6
 
 export function enabledCharacters(): CharacterCard[] {
   return useCharactersStore.getState().items.filter((c) => c.enabled && c.prompt.trim())
+}
+
+/** 연결된 캐릭레퍼 id들 (커스텀) — charIds 지정 시 그 캐릭터들, 아니면 enabled 캐릭터 기준 */
+export function linkedCharRefIds(charIds?: Set<number>): number[] {
+  return useCharactersStore
+    .getState()
+    .items.filter(
+      (c) =>
+        (charIds ? charIds.has(c.id) : c.enabled && c.prompt.trim()) && c.charRefId != null
+    )
+    .map((c) => c.charRefId as number)
 }

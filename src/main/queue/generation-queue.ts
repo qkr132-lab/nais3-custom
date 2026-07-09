@@ -39,6 +39,20 @@ export class GenerationQueue extends EventEmitter {
     return ids
   }
 
+  /** 여러 요청을 한 번에 등록 — 씬 예약/큐 반복이 건별 IPC로 넣는 동안 취소가
+   *  새로 도착하는 항목을 놓치는 문제 방지 (등록이 원자적이면 취소가 전부 커버) */
+  enqueueMany(requests: GenerationRequest[]): string[] {
+    const ids: string[] = []
+    for (const request of requests) {
+      const id = randomUUID()
+      this.items.set(id, { id, state: 'pending', request })
+      ids.push(id)
+    }
+    this.emitChanged()
+    void this.run()
+    return ids
+  }
+
   cancel(ids: string[]): void {
     for (const id of ids) {
       const item = this.items.get(id)

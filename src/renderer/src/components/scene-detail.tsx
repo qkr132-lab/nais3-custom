@@ -306,7 +306,12 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                   src={imageUrl(img.filePath)}
                   className="h-full w-full cursor-pointer object-cover"
                   loading="lazy"
-                  draggable={false}
+                  // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
+                  draggable
+                  onDragStart={(e) => {
+                    e.preventDefault()
+                    void window.nais.invoke('images:startDrag', { filePath: img.filePath })
+                  }}
                   onClick={() => setLightboxIdx(newTop ? i + 1 : i)}
                   alt=""
                 />

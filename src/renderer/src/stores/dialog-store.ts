@@ -31,6 +31,16 @@ interface DialogState {
   _resolveConfirm: (ok: boolean) => void
 }
 
+// 확인 다이얼로그 전역 끄기 (커스텀 설정) — 켜져 있으면 askConfirm이 즉시 true
+let confirmsDisabled = localStorage.getItem('confirms_disabled') === '1'
+export function setConfirmsDisabled(v: boolean): void {
+  confirmsDisabled = v
+  localStorage.setItem('confirms_disabled', v ? '1' : '0')
+}
+export function getConfirmsDisabled(): boolean {
+  return confirmsDisabled
+}
+
 export const useDialogStore = create<DialogState>((set, get) => ({
   textPrompt: null,
   confirm: null,
@@ -38,8 +48,9 @@ export const useDialogStore = create<DialogState>((set, get) => ({
     new Promise((resolve) => {
       set({ textPrompt: { title, value: defaultValue, placeholder, resolve } })
     }),
-  askConfirm: (title, opts) =>
-    new Promise((resolve) => {
+  askConfirm: (title, opts) => {
+    if (confirmsDisabled) return Promise.resolve(true)
+    return new Promise((resolve) => {
       set({
         confirm: {
           title,
@@ -49,7 +60,8 @@ export const useDialogStore = create<DialogState>((set, get) => ({
           resolve
         }
       })
-    }),
+    })
+  },
   _resolve: (value) => {
     get().textPrompt?.resolve(value)
     set({ textPrompt: null })

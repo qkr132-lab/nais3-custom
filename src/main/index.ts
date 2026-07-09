@@ -4,7 +4,7 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
-import { closeDb, initDb } from './db'
+import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
@@ -17,7 +17,7 @@ import { logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance, generateImageStream, generateImageZip } from './nai/client'
 import { prepareCharRefs, prepareVibes } from './refs/prepare'
 import { GenerationQueue } from './queue/generation-queue'
-import { getPresetName, getScene } from './scenes/repo'
+import { getPresetName, getScene, purgeOldTrash } from './scenes/repo'
 
 // 앱 이름 (dev 메뉴바·dock에서 'Electron' 대신 표시). 패키징 앱은 productName 사용
 app.setName('NAIS3')
@@ -57,7 +57,9 @@ function createWindow(): void {
     ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // 내장 브라우저(웹 모드) — <webview> 태그 허용 (단보루 등 참고 사이트)
+      webviewTag: true
     }
   })
 
@@ -99,6 +101,10 @@ app.whenReady().then(() => {
     return
   }
 
+  // 시작 시 자동 백업(하루 1회) + 보관 기간 지난 휴지통 씬 자동 영구삭제 (커스텀 — 실수 대비)
+  autoBackupIfDue()
+  void purgeOldTrash()
+
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
   const queue = new GenerationQueue(async (rawRequest, id, signal) => {
     const token = getNaiToken()
@@ -120,10 +126,11 @@ app.whenReady().then(() => {
       }))
     }
 
-    // 바이브/캐릭레퍼는 DB의 enabled 항목에서 준비 (바이브는 필요 시 인코딩 — 2 Anlas, 캐시됨)
-    const { vibes, newlyEncoded } = await prepareVibes(token)
+    // 바이브/캐릭레퍼는 DB의 enabled 항목에서 준비 (바이브는 필요 시 인코딩 — 2 Anlas, 캐시됨).
+    // 요청에 vibeIds/charRefIds가 있으면 enabled 대신 그 id들만 (씬 큐 반복/씬별 추가)
+    const { vibes, newlyEncoded } = await prepareVibes(token, rawRequest.vibeIds)
     if (newlyEncoded.length) broadcast('vibes:encoded', {}) // 카드 인코딩 표시 갱신
-    const characterReferences = await prepareCharRefs()
+    const characterReferences = await prepareCharRefs(rawRequest.charRefIds)
 
     let source = request.source
     // i2i/인페인트: 소스 해상도를 유효 NAI 해상도(64 배수·픽셀 상한)로 스냅하고 이미지를 맞춰 리사이즈.
@@ -232,6 +239,16 @@ app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  // 내장 브라우저(webview)의 팝업/새 창은 같은 웹뷰에서 열기 (단보루 target=_blank 대응)
+  app.on('web-contents-created', (_, contents) => {
+    if (contents.getType() === 'webview') {
+      contents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith('http://') || url.startsWith('https://')) void contents.loadURL(url)
+        return { action: 'deny' }
+      })
+    }
   })
 
   // mac dock 아이콘 (dev 미리보기용 — 패키징 앱은 icns 사용)

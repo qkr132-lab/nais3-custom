@@ -9,6 +9,8 @@ import { InpaintHost } from './components/inpaint-host'
 import { MetadataDialog } from './components/metadata-dialog'
 import { PromptPanel } from './components/prompt-panel'
 import { SceneMode } from './components/scene-mode'
+import { LibraryMode } from './components/library-mode'
+import { WebMode } from './components/web-mode'
 import { Titlebar } from './components/titlebar'
 import { SettingsDialog } from './components/token-dialog'
 import { TextPromptHost } from './components/text-prompt-host'
@@ -19,10 +21,21 @@ import { useCharRefsStore, useVibesStore } from './stores/refs-store'
 import { bindGenerationEvents, useGenerationStore } from './stores/generation-store'
 import { bindSceneEvents } from './stores/scenes-store'
 import { bindShortcuts, useShortcutsStore } from './stores/shortcuts-store'
+import { bindUndoShortcut } from './stores/undo-store'
 import { bindUpdateEvents } from './stores/update-store'
 import { bindNavMouse } from './lib/nav-history'
 import { useLayoutStore } from './stores/layout-store'
 import { useThemeStore } from './stores/theme-store'
+
+/** 웹 모드 keep-alive 래퍼 — 처음 방문 후엔 hidden으로 유지해 webview 세션 보존 */
+function WebModeKeepAlive({ active }: { active: boolean }): React.JSX.Element | null {
+  const [visited, setVisited] = useState(false)
+  useEffect(() => {
+    if (active) setVisited(true)
+  }, [active])
+  if (!active && !visited) return null
+  return <div className={active ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>{<WebMode />}</div>
+}
 
 export default function App(): React.JSX.Element {
   const leftOpen = useLayoutStore((s) => s.leftOpen)
@@ -72,6 +85,7 @@ export default function App(): React.JSX.Element {
     const unbindKeys = bindShortcuts()
     const unbindUpdate = bindUpdateEvents()
     const unbindNav = bindNavMouse() // 마우스 4/5번 버튼 뒤로/앞으로
+    const unbindUndo = bindUndoShortcut() // Ctrl+Z 실행취소 스택 (커스텀)
     // F5 새로고침 (프로덕션에서도)
     const onF5 = (e: KeyboardEvent): void => {
       if (e.key === 'F5') {
@@ -86,6 +100,7 @@ export default function App(): React.JSX.Element {
       unbindKeys()
       unbindUpdate()
       unbindNav()
+      unbindUndo()
       window.removeEventListener('keydown', onF5)
     }
   }, [])
@@ -121,9 +136,13 @@ export default function App(): React.JSX.Element {
             <SceneMode />
           ) : centerMode === 'director' ? (
             <DirectorMode />
-          ) : (
+          ) : centerMode === 'library' ? (
+            <LibraryMode />
+          ) : centerMode === 'main' ? (
             <PreviewPane />
-          )}
+          ) : null}
+          {/* 웹 모드는 hidden 유지 렌더 — 모드를 오가도 페이지/로그인이 유지된다 */}
+          <WebModeKeepAlive active={centerMode === 'web'} />
           <AnimatePresence initial={false}>
             {rightOpen && (
               <motion.div

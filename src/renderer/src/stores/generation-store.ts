@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { GenerationRequest, HistoryItem, PromptParts, QueueStatus } from '@shared/types'
-import { enabledCharacters } from './characters-store'
-import { useVibesStore } from './refs-store'
+import { enabledCharacters, linkedCharRefIds } from './characters-store'
+import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 
 /**
@@ -192,9 +192,21 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       enabled: true as const
     }))
     const src = get().source
+    // 캐릭터에 연결된 캐릭레퍼 자동 포함 (커스텀) — 있으면 enabled 레퍼런스와 합집합으로 오버라이드
+    const linked = linkedCharRefIds()
+    const charRefIds =
+      linked.length > 0
+        ? [
+            ...new Set([
+              ...useCharRefsStore.getState().items.filter((c) => c.enabled).map((c) => c.id),
+              ...linked
+            ])
+          ]
+        : undefined
     const finalRequest = {
       ...baseRequest,
       characterPrompts,
+      charRefIds,
       source: src
         ? {
             imageBase64: src.imageBase64,
@@ -223,10 +235,20 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   cancelAll: async () => {
     const queue = get().queue
     if (!queue) return
-    const ids = queue.items
-      .filter((i) => i.state === 'pending' || i.state === 'generating')
-      .map((i) => i.id)
-    await window.nais.invoke('queue:cancel', { ids })
+    const active = queue.items.filter((i) => i.state === 'pending' || i.state === 'generating')
+    // 씬의 "아직 시작 안 한" 항목들은 취소 후 예약으로 되돌린다 (남은 개수 유실 방지)
+    const bySceneId = new Map<number, number>()
+    for (const i of active) {
+      if (i.state === 'pending' && i.request.sceneId != null) {
+        bySceneId.set(i.request.sceneId, (bySceneId.get(i.request.sceneId) ?? 0) + 1)
+      }
+    }
+    await window.nais.invoke('queue:cancel', { ids: active.map((i) => i.id) })
+    if (bySceneId.size > 0) {
+      // 순환 import 방지를 위한 동적 import (scenes-store가 이 스토어를 정적 import함)
+      const { useScenesStore } = await import('./scenes-store')
+      await useScenesStore.getState().restoreReserves(bySceneId)
+    }
   },
 
   refreshHistory: async () => {

@@ -24,7 +24,7 @@ const TYPO =
 
 type Suggestion =
   | { kind: 'frag'; path: string }
-  | { kind: 'tag'; tag: string; count: number; type: string }
+  | { kind: 'tag'; tag: string; count: number; type: string; ko?: string }
 
 const TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/
 
@@ -118,7 +118,8 @@ export function PromptEditor({
     if (!ta) return
     const caret = caretCoords(ta, ta.selectionStart)
     const rect = ta.getBoundingClientRect()
-    const estimatedHeight = Math.min(itemCount, 8) * 27 + 10
+    // 한글 뜻이 붙으면 항목이 2줄이 될 수 있어 넉넉히 추정
+    const estimatedHeight = Math.min(itemCount, 8) * 40 + 10
     let left = rect.left + caret.left - ta.scrollLeft
     let top = rect.top + caret.top - ta.scrollTop + caret.height + 4
     left = Math.max(8, Math.min(left, window.innerWidth - 288))
@@ -160,7 +161,9 @@ export function PromptEditor({
     const rawToken = before.slice(sepIdx + 1)
     const token = rawToken.trimStart()
     const start = sepIdx + 1 + (rawToken.length - token.length)
-    if (token.trim().length < 2) {
+    // 한글은 한 글자도 의미가 있어("눈", "귀") 1자부터 검색
+    const minLen = /[가-힣]/.test(token) ? 1 : 2
+    if (token.trim().length < minLen) {
       setSuggestions([])
       return
     }
@@ -283,7 +286,7 @@ export function PromptEditor({
               <button
                 key={s.kind === 'frag' ? `f:${s.path}` : `t:${s.tag}`}
                 className={cn(
-                  'flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-[12px] text-muted',
+                  'flex w-full flex-col px-2.5 py-1 text-left font-mono text-[12px] text-muted',
                   i === selected && 'bg-surface-2 text-ink'
                 )}
                 onMouseDown={(e) => {
@@ -295,8 +298,16 @@ export function PromptEditor({
                   <span className="truncate text-[#5cbe7d]">{`<${s.path}>`}</span>
                 ) : (
                   <>
-                    <span className={cn('min-w-0 flex-1 truncate', TYPE_COLORS[s.type])}>{s.tag}</span>
-                    <span className="shrink-0 text-[10.5px] text-faint">{formatCount(s.count)}</span>
+                    <span className="flex w-full items-center gap-2">
+                      <span className={cn('min-w-0 flex-1 truncate', TYPE_COLORS[s.type])}>{s.tag}</span>
+                      <span className="shrink-0 text-[10.5px] text-faint">{formatCount(s.count)}</span>
+                    </span>
+                    {/* 한글 뜻 (커스텀 사전) */}
+                    {s.ko && (
+                      <span className="w-full truncate font-sans text-[10.5px] leading-tight text-faint">
+                        {s.ko}
+                      </span>
+                    )}
                   </>
                 )}
               </button>

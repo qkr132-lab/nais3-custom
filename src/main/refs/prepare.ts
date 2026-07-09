@@ -7,9 +7,10 @@ import { enabledCharRefRows, enabledVibeRows, saveVibeEncoding } from './repo'
 /** 생성 직전 바이브 준비 — 미인코딩/ie 변경분만 encode-vibe (2 Anlas) 후 캐시.
  *  newlyEncoded: 이번에 새로 인코딩된 바이브 id (카드 표시 갱신 통지용) */
 export async function prepareVibes(
-  token: string
+  token: string,
+  ids?: number[]
 ): Promise<{ vibes: VibeOptions[]; newlyEncoded: number[] }> {
-  const rows = enabledVibeRows()
+  const rows = enabledVibeRows(ids)
   const vibes: VibeOptions[] = []
   const newlyEncoded: number[] = []
   for (const row of rows) {
@@ -57,8 +58,8 @@ async function processCharRefImage(filePath: string): Promise<string> {
   return png.toString('base64')
 }
 
-export async function prepareCharRefs(): Promise<CharacterReferenceOptions[]> {
-  const rows = enabledCharRefRows()
+export async function prepareCharRefs(ids?: number[]): Promise<CharacterReferenceOptions[]> {
+  const rows = enabledCharRefRows(ids)
   const result: CharacterReferenceOptions[] = []
   for (const row of rows) {
     result.push({

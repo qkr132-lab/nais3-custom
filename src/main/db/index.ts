@@ -1,8 +1,13 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { migrations } from './migrations'
+
+/** 현재 시각(ms) — 자동 백업 주기 판정용 (Date.now는 메인 프로세스에서 정상 동작) */
+function nowMs(): number {
+  return Date.now()
+}
 
 let db: Database.Database | null = null
 
@@ -73,15 +78,81 @@ function pruneBackups(backupDir: string, keep: number): void {
   }
 }
 
-/** 주기 백업용: 압축 정리된 스냅샷을 원자적으로 생성 */
+/** 백업 폴더 총 용량이 상한을 넘으면 오래된 것부터 삭제 (최신 minKeep개는 항상 보존).
+ *  maxBytes <= 0 = 무제한 (용량 정리 안 함) */
+function pruneBackupsBySize(backupDir: string, maxBytes: number, minKeep = 3): void {
+  if (maxBytes <= 0) return
+  const files = readdirSync(backupDir)
+    .filter((f) => f.endsWith('.db'))
+    .map((f) => {
+      const st = statSync(join(backupDir, f))
+      return { f, size: st.size, mtime: st.mtimeMs }
+    })
+    .sort((a, b) => a.mtime - b.mtime) // 오래된 것 먼저
+  let total = files.reduce((s, x) => s + x.size, 0)
+  let i = 0
+  while (total > maxBytes && files.length - i > minKeep) {
+    rmSync(join(backupDir, files[i].f))
+    total -= files[i].size
+    i++
+  }
+}
+
+/** 백업 폴더 현황 (설정 UI 표시용) */
+export function backupInfo(): { dir: string; count: number; totalBytes: number } {
+  const dir = join(app.getPath('userData'), 'backups')
+  try {
+    const files = readdirSync(dir).filter((f) => f.endsWith('.db'))
+    const totalBytes = files.reduce((s, f) => s + statSync(join(dir, f)).size, 0)
+    return { dir, count: files.length, totalBytes }
+  } catch {
+    return { dir, count: 0, totalBytes: 0 }
+  }
+}
+
+/** 설정된 백업 용량 상한(MB) — 기본 512, 0 = 무제한 */
+function backupMaxBytes(): number {
+  const db = getDb()
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'backup_max_mb'`).get() as
+    | { value: string }
+    | undefined
+  const mb = Number(row?.value ?? '512')
+  return Number.isFinite(mb) ? mb * 1024 * 1024 : 512 * 1024 * 1024
+}
+
+/** 주기 백업용: 압축 정리된 스냅샷을 원자적으로 생성.
+ *  개수(30개) + 총 용량(설정 backup_max_mb, 기본 512MB) 이중 상한으로 정리 */
 export function backupNow(): string {
   const backupDir = join(app.getPath('userData'), 'backups')
   mkdirSync(backupDir, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const dest = join(backupDir, `auto-${stamp}.db`)
   getDb().exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`)
-  pruneBackups(backupDir, 10)
+  pruneBackups(backupDir, 30)
+  pruneBackupsBySize(backupDir, backupMaxBytes())
   return dest
+}
+
+/**
+ * 앱 시작 시 자동 백업 (커스텀 — 하루 1회). 마지막 auto-* 스냅샷이 20시간 넘게 오래됐으면 새로 뜬다.
+ * 씬/캐릭터/프롬프트/조각/설정(커스텀 확장 포함) 전부가 이 DB에 있으므로 통째로 지켜진다.
+ */
+export function autoBackupIfDue(): void {
+  try {
+    const backupDir = join(app.getPath('userData'), 'backups')
+    mkdirSync(backupDir, { recursive: true })
+    const autos = readdirSync(backupDir)
+      .filter((f) => f.startsWith('auto-') && f.endsWith('.db'))
+      .sort()
+    const last = autos[autos.length - 1]
+    if (last) {
+      const lastTime = statSync(join(backupDir, last)).mtimeMs
+      if (nowMs() - lastTime < 20 * 60 * 60 * 1000) return // 아직 최근 백업 있음
+    }
+    backupNow()
+  } catch {
+    // 백업 실패가 앱 시작을 막지 않게
+  }
 }
 
 export function closeDb(): void {

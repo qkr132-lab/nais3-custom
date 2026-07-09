@@ -78,6 +78,10 @@ export interface GenerationRequest {
   source?: SourceImage
   /** 씬 생성이면 씬 id (저장 시 images.scene_id 연결) */
   sceneId?: number
+  /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
+  vibeIds?: number[]
+  /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
+  charRefIds?: number[]
 }
 
 export interface PromptParts {
@@ -120,6 +124,8 @@ export interface CharacterCard {
   enabled: boolean
   center: { x: number; y: number }
   folderId: number | null
+  /** 연결된 캐릭레퍼 id (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */
+  charRefId: number | null
 }
 
 /** 폴더 행 (캐릭터/조각 공용 리스트 모델) */
@@ -145,7 +151,7 @@ export const FOLDER_COLORS = [
 ] as const
 
 export type CharacterCardPatch = Partial<
-  Pick<CharacterCard, 'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center'>
+  Pick<CharacterCard, 'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId'>
 >
 
 /** 리스트 전체 순서 (폴더 행 + 카드 행). 카드의 폴더 소속은 이 순서에서 파생된다 */
@@ -274,6 +280,8 @@ export interface Scene {
   height: number
   /** 예약 수 (예약→생성 워크플로. +/-로 조정) */
   reserveCount: number
+  /** 씬별 variety+ 강제 적용 (커스텀. false = 메인 설정 따름) */
+  varietyPlus: boolean
   /** 목록 카드용: 최신 생성 이미지 썸네일 (없으면 '') */
   thumbnail: string
   /** 최신 생성 이미지의 원본 파일 경로 (카드에 풀해상도로 선명하게 표시. 없으면 '') */
@@ -289,6 +297,18 @@ export interface SceneImage {
   thumbnail: string
   seed: number | null
   favorite: boolean
+}
+
+/** 이미지 라이브러리 항목 (NAIS2 Library 이식) — 참고 이미지 모음 */
+export interface LibraryImage {
+  id: number
+  name: string
+  filePath: string
+  /** webp 썸네일 base64 (data URL 프리픽스 없음) */
+  thumbnail: string
+  width: number
+  height: number
+  createdAt: string
 }
 
 /** IPC invoke 채널 계약: 채널명 → (요청, 응답) */
@@ -311,6 +331,8 @@ export interface IpcInvokeMap {
   'nai:balance': { req: void; res: { anlas: number | null; tier: string | null } }
   'nai:anlasUsage': { req: void; res: { today: number; week: number } }
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
+  /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
+  'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
   'queue:cancel': { req: { ids: string[] }; res: void }
   'queue:status': { req: void; res: QueueStatus }
   'images:list': {
@@ -360,7 +382,12 @@ export interface IpcInvokeMap {
   'frags:folderDelete': { req: { id: number }; res: void }
   'tags:search': {
     req: { query: string; limit?: number }
-    res: { items: { tag: string; count: number; type: string }[] }
+    res: { items: { tag: string; count: number; type: string; ko?: string }[] }
+  }
+  /** 태그 탐색기: 태그명 목록 → 정보 (미존재 태그는 제외됨) */
+  'tags:lookup': {
+    req: { tags: string[] }
+    res: { items: { tag: string; count: number; type: string; ko?: string }[] }
   }
   /** T5 토큰 카운트 (V4.5 한도 512, EOS 포함 — NAI 웹과 동일 방식) */
   'tokens:count': { req: { texts: string[] }; res: { counts: number[] } }
@@ -371,6 +398,8 @@ export interface IpcInvokeMap {
   }
   /** 파일 탐색기에서 해당 파일 위치 열기 (파일 선택 상태로) */
   'images:showInFolder': { req: { filePath: string }; res: void }
+  /** OS 네이티브 드래그 시작 — 이미지를 앱 밖(탐색기 등)으로 끌어 저장 (NAIS2 기능) */
+  'images:startDrag': { req: { filePath: string }; res: void }
   /** 다른 이름으로 저장 — 파일 저장 다이얼로그로 복사 */
   'images:saveAs': { req: { filePath: string }; res: { saved: boolean } }
   /** 이미지를 클립보드로 복사 */
@@ -428,6 +457,14 @@ export interface IpcInvokeMap {
   'update:start': { req: void; res: void }
   /** 전체 데이터 JSON 내보내기 (저장 다이얼로그) */
   'backup:export': { req: void; res: { saved: boolean } }
+  /** DB 백업 폴더 열기 (커스텀 — 자동 스냅샷 보관소) */
+  'backup:openFolder': { req: void; res: void }
+  /** 지금 즉시 DB 백업 스냅샷 생성 (커스텀) */
+  'backup:now': { req: void; res: { path: string } }
+  /** 백업 폴더 현황 — 개수/총 용량 (커스텀, 설정 UI 표시용) */
+  'backup:info': { req: void; res: { dir: string; count: number; totalBytes: number } }
+  /** 웹 모드 프록시 설정 (커스텀 — 단보루 등 우회). rules 빈 문자열이면 직접 연결 */
+  'web:setProxy': { req: { rules: string }; res: { ok: boolean } }
   /** JSON 가져오기 (열기 다이얼로그). NAIS3/NAIS2 포맷 자동 감지. summary=사람이 읽는 결과 */
   'backup:import': {
     req: void
@@ -435,13 +472,25 @@ export interface IpcInvokeMap {
   }
   /** 특정 프리셋의 씬 목록 */
   'scenes:list': { req: { presetId: number }; res: { items: Scene[] } }
+  /** 휴지통(소프트삭제) 씬 목록 (커스텀 — 복원용) */
+  'scenes:trash': {
+    req: void
+    res: { items: (Scene & { deletedAt: string; presetName: string })[] }
+  }
+  /** 휴지통 씬 복원 */
+  'scenes:restore': { req: { ids: number[] }; res: void }
+  /** 휴지통 씬 영구 삭제 (파일은 OS 휴지통으로) */
+  'scenes:purge': { req: { ids: number[] }; res: void }
   'scenes:create': { req: { presetId: number; name: string }; res: { id: number } }
   'scenes:get': { req: { id: number }; res: { scene: Scene | null } }
   'scenes:update': {
     req: {
       id: number
       patch: Partial<
-        Pick<Scene, 'name' | 'prompt' | 'negativePrompt' | 'width' | 'height' | 'reserveCount'>
+        Pick<
+          Scene,
+          'name' | 'prompt' | 'negativePrompt' | 'width' | 'height' | 'reserveCount' | 'varietyPlus'
+        >
       >
     }
     res: void
@@ -496,6 +545,18 @@ export interface IpcInvokeMap {
   'vibes:folderCollapse': { req: { id: number; collapsed: boolean }; res: void }
   'vibes:folderColor': { req: { id: number; color: string | null }; res: void }
   'vibes:folderDelete': { req: { id: number }; res: void }
+  /** 이미지 라이브러리 (NAIS2 Library 이식) */
+  'library:list': { req: void; res: { items: LibraryImage[] } }
+  'library:add': { req: void; res: { count: number } }
+  'library:addFromPaths': { req: { paths: string[] }; res: { count: number } }
+  'library:rename': { req: { id: number; name: string }; res: void }
+  'library:delete': { req: { ids: number[] }; res: void }
+  'library:reorder': { req: { ids: number[] }; res: void }
+  /** 스타일(작가) 태그 분석 — Kaloscope HF Space (NAIS2 스마트 도구 이식) */
+  'tools:analyzeStyle': {
+    req: { filePath?: string; base64?: string }
+    res: { tags: { label: string; score: number }[] } | { error: string }
+  }
   'crefs:list': { req: void; res: { folders: ListFolder[]; items: CharRefItem[] } }
   'crefs:add': { req: { folderId: number | null }; res: { count: number } }
   'crefs:update': {

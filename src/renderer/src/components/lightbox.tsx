@@ -58,7 +58,12 @@ export function Lightbox({
           src={imageUrl(filePaths[index])}
           className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
           onClick={(e) => e.stopPropagation()}
-          draggable={false}
+          // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
+          draggable
+          onDragStart={(e) => {
+            e.preventDefault()
+            void window.nais.invoke('images:startDrag', { filePath: filePaths[index] })
+          }}
           alt=""
         />
       </ImageContextMenu>

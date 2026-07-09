@@ -19,6 +19,7 @@ interface CharRow {
   center_x: number
   center_y: number
   folder_id: number | null
+  char_ref_id: number | null
 }
 
 export function listCharacters(): { folders: CharacterFolder[]; items: CharacterCard[] } {
@@ -37,7 +38,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
   const items = (
     db
       .prepare(
-        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id
+        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id
          FROM character_prompts ORDER BY sort_order, id`
       )
       .all() as CharRow[]
@@ -49,7 +50,8 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
     thumbnail: r.thumbnail ? r.thumbnail.toString('base64') : '',
     enabled: r.enabled === 1,
     center: { x: r.center_x, y: r.center_y },
-    folderId: r.folder_id
+    folderId: r.folder_id,
+    charRefId: r.char_ref_id
   }))
 
   return { folders, items }
@@ -91,6 +93,10 @@ export function updateCharacter(id: number, patch: CharacterCardPatch): void {
   if (patch.center !== undefined) {
     sets.push('center_x = ?', 'center_y = ?')
     values.push(patch.center.x, patch.center.y)
+  }
+  if (patch.charRefId !== undefined) {
+    sets.push('char_ref_id = ?')
+    values.push(patch.charRefId)
   }
   if (sets.length === 0) return
   sets.push(`updated_at = datetime('now')`)

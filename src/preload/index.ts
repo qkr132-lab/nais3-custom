@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
 
 /**
@@ -20,6 +20,10 @@ const api = {
       listener(payload)
     ipcRenderer.on(channel, wrapped)
     return () => ipcRenderer.removeListener(channel, wrapped)
+  },
+  /** 드래그 앤 드롭된 File의 실제 경로 (라이브러리 추가용 — File.path는 최신 Electron에서 제거됨) */
+  pathForFile(file: File): string {
+    return webUtils.getPathForFile(file)
   }
 }
 

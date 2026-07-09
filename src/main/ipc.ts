@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
 import {
   createCharacter,
@@ -15,7 +15,7 @@ import {
   setFolderColor,
   updateCharacter
 } from './characters/repo'
-import { getDbPath, getDb } from './db'
+import { getDbPath, getDb, backupNow, backupInfo } from './db'
 import { metadataFromPng, metadataFromPayloadJson } from './images/metadata'
 import {
   createFragment,
@@ -45,6 +45,15 @@ import {
 import { anlasUsage, logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance } from './nai/client'
 import { listImages, getImagePayload, saveGeneratedImage } from './images/storage'
+import {
+  addLibraryImages,
+  addLibraryImagesFromPaths,
+  deleteLibraryImages,
+  listLibraryImages,
+  renameLibraryImage,
+  reorderLibraryImages
+} from './library/repo'
+import { analyzeStyle } from './tools/style-analysis'
 import { augmentImage, upscaleImage } from './nai/client'
 import {
   listPresets,
@@ -54,6 +63,9 @@ import {
   reorderPresets,
   setPresetDefaultResolution,
   listScenes,
+  listTrashedScenes,
+  restoreScenes,
+  purgeScenes,
   createScene,
   getScene,
   getPresetName,
@@ -102,10 +114,10 @@ import {
   reorderRefs,
   updateRefImage
 } from './refs/repo'
-import { searchTags } from './tags'
+import { lookupTags, searchTags } from './tags'
 import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'fs'
-import { basename } from 'path'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { basename, extname, join } from 'path'
 import sharp from 'sharp'
 import { verifyToken } from './nai/client'
 import type { GenerationQueue } from './queue/generation-queue'
@@ -152,6 +164,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('nai:anlasUsage', () => anlasUsage())
 
   handle('queue:enqueue', ({ request, count }) => ({ ids: ctx.queue.enqueue(request, count) }))
+  handle('queue:enqueueMany', ({ requests }) => ({ ids: ctx.queue.enqueueMany(requests) }))
   handle('queue:cancel', ({ ids }) => {
     ctx.queue.cancel(ids)
   })
@@ -252,7 +265,33 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       return { error: e instanceof Error ? e.message : String(e) }
     }
   })
+  // DB 백업 폴더 열기 / 즉시 스냅샷 (커스텀 — 실수 대비)
+  handle('backup:openFolder', () => {
+    const dir = join(app.getPath('userData'), 'backups')
+    void shell.openPath(dir)
+  })
+  handle('backup:now', () => ({ path: backupNow() }))
+  handle('backup:info', () => backupInfo())
+
+  // 웹 모드 프록시 (커스텀 — 단보루 등 우회). persist:webmode 세션에만 적용
+  handle('web:setProxy', async ({ rules }) => {
+    try {
+      const ses = session.fromPartition('persist:webmode')
+      await ses.setProxy(rules.trim() ? { proxyRules: rules.trim() } : { mode: 'direct' })
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+
   handle('scenes:list', ({ presetId }) => ({ items: listScenes(presetId) }))
+  handle('scenes:trash', () => ({ items: listTrashedScenes() }))
+  handle('scenes:restore', ({ ids }) => {
+    restoreScenes(ids)
+  })
+  handle('scenes:purge', async ({ ids }) => {
+    await purgeScenes(ids)
+  })
   handle('scenes:create', ({ presetId, name }) => ({ id: createScene(presetId, name) }))
   handle('scenes:get', ({ id }) => ({ scene: getScene(id) }))
   handle('scenes:update', ({ id, patch }) => {
@@ -370,10 +409,59 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
 
   handle('tags:search', ({ query, limit }) => ({ items: searchTags(query, limit) }))
+  handle('tags:lookup', ({ tags }) => ({ items: lookupTags(tags) }))
   handle('tokens:count', ({ texts }) => ({ counts: texts.map(countTokens) }))
 
   handle('images:showInFolder', ({ filePath }) => {
     if (isUnderImagesRoot(filePath)) shell.showItemInFolder(filePath)
+  })
+
+  // 이미지를 앱 밖(탐색기/타 앱)으로 드래그해 저장 (NAIS2 기능 이식).
+  // 드래그 고스트 아이콘은 파일에서 즉석 생성한 소형 PNG.
+  // 드래그 동안 창을 반투명하게 — 뒤에 있는 창(탐색기 등)에 놓기 쉽게.
+  // Windows에서 startDrag는 드래그가 끝날 때까지 블로킹되므로 호출 뒤 복원하면 된다.
+  // 파일명: "씬이름_3.png" 대신 "씬이름.png"으로 — 연번 없는 임시 복사본을 드래그.
+  // (대상 폴더에 같은 이름이 있으면 OS가 충돌 처리를 맡는다)
+  handle('images:startDrag', async ({ filePath }) => {
+    if (!isUnderImagesRoot(filePath)) return
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    let icon = nativeImage.createEmpty()
+    try {
+      const png = await sharp(filePath).resize(96, 96, { fit: 'inside' }).png().toBuffer()
+      icon = nativeImage.createFromBuffer(png)
+    } catch {
+      // 아이콘 실패해도 드래그는 진행
+    }
+
+    // 연번 접미사(_N) 제거한 이름의 임시 복사본 (씬 이미지 "이름_3.png" → "이름.png")
+    let dragPath = filePath
+    const ext = extname(filePath)
+    const base = basename(filePath, ext)
+    const m = /^(.+)_(\d+)$/.exec(base)
+    if (m) {
+      try {
+        const dragDir = join(app.getPath('temp'), 'nais3-drag')
+        // 이전 드래그 잔여물 정리 (startDrag가 블로킹이라 이 시점엔 사용 중 아님)
+        rmSync(dragDir, { recursive: true, force: true })
+        mkdirSync(dragDir, { recursive: true })
+        dragPath = join(dragDir, `${m[1]}${ext}`)
+        copyFileSync(filePath, dragPath)
+      } catch {
+        dragPath = filePath // 복사 실패 시 원본 그대로
+      }
+    }
+
+    // 반투명 + 마우스 통과: 창이 위에 있어도 "뚫고" 뒤의 탐색기 등에 바로 놓을 수 있다.
+    // (통과 중엔 앱 자체에는 드롭 불가 — 메타데이터 보기는 우클릭 메뉴로 가능)
+    win.setOpacity(0.3)
+    win.setIgnoreMouseEvents(true)
+    try {
+      win.webContents.startDrag({ file: dragPath, icon })
+    } finally {
+      win.setIgnoreMouseEvents(false)
+      win.setOpacity(1)
+    }
   })
 
   handle('images:saveAs', async ({ filePath }) => {
@@ -586,6 +674,29 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('crefs:folderDelete', ({ id }) => {
     deleteRefFolder('charref', id)
+  })
+
+  // 이미지 라이브러리 (NAIS2 Library 이식)
+  handle('library:list', () => listLibraryImages())
+  handle('library:add', () => addLibraryImages())
+  handle('library:addFromPaths', ({ paths }) => addLibraryImagesFromPaths(paths))
+  handle('library:rename', ({ id, name }) => {
+    renameLibraryImage(id, name)
+  })
+  handle('library:delete', ({ ids }) => {
+    deleteLibraryImages(ids)
+  })
+  handle('library:reorder', ({ ids }) => {
+    reorderLibraryImages(ids)
+  })
+
+  // 스타일(작가) 태그 분석 — Kaloscope HF Space (NAIS2 스마트 도구 이식)
+  handle('tools:analyzeStyle', async (req) => {
+    try {
+      return { tags: await analyzeStyle(req) }
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   handle('window:control', ({ action }) => {

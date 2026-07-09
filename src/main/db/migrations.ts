@@ -267,5 +267,38 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE scene_presets ADD COLUMN default_width INTEGER;
       ALTER TABLE scene_presets ADD COLUMN default_height INTEGER;
     `)
+  },
+
+  // v12: 이미지 라이브러리 (NAIS2 Library 이식) — 참고 이미지 모음. 파일은 userData/library/refs에 복사
+  (db) => {
+    db.exec(`
+      CREATE TABLE library_images (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        file_path TEXT NOT NULL,
+        thumbnail BLOB,
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+  },
+
+  // v13 (커스텀): 씬별 variety+ 오버라이드 + 캐릭터 카드에 캐릭레퍼 연결
+  // (FK 포함 ADD COLUMN 제약 때문에 REFERENCES 없이 추가 — 앱에서 정합성 관리)
+  (db) => {
+    db.exec(`
+      ALTER TABLE gen_scenes ADD COLUMN variety_plus INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE character_prompts ADD COLUMN char_ref_id INTEGER;
+    `)
+  },
+
+  // v14 (커스텀): 씬 소프트삭제 (휴지통) — 실수 삭제 복원용. deleted_at IS NULL = 살아있음
+  (db) => {
+    db.exec(`
+      ALTER TABLE gen_scenes ADD COLUMN deleted_at TEXT;
+      CREATE INDEX idx_gen_scenes_deleted ON gen_scenes(deleted_at);
+    `)
   }
 ]

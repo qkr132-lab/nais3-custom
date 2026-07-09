@@ -22,7 +22,12 @@ const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`
  *   .app을 교체하고 재시작한다 (Tauri 방식). 최초 설치 때만 Gatekeeper를 넘기면
  *   이후 업데이트 파일은 앱이 받은 것이라 quarantine이 없어 재실행에 문제 없음.
  */
+// 커스텀 빌드: 자동 업데이트 비활성 — 공식 릴리즈가 커스텀 기능(큐 반복/씬별 캐릭터)을
+// 덮어쓰는 것 방지. 공식판으로 돌아가려면 GitHub 릴리즈에서 수동 설치.
+const UPDATER_DISABLED = true as boolean
+
 export function setupUpdater(): void {
+  if (UPDATER_DISABLED) return
   if (!app.isPackaged) return // dev에선 확인 안 함
 
   if (process.platform === 'darwin') {

@@ -1,8 +1,17 @@
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
-import { enabledCharacters } from './characters-store'
+import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore } from './generation-store'
+import { useCharRefsStore, useVibesStore } from './refs-store'
+import {
+  enabledEntries,
+  hasAddition,
+  useSceneExtrasStore,
+  type SequenceEntry
+} from './scene-extras-store'
+import { toastUndo } from './toast-store'
+import { pushUndo } from './undo-store'
 
 const PAGE = 80 // 씬 상세 이미지 페이지 크기 (수만 장 대비: 한 번에 전부 로드 금지)
 let loadSeq = 0 // load() 비동기 응답 순서 보장용
@@ -15,6 +24,7 @@ interface ScenesState {
   selectedId: number | null // 상세로 연 씬
   editMode: boolean
   selection: Set<number> // 편집 모드 체크된 씬들
+  lastSelectedId: number | null // Shift 범위 선택 기준점 (커스텀)
   columns: number // 2~5
   cardOrientation: 'portrait' | 'landscape' // 카드 비율 고정 (해상도 무관)
 
@@ -40,8 +50,16 @@ interface ScenesState {
   setColumns: (n: number) => void
   setCardOrientation: (o: 'portrait' | 'landscape') => void
   toggleSelected: (id: number) => void
+  /** Shift+클릭 범위 선택 — lastSelectedId부터 id까지 (커스텀) */
+  selectRangeTo: (id: number) => void
   selectAll: () => void
   clearSelection: () => void
+
+  // 휴지통 (소프트삭제 복원) — 커스텀
+  trashed: (Scene & { deletedAt: string; presetName: string })[]
+  loadTrash: () => Promise<void>
+  restoreScenes: (ids: number[]) => Promise<void>
+  purgeScenes: (ids: number[]) => Promise<void>
 
   create: (name: string) => Promise<void>
   update: (id: number, patch: Partial<Scene>) => Promise<void>
@@ -59,6 +77,14 @@ interface ScenesState {
   // 편집 모드 일괄
   bulkMove: (presetId: number) => Promise<void>
   bulkDelete: () => Promise<void>
+  /** 선택 씬만 예약 증감 (배치 수 단위) — 커스텀 */
+  bulkAdjustReserve: (delta: number) => Promise<void>
+  /** 선택 씬 예약 취소 — 커스텀 */
+  bulkClearReserve: () => Promise<void>
+  /** 선택 씬 variety+ 일괄 적용/해제 — 커스텀 */
+  bulkSetVariety: (v: boolean) => Promise<void>
+  /** 선택 씬 일괄 복제 — 커스텀 */
+  bulkDuplicate: () => Promise<void>
   bulkSetResolution: (width: number, height: number) => Promise<void>
   bulkClearFavorites: () => Promise<void>
   bulkClearImages: () => Promise<void>
@@ -76,6 +102,8 @@ interface ScenesState {
 
   /** 예약된 씬들을 예약 수만큼 큐에 넣는다 (메인 생성 버튼이 씬 모드에서 호출) */
   generateReserved: () => Promise<void>
+  /** 취소된 대기 항목을 예약으로 복원 (커스텀 — cancelAll이 호출) */
+  restoreReserves: (bySceneId: Map<number, number>) => Promise<void>
   /** 이 씬 1장 바로 생성 (예약 없이 — NAIS2식 즉석 생성) */
   generateOne: (sceneId: number) => Promise<void>
 }
@@ -94,16 +122,57 @@ export function appendPrompt(base: string, add: string): string {
  * 파라미터)을 그대로 쓰고, 씬 프롬프트는 기본/네거 프롬프트 "뒤에 이어붙인다".
  * 해상도만 씬 것을 사용 (소스가 있으면 소스 해상도가 우선). 바이브/레퍼런스/조각은
  * 메인 프로세스가 DB·와일드카드에서 읽어 적용하므로 여기선 프롬프트·캐릭터·파라미터만 구성.
+ *
+ * 커스텀 확장 (NAIS2 Custom 이식):
+ * - entry(큐 반복 항목)가 있으면 캐릭터/바이브/캐릭레퍼는 메인 설정 대신 항목의 선택만 적용
+ * - 씬별 캐릭터 추가가 켜져 있으면 해당 씬의 추가 선택을 합집합으로 얹는다
  */
-function buildSceneRequest(scene: Scene): GenerationRequest {
+function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): GenerationRequest {
   const base = useGenerationStore.getState().request
   const src = useGenerationStore.getState().source
-  const characterPrompts = enabledCharacters().map((c) => ({
-    prompt: c.prompt,
-    negativePrompt: c.negativePrompt,
-    center: c.center,
-    enabled: true as const
-  }))
+  const extras = useSceneExtrasStore.getState()
+  const rawAddition = extras.additionsEnabled
+    ? extras.additions[scene.presetId]?.[scene.id]
+    : undefined
+  const add = hasAddition(rawAddition) ? rawAddition : null
+
+  // 캐릭터: 반복 항목이 있으면 항목 선택, 아니면 메인 enabled. 씬별 추가는 합집합.
+  // NAI 동시 캐릭터 한도(6)를 넘지 않게 라이브러리 순서로 자른다.
+  const charIds = new Set([
+    ...(entry ? entry.characterIds : enabledCharacters().map((c) => c.id)),
+    ...(add?.characterIds ?? [])
+  ])
+  const characterPrompts = useCharactersStore
+    .getState()
+    .items.filter((c) => charIds.has(c.id) && c.prompt.trim())
+    .slice(0, 6)
+    .map((c) => ({
+      prompt: c.prompt,
+      negativePrompt: c.negativePrompt,
+      center: c.center,
+      enabled: true as const
+    }))
+  // 포함된 캐릭터에 연결된 캐릭레퍼는 자동 적용 (커스텀)
+  const linked = linkedCharRefIds(charIds)
+
+  // 바이브/캐릭레퍼 오버라이드 — undefined면 메인이 enabled 항목을 그대로 사용
+  let vibeIds: number[] | undefined
+  let charRefIds: number[] | undefined
+  if (entry) {
+    // 반복 모드: 메인 설정 미적용, 항목 선택(+씬별 추가+연결 레퍼런스)만 — 빈 배열이면 아예 미적용
+    vibeIds = [...new Set([...entry.vibeIds, ...(add?.vibeIds ?? [])])]
+    charRefIds = [...new Set([...entry.charRefIds, ...(add?.charRefIds ?? []), ...linked])]
+  } else {
+    if (add && add.vibeIds.length > 0) {
+      const enabled = useVibesStore.getState().items.filter((v) => v.enabled).map((v) => v.id)
+      vibeIds = [...new Set([...enabled, ...add.vibeIds])]
+    }
+    if ((add && add.charRefIds.length > 0) || linked.length > 0) {
+      const enabled = useCharRefsStore.getState().items.filter((c) => c.enabled).map((c) => c.id)
+      charRefIds = [...new Set([...enabled, ...(add?.charRefIds ?? []), ...linked])]
+    }
+  }
+
   return {
     ...base,
     prompt: appendPrompt(base.prompt, scene.prompt),
@@ -113,7 +182,11 @@ function buildSceneRequest(scene: Scene): GenerationRequest {
     negativePrompt: appendPrompt(base.negativePrompt, scene.negativePrompt),
     width: src ? src.width : scene.width,
     height: src ? src.height : scene.height,
+    // 씬별 variety+ 오버라이드 (커스텀) — 켜져 있으면 강제 on, 아니면 메인 설정 따름
+    variety: scene.varietyPlus ? true : base.variety,
     characterPrompts,
+    vibeIds,
+    charRefIds,
     sceneId: scene.id,
     source: src
       ? {
@@ -126,6 +199,16 @@ function buildSceneRequest(scene: Scene): GenerationRequest {
   }
 }
 
+/** 커스텀 확장이 참조하는 스토어들이 로드됐는지 보장 (씬 생성 직전 호출) */
+async function ensureExtrasData(): Promise<void> {
+  const jobs: Promise<void>[] = []
+  if (!useSceneExtrasStore.getState().loaded) jobs.push(useSceneExtrasStore.getState().load())
+  if (!useCharactersStore.getState().loaded) jobs.push(useCharactersStore.getState().load())
+  if (!useVibesStore.getState().loaded) jobs.push(useVibesStore.getState().load())
+  if (!useCharRefsStore.getState().loaded) jobs.push(useCharRefsStore.getState().load())
+  await Promise.all(jobs)
+}
+
 export const useScenesStore = create<ScenesState>((set, get) => ({
   presets: [],
   activePresetId: 1,
@@ -133,6 +216,8 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   selectedId: null,
   editMode: false,
   selection: new Set(),
+  lastSelectedId: null,
+  trashed: [],
   columns: Number(localStorage.getItem('scene_columns')) || 3,
   cardOrientation:
     (localStorage.getItem('scene_orientation') as 'portrait' | 'landscape') || 'portrait',
@@ -193,7 +278,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     set({ selectedId, images: [], imagesTotal: 0, favoritesOnly: false })
     if (selectedId != null) void get().loadImages(selectedId, true)
   },
-  setEditMode: (editMode) => set({ editMode, selection: new Set() }),
+  setEditMode: (editMode) => set({ editMode, selection: new Set(), lastSelectedId: null }),
   setColumns: (columns) => {
     set({ columns })
     localStorage.setItem('scene_columns', String(columns))
@@ -205,10 +290,42 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   toggleSelected: (id) => {
     const next = new Set(get().selection)
     next.has(id) ? next.delete(id) : next.add(id)
-    set({ selection: next })
+    set({ selection: next, lastSelectedId: id })
+  },
+  selectRangeTo: (id) => {
+    const { scenes, lastSelectedId, selection } = get()
+    const to = scenes.findIndex((s) => s.id === id)
+    const from = lastSelectedId != null ? scenes.findIndex((s) => s.id === lastSelectedId) : -1
+    if (to < 0) return
+    if (from < 0) {
+      // 기준점 없으면 단일 선택
+      const next = new Set(selection)
+      next.add(id)
+      set({ selection: next, lastSelectedId: id })
+      return
+    }
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    const next = new Set(selection)
+    for (let i = lo; i <= hi; i++) next.add(scenes[i].id)
+    set({ selection: next, lastSelectedId: id })
   },
   selectAll: () => set({ selection: new Set(get().scenes.map((s) => s.id)) }),
-  clearSelection: () => set({ selection: new Set() }),
+  clearSelection: () => set({ selection: new Set(), lastSelectedId: null }),
+
+  loadTrash: async () => {
+    const { items } = await window.nais.invoke('scenes:trash', undefined)
+    set({ trashed: items })
+  },
+  restoreScenes: async (ids) => {
+    if (ids.length === 0) return
+    await window.nais.invoke('scenes:restore', { ids })
+    await Promise.all([get().load(), get().loadTrash()])
+  },
+  purgeScenes: async (ids) => {
+    if (ids.length === 0) return
+    await window.nais.invoke('scenes:purge', { ids })
+    await get().loadTrash()
+  },
 
   create: async (name) => {
     await window.nais.invoke('scenes:create', { presetId: get().activePresetId, name })
@@ -224,7 +341,8 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         negativePrompt: patch.negativePrompt,
         width: patch.width,
         height: patch.height,
-        reserveCount: patch.reserveCount
+        reserveCount: patch.reserveCount,
+        varietyPlus: patch.varietyPlus
       }
     })
   },
@@ -233,9 +351,13 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await get().load()
   },
   remove: async (id) => {
+    const name = get().scenes.find((s) => s.id === id)?.name ?? '씬'
     await window.nais.invoke('scenes:delete', { id })
     if (get().selectedId === id) set({ selectedId: null })
     await get().load()
+    // 소프트삭제 — 토스트 버튼 또는 Ctrl+Z로 복원 (휴지통에서도 가능)
+    toastUndo(`"${name}" 삭제됨`, () => void get().restoreScenes([id]))
+    pushUndo(`"${name}" 삭제`, () => void get().restoreScenes([id]))
   },
   reorder: async (ids) => {
     set({ scenes: ids.map((id) => get().scenes.find((s) => s.id === id)!).filter(Boolean) })
@@ -266,6 +388,48 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await window.nais.invoke('scenes:setReserveAll', { presetId: get().activePresetId, count: 0 })
   },
 
+  bulkAdjustReserve: async (delta) => {
+    const ids = new Set(get().selection)
+    if (ids.size === 0) return
+    const step = delta * (useGenerationStore.getState().batchCount || 1)
+    const next = get().scenes.map((s) =>
+      ids.has(s.id) ? { ...s, reserveCount: Math.max(0, s.reserveCount + step) } : s
+    )
+    set({ scenes: next })
+    for (const s of next) {
+      if (ids.has(s.id))
+        void window.nais.invoke('scenes:update', { id: s.id, patch: { reserveCount: s.reserveCount } })
+    }
+  },
+  bulkClearReserve: async () => {
+    const ids = new Set(get().selection)
+    if (ids.size === 0) return
+    set({
+      scenes: get().scenes.map((s) => (ids.has(s.id) ? { ...s, reserveCount: 0 } : s))
+    })
+    for (const id of ids) {
+      void window.nais.invoke('scenes:update', { id, patch: { reserveCount: 0 } })
+    }
+  },
+  bulkSetVariety: async (v) => {
+    const ids = new Set(get().selection)
+    if (ids.size === 0) return
+    set({
+      scenes: get().scenes.map((s) => (ids.has(s.id) ? { ...s, varietyPlus: v } : s))
+    })
+    for (const id of ids) {
+      void window.nais.invoke('scenes:update', { id, patch: { varietyPlus: v } })
+    }
+  },
+  bulkDuplicate: async () => {
+    // 목록 순서대로 복제 (선택 순서 아님)
+    const ids = get().scenes.filter((s) => get().selection.has(s.id)).map((s) => s.id)
+    if (ids.length === 0) return
+    for (const id of ids) await window.nais.invoke('scenes:duplicate', { id })
+    set({ selection: new Set(), lastSelectedId: null })
+    await get().load()
+  },
+
   bulkMove: async (presetId) => {
     const ids = [...get().selection]
     await window.nais.invoke('scenes:bulkMove', { ids, presetId })
@@ -274,9 +438,13 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   bulkDelete: async () => {
     const ids = [...get().selection]
+    if (ids.length === 0) return
     await window.nais.invoke('scenes:bulkDelete', { ids })
-    set({ selection: new Set() })
+    set({ selection: new Set(), lastSelectedId: null })
     await get().load()
+    // 소프트삭제 — 토스트 버튼 또는 Ctrl+Z로 전부 되살림 (휴지통에서도 가능)
+    toastUndo(`씬 ${ids.length}개 삭제됨`, () => void get().restoreScenes(ids))
+    pushUndo(`씬 ${ids.length}개 삭제`, () => void get().restoreScenes(ids))
   },
   bulkSetResolution: async (width, height) => {
     const ids = [...get().selection]
@@ -360,24 +528,45 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
 
   generateReserved: async () => {
+    await ensureExtrasData()
     const reserved = get().scenes.filter((s) => s.reserveCount > 0)
     // 예약을 큐에 넣는 즉시 예약 수는 소진(0) — 예약이란 게 "뽑을 대기열"이므로
     set({ scenes: get().scenes.map((s) => (s.reserveCount > 0 ? { ...s, reserveCount: 0 } : s)) })
     void window.nais.invoke('scenes:setReserveAll', { presetId: get().activePresetId, count: 0 })
     let offset = 0
-    for (const scene of reserved) {
-      for (let i = 0; i < scene.reserveCount; i++) {
-        await window.nais.invoke('queue:enqueue', {
-          request: { ...buildSceneRequest(scene), seed: sceneSeed(offset++) },
-          count: 1
-        })
+    // 큐 반복: 활성 항목이 있으면 항목마다 예약 전체를 반복 (항목 → 씬 순서, NAIS2 Custom과 동일)
+    const entries = enabledEntries()
+    const rounds: (SequenceEntry | null)[] = entries.length > 0 ? entries : [null]
+    // 전부 만들어 한 번에 등록 — 건별 등록 중 취소하면 뒤이어 도착하는 항목이 살아남는 문제 방지
+    const requests: GenerationRequest[] = []
+    for (const entry of rounds) {
+      for (const scene of reserved) {
+        for (let i = 0; i < scene.reserveCount; i++) {
+          requests.push({ ...buildSceneRequest(scene, entry), seed: sceneSeed(offset++) })
+        }
       }
     }
+    if (requests.length > 0) await window.nais.invoke('queue:enqueueMany', { requests })
+  },
+
+  /** 취소 시 대기 중이던 씬 항목을 예약 수로 복원 (sceneId → 개수) — cancelAll이 호출 */
+  restoreReserves: async (bySceneId) => {
+    for (const [sceneId, count] of bySceneId) {
+      const { scene } = await window.nais.invoke('scenes:get', { id: sceneId })
+      if (!scene) continue
+      await window.nais.invoke('scenes:update', {
+        id: sceneId,
+        patch: { reserveCount: scene.reserveCount + count }
+      })
+    }
+    await get().load()
   },
 
   generateOne: async (sceneId) => {
     const scene = get().scenes.find((s) => s.id === sceneId)
     if (!scene) return
+    // 즉석 1장은 큐 반복 미적용 (NAIS2 Custom의 상세 생성과 동일) — 씬별 추가는 적용
+    await ensureExtrasData()
     await window.nais.invoke('queue:enqueue', {
       request: { ...buildSceneRequest(scene), seed: sceneSeed(0) },
       count: 1

@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   ChevronDown,
   ChevronUp,
   ImageUp,
@@ -26,6 +27,7 @@ import { CharacterOverlay } from './character-overlay'
 import { FragmentOverlay } from './fragment-overlay'
 import { ParamsDialog } from './params-dialog'
 import { RefOverlay } from './ref-overlay'
+import { TagExplorer } from './tag-explorer'
 import { SOURCE_BANNER_HEIGHT, SourceBanner } from './source-banner'
 import { Button } from './ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
@@ -55,6 +57,7 @@ export function PromptPanel(): React.JSX.Element {
   const enabledCrefs = useCharRefsStore((s) => s.items.filter((c) => c.enabled).length)
   const source = useGenerationStore((s) => s.source)
   const [paramsOpen, setParamsOpen] = useState(false)
+  const [tagExplorerOpen, setTagExplorerOpen] = useState(false)
 
   useEffect(() => {
     const openParams = (): void => setParamsOpen((v) => !v)
@@ -235,6 +238,14 @@ export function PromptPanel(): React.JSX.Element {
             action={
               <div className="flex items-center gap-1">
                 {promptSplitEnabled && <TokenBadge tokens={tokenTotals.pos} />}
+                {/* 태그 탐색기 (커스텀) — 카테고리별 태그 둘러보기 */}
+                <button
+                  className="grid size-5 place-items-center rounded text-faint transition-colors hover:text-ink"
+                  title="태그 탐색기 — 카테고리별 태그 둘러보기"
+                  onClick={() => setTagExplorerOpen(true)}
+                >
+                  <BookOpen size={13} />
+                </button>
                 <SyntaxHelp />
               </div>
             }
@@ -405,6 +416,7 @@ export function PromptPanel(): React.JSX.Element {
       </div>
 
       <ParamsDialog open={paramsOpen} onOpenChange={setParamsOpen} />
+      <TagExplorer open={tagExplorerOpen} onOpenChange={setTagExplorerOpen} />
     </aside>
   )
 }

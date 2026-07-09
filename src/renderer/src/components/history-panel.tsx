@@ -78,11 +78,11 @@ export function HistoryPanel(): React.JSX.Element {
                     <img
                       src={`data:image/webp;base64,${item.thumbnail}`}
                       className="size-full object-cover"
-                      // 프리뷰로 드래그해서 메타데이터 열기
+                      // OS 네이티브 드래그 — 탐색기로 끌어 저장 + 프리뷰에 놓으면 메타데이터 (NAIS2 기능)
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData('nais/file-path', item.filePath)
-                        e.dataTransfer.effectAllowed = 'copy'
+                        e.preventDefault()
+                        void window.nais.invoke('images:startDrag', { filePath: item.filePath })
                       }}
                       alt=""
                     />

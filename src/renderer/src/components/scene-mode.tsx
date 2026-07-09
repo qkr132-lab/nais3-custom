@@ -15,8 +15,13 @@ import {
   Plus,
   RectangleHorizontal,
   RectangleVertical,
+  RotateCcw,
+  SlidersHorizontal,
+  Sparkles,
   Star,
-  Trash2
+  Trash2,
+  UserPlus,
+  Users
 } from 'lucide-react'
 import {
   closestCenter,
@@ -35,27 +40,33 @@ import type { Scene } from '@shared/types'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
+import { useSceneExtrasStore, hasAddition } from '../stores/scene-extras-store'
 import { useResolutionsStore } from '../stores/resolutions-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { ResolutionPicker } from './resolution-picker'
 import { SceneDetail } from './scene-detail'
+import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
 import { Button } from './ui/button'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { Switch } from './ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 export function SceneMode(): React.JSX.Element {
   const scenes = useScenesStore((s) => s.scenes)
   const selectedId = useScenesStore((s) => s.selectedId)
   const loadPresets = useScenesStore((s) => s.loadPresets)
+  const loadExtras = useSceneExtrasStore((s) => s.load)
 
   useEffect(() => {
     void loadPresets()
-  }, [loadPresets])
+    void loadExtras()
+  }, [loadPresets, loadExtras])
 
   const selected = scenes.find((s) => s.id === selectedId) ?? null
   if (selected) return <SceneDetail scene={selected} />
@@ -213,6 +224,16 @@ function SceneGrid(): React.JSX.Element {
   const clearReserveAll = useScenesStore((s) => s.clearReserveAll)
   const reorder = useScenesStore((s) => s.reorder)
 
+  // 커스텀 확장 (NAIS2 Custom): 큐 반복 / 씬별 캐릭터 추가
+  const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
+  const setSequenceEnabled = useSceneExtrasStore((s) => s.setSequenceEnabled)
+  const activeEntryCount = useSceneExtrasStore((s) => s.entries.filter((e) => e.enabled).length)
+  const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
+  const setAdditionsEnabled = useSceneExtrasStore((s) => s.setAdditionsEnabled)
+  const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [additionSceneIds, setAdditionSceneIds] = useState<number[] | null>(null)
+
   // 스크롤 위치 복원 — 마운트 직후 + 씬 목록이 늦게 로드된 경우 한 번 더
   const scrollRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -297,6 +318,59 @@ function SceneGrid(): React.JSX.Element {
           active={editMode}
           onClick={() => setEditMode(!editMode)}
         />
+        {/* 휴지통 — 삭제한 씬 복원 (커스텀) */}
+        <IconBtn
+          icon={<Trash2 size={16} />}
+          tip="휴지통 — 삭제한 씬 복원"
+          onClick={() => {
+            void useScenesStore.getState().loadTrash()
+            setTrashOpen(true)
+          }}
+        />
+        <div className="mx-1 h-5 w-px bg-line" />
+
+        {/* 큐 반복: 캐릭터/레퍼런스 조합을 바꿔가며 예약 전체 반복 (NAIS2 Custom) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={cn(
+                'flex h-8 items-center gap-1.5 rounded-md border px-2 transition-colors',
+                sequenceEnabled ? 'border-accent/50 bg-accent/10' : 'border-line'
+              )}
+            >
+              <Users size={14} className={sequenceEnabled ? 'text-accent' : 'text-muted'} />
+              <Switch checked={sequenceEnabled} onCheckedChange={setSequenceEnabled} />
+              <button
+                className="grid size-6 place-items-center rounded text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                onClick={() => setSequenceDialogOpen(true)}
+              >
+                <SlidersHorizontal size={13} />
+              </button>
+              {activeEntryCount > 0 && (
+                <span className="grid h-4 min-w-4 place-items-center rounded-full bg-accent/15 px-1 text-[10px] font-semibold text-accent">
+                  {activeEntryCount}
+                </span>
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>캐릭터/레퍼런스 큐 반복</TooltipContent>
+        </Tooltip>
+
+        {/* 씬별 캐릭터 추가 (NAIS2 Custom) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={cn(
+                'flex h-8 items-center gap-1.5 rounded-md border px-2 transition-colors',
+                additionsEnabled ? 'border-accent/50 bg-accent/10' : 'border-line'
+              )}
+            >
+              <UserPlus size={14} className={additionsEnabled ? 'text-accent' : 'text-muted'} />
+              <Switch checked={additionsEnabled} onCheckedChange={setAdditionsEnabled} />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>씬별 캐릭터 추가</TooltipContent>
+        </Tooltip>
 
         <div className="flex-1" />
 
@@ -336,7 +410,7 @@ function SceneGrid(): React.JSX.Element {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
-            <BulkBar />
+            <BulkBar onOpenAddition={setAdditionSceneIds} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -367,6 +441,7 @@ function SceneGrid(): React.JSX.Element {
                   scene={scene}
                   live={scene.id === generatingSceneId ? previewPng : null}
                   generating={scene.id === generatingSceneId}
+                  onOpenAddition={setAdditionSceneIds}
                 />
               ))}
               <button
@@ -413,12 +488,32 @@ function SceneGrid(): React.JSX.Element {
           </p>
         )}
       </div>
+
+      {/* 커스텀 확장 다이얼로그 (NAIS2 Custom) */}
+      <SequenceDialog open={sequenceDialogOpen} onOpenChange={setSequenceDialogOpen} />
+      <SceneTrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
+      <AdditionDialog
+        presetId={activePresetId}
+        sceneIds={additionSceneIds}
+        sceneName={
+          additionSceneIds && additionSceneIds.length === 1
+            ? (scenes.find((s) => s.id === additionSceneIds[0])?.name ?? '')
+            : additionSceneIds
+              ? `씬 ${additionSceneIds.length}개`
+              : ''
+        }
+        onClose={() => setAdditionSceneIds(null)}
+      />
     </div>
   )
 }
 
 /** 편집 모드 일괄 작업 바 */
-function BulkBar(): React.JSX.Element {
+function BulkBar({
+  onOpenAddition
+}: {
+  onOpenAddition: (sceneIds: number[]) => void
+}): React.JSX.Element {
   const selection = useScenesStore((s) => s.selection)
   const presets = useScenesStore((s) => s.presets)
   const activePresetId = useScenesStore((s) => s.activePresetId)
@@ -426,6 +521,10 @@ function BulkBar(): React.JSX.Element {
   const clearSelection = useScenesStore((s) => s.clearSelection)
   const bulkMove = useScenesStore((s) => s.bulkMove)
   const bulkDelete = useScenesStore((s) => s.bulkDelete)
+  const bulkAdjustReserve = useScenesStore((s) => s.bulkAdjustReserve)
+  const bulkClearReserve = useScenesStore((s) => s.bulkClearReserve)
+  const bulkSetVariety = useScenesStore((s) => s.bulkSetVariety)
+  const bulkDuplicate = useScenesStore((s) => s.bulkDuplicate)
   const bulkSetResolution = useScenesStore((s) => s.bulkSetResolution)
   const customResolutions = useResolutionsStore((s) => s.custom)
   const bulkClearFavorites = useScenesStore((s) => s.bulkClearFavorites)
@@ -443,6 +542,38 @@ function BulkBar(): React.JSX.Element {
       </Button>
       <Button size="sm" variant="ghost" onClick={clearSelection} disabled={disabled}>
         해제
+      </Button>
+      <div className="mx-1 h-4 w-px bg-line" />
+
+      {/* 선택 예약 (커스텀) — 누를 때마다 선택 씬들만 배치 수 단위로 증감 */}
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkAdjustReserve(1)}>
+        <CalendarPlus size={13} /> 예약 +
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkAdjustReserve(-1)}>
+        <Minus size={13} /> 예약 −
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkClearReserve()}>
+        <CalendarX size={13} /> 예약 취소
+      </Button>
+      {/* 씬별 variety+ 일괄 (커스텀) */}
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkSetVariety(true)}>
+        <Sparkles size={13} /> V+ 적용
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkSetVariety(false)}>
+        V+ 해제
+      </Button>
+      {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => onOpenAddition([...selection])}
+      >
+        <UserPlus size={13} /> 씬별 캐릭터
+      </Button>
+      {/* 일괄 복제 (커스텀) */}
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void bulkDuplicate()}>
+        <Copy size={13} /> 복제
       </Button>
       <div className="mx-1 h-4 w-px bg-line" />
 
@@ -550,22 +681,43 @@ function dndStyle(sortable: ReturnType<typeof useSortable>): CSSProperties {
 const SceneCard = memo(function SceneCard({
   scene,
   live,
-  generating
+  generating,
+  onOpenAddition
 }: {
   scene: Scene
   live: string | null
   generating: boolean
+  onOpenAddition: (sceneIds: number[]) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
   const selection = useScenesStore((s) => s.selection)
   const toggleSelected = useScenesStore((s) => s.toggleSelected)
+  const selectRangeTo = useScenesStore((s) => s.selectRangeTo)
   const select = useScenesStore((s) => s.select)
   const update = useScenesStore((s) => s.update)
   const duplicate = useScenesStore((s) => s.duplicate)
   const remove = useScenesStore((s) => s.remove)
   const adjustReserve = useScenesStore((s) => s.adjustReserve)
   const sortable = useSortable({ id: `scene-${scene.id}` })
+
+  // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지
+  const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
+  const addition = useSceneExtrasStore((s) => s.additions[scene.presetId]?.[scene.id])
+  const additionCount = hasAddition(addition)
+    ? addition.characterIds.length + addition.charRefIds.length + addition.vibeIds.length
+    : 0
+
+  // 생성 중 이 씬의 남은 개수 (메인 큐 pending+generating) — NAIS2처럼 배지가 줄어들며 표시.
+  // 큐 반복 사용 시 항목×예약 전체가 반영된다.
+  const queueRemaining = useGenerationStore(
+    (s) =>
+      s.queue?.items.filter(
+        (i) =>
+          (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
+      ).length ?? 0
+  )
+  const badgeCount = scene.reserveCount + queueRemaining
 
   const checked = selection.has(scene.id)
   // 이미지 우선순위: 생성 중 스트리밍 > 저장 썸네일(가벼움, 드래그 렉 방지) > 원본 > 없음.
@@ -611,7 +763,13 @@ const SceneCard = memo(function SceneCard({
         sortable.isDragging && 'shadow-xl'
       )}
       style={{ aspectRatio: CARD_ASPECT[cardOrientation], ...dndStyle(sortable) }}
-      onClick={() => (editMode ? toggleSelected(scene.id) : select(scene.id))}
+      onClick={(e) =>
+        editMode
+          ? e.shiftKey
+            ? selectRangeTo(scene.id) // Shift+클릭: 기준점부터 범위 선택 (커스텀)
+            : toggleSelected(scene.id)
+          : select(scene.id)
+      }
     >
       {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
       {src ? (
@@ -629,11 +787,46 @@ const SceneCard = memo(function SceneCard({
         </div>
       )}
 
-      {/* 예약 수 — 좌측 상단 붉은 원 */}
-      {scene.reserveCount > 0 && (
+      {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
+      {badgeCount > 0 && (
         <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
-          {scene.reserveCount}
+          {badgeCount}
         </span>
+      )}
+
+      {/* 씬별 variety+ 적용 표시 (커스텀) */}
+      {scene.varietyPlus && (
+        <span
+          className={cn(
+            'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
+            badgeCount > 0 ? 'left-9' : 'left-1.5'
+          )}
+          title="이 씬은 Variety+가 적용됩니다"
+        >
+          <Sparkles size={10} /> V+
+        </span>
+      )}
+
+      {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
+      {additionsEnabled && !editMode && (
+        <button
+          className={cn(
+            'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
+            badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
+            additionCount > 0
+              ? 'bg-accent text-white hover:bg-accent/85'
+              : 'bg-black/60 text-white/90 hover:bg-black/80'
+          )}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenAddition([scene.id])
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
+        >
+          <UserPlus size={14} />
+          {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
+        </button>
       )}
 
       {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
@@ -719,6 +912,17 @@ const SceneCard = memo(function SceneCard({
       <ContextMenuItem onSelect={() => void openFolder()}>
         <FolderOpen size={13} className="text-amber-400" /> 폴더 열기
       </ContextMenuItem>
+      {additionsEnabled && (
+        <ContextMenuItem onSelect={() => onOpenAddition([scene.id])}>
+          <UserPlus size={13} /> 씬별 캐릭터 추가
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem
+        onSelect={() => void update(scene.id, { varietyPlus: !scene.varietyPlus })}
+      >
+        <Sparkles size={13} className={scene.varietyPlus ? 'text-violet-400' : undefined} />
+        Variety+ {scene.varietyPlus ? '끄기' : '켜기'}
+      </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem danger onSelect={() => void removeScene()}>
         <Trash2 size={13} /> 삭제
@@ -750,5 +954,146 @@ function MenuItem({
       {icon}
       {label}
     </button>
+  )
+}
+
+/** 씬 휴지통 — 삭제한 씬을 되살리거나 영구 삭제 (커스텀). 보관 기간은 설정 가능 */
+function SceneTrashDialog({
+  open,
+  onOpenChange
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}): React.JSX.Element {
+  const trashed = useScenesStore((s) => s.trashed)
+  const restoreScenes = useScenesStore((s) => s.restoreScenes)
+  const purgeScenes = useScenesStore((s) => s.purgeScenes)
+  const [retention, setRetention] = useState('30')
+
+  useEffect(() => {
+    if (!open) return
+    void window.nais.invoke('settings:get', { key: 'trash_retention_days' }).then(({ value }) => {
+      if (value) setRetention(value)
+    })
+  }, [open])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[82vh] max-w-[720px] flex-col">
+        <div className="border-b border-line px-4 py-3">
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 size={15} /> 휴지통
+          </DialogTitle>
+          <DialogDescription className="mt-0.5">
+            삭제한 씬을 되살릴 수 있습니다.
+            {retention === '0' ? ' 자동 삭제 없이 계속 보관합니다.' : ` ${retention}일이 지나면 자동으로 영구 삭제됩니다.`}
+          </DialogDescription>
+        </div>
+        {/* 보관 기간 설정 (커스텀) */}
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <span className="text-[12px] text-muted">보관 기간</span>
+          <Select
+            value={retention}
+            onValueChange={(v) => {
+              setRetention(v)
+              void window.nais.invoke('settings:set', { key: 'trash_retention_days', value: v })
+            }}
+          >
+            <SelectTrigger className="h-7 w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">7일</SelectItem>
+              <SelectItem value="30">30일</SelectItem>
+              <SelectItem value="90">90일</SelectItem>
+              <SelectItem value="0">무제한</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {trashed.length === 0 ? (
+            <p className="py-10 text-center text-[13px] text-faint">휴지통이 비어 있습니다</p>
+          ) : (
+            <div className="space-y-1.5">
+              {trashed.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 p-2"
+                >
+                  <div className="size-12 shrink-0 overflow-hidden rounded-md bg-paper">
+                    {s.thumbnail ? (
+                      <img
+                        src={`data:image/webp;base64,${s.thumbnail}`}
+                        className="h-full w-full object-cover"
+                        alt=""
+                      />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center text-faint">
+                        <ImageOff size={16} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-ink">{s.name}</div>
+                    <div className="truncate text-[11px] text-faint">
+                      {s.presetName && `${s.presetName} · `}
+                      이미지 {s.imageCount}장
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => void restoreScenes([s.id])}>
+                    <RotateCcw size={13} /> 복원
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-danger"
+                    onClick={async () => {
+                      if (
+                        await askConfirm('영구 삭제', {
+                          message: `"${s.name}"을(를) 영구 삭제합니다. 이미지 파일은 OS 휴지통으로 이동합니다.`,
+                          confirmLabel: '영구 삭제',
+                          danger: true
+                        })
+                      )
+                        void purgeScenes([s.id])
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {trashed.length > 0 && (
+          <div className="flex justify-end gap-2 border-t border-line px-4 py-2.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void restoreScenes(trashed.map((s) => s.id))}
+            >
+              <RotateCcw size={13} /> 전체 복원
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-danger"
+              onClick={async () => {
+                if (
+                  await askConfirm('휴지통 비우기', {
+                    message: `휴지통의 씬 ${trashed.length}개를 영구 삭제합니다. 이미지 파일은 OS 휴지통으로 이동합니다.`,
+                    confirmLabel: '비우기',
+                    danger: true
+                  })
+                )
+                  void purgeScenes(trashed.map((s) => s.id))
+              }}
+            >
+              <Trash2 size={13} /> 휴지통 비우기
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

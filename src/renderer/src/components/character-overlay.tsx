@@ -4,6 +4,7 @@ import {
   FolderPlus,
   ImageOff,
   ImagePlus,
+  Link2,
   Pencil,
   Plus,
   Search,
@@ -17,14 +18,18 @@ import type { CharacterCard } from '@shared/types'
 import { cn } from '../lib/utils'
 import { buildDisplayRows } from '../lib/folder-list'
 import { useCharactersStore, MAX_CHARACTERS } from '../stores/characters-store'
+import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
 
 /** NAI 웹의 5×5 수동 배치 그리드 (실캡처: 0.1~0.9) */
@@ -162,6 +167,8 @@ export function CharacterOverlay(): React.JSX.Element {
       >
         {char.name || char.prompt.slice(0, 40) || <span className="text-faint">빈 캐릭터</span>}
       </button>
+      {/* 연결된 캐릭레퍼 표시 (커스텀) — 이 캐릭터가 포함되면 레퍼런스도 자동 적용 */}
+      <LinkedRefBadge charRefId={char.charRefId} onHover={showPreview} onLeave={() => setHoverPreview(null)} />
       {useCoords && char.enabled && (
         <Popover>
           <PopoverTrigger asChild>
@@ -235,6 +242,8 @@ export function CharacterOverlay(): React.JSX.Element {
         placeholder="캐릭터 네거티브"
         onValueChange={(v) => updateCard(char.id, { negativePrompt: v })}
       />
+      {/* 캐릭레퍼 연결 (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */}
+      <RefLinkRow char={char} onLink={(refId) => updateCard(char.id, { charRefId: refId })} />
     </div>
   )
 
@@ -374,5 +383,286 @@ export function CharacterOverlay(): React.JSX.Element {
           document.body
         )}
     </div>
+  )
+}
+
+/** 헤더의 연결 레퍼런스 미니 표시 (커스텀) */
+function LinkedRefBadge({
+  charRefId,
+  onHover,
+  onLeave
+}: {
+  charRefId: number | null
+  onHover: (e: React.MouseEvent, src: string) => void
+  onLeave: () => void
+}): React.JSX.Element | null {
+  const ref = useCharRefsStore((s) =>
+    charRefId != null ? s.items.find((c) => c.id === charRefId) : undefined
+  )
+  if (!ref) return null
+  return (
+    <span className="relative shrink-0" title={`연결된 레퍼런스: ${ref.name || '이름 없음'}`}>
+      {ref.thumbnail ? (
+        <img
+          src={`data:image/webp;base64,${ref.thumbnail}`}
+          className="size-7 rounded-md border border-accent/50 object-cover"
+          alt=""
+          onMouseEnter={(e) => onHover(e, ref.thumbnail)}
+          onMouseLeave={onLeave}
+        />
+      ) : (
+        <span className="grid size-7 place-items-center rounded-md border border-accent/50 bg-surface-2">
+          <Link2 size={12} className="text-accent" />
+        </span>
+      )}
+      <Link2
+        size={9}
+        className="absolute -bottom-1 -right-1 rounded-full bg-accent p-px text-white"
+      />
+    </span>
+  )
+}
+
+/** 캐릭레퍼 유형 한글 라벨 (NAI 웹과 동일 항목) */
+const REF_TYPE_LABELS: { value: string; label: string }[] = [
+  { value: 'character', label: '캐릭터' },
+  { value: 'style', label: '스타일' },
+  { value: 'character&style', label: '캐릭터+스타일' },
+  { value: 'costume', label: '의상' },
+  { value: 'delta', label: '델타' }
+]
+
+/** 캐릭레퍼 연결 행 (커스텀) — 카드 확장 영역 하단. 클릭하면 큰 연결 창이 열린다 */
+function RefLinkRow({
+  char,
+  onLink
+}: {
+  char: CharacterCard
+  onLink: (refId: number | null) => void
+}): React.JSX.Element {
+  const refs = useCharRefsStore((s) => s.items)
+  const linked = char.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const typeLabel = linked
+    ? (REF_TYPE_LABELS.find((t) => t.value === linked.refType)?.label ?? linked.refType)
+    : ''
+
+  return (
+    <>
+      <button
+        className="flex w-full items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5 text-left transition-colors hover:bg-surface-2/70"
+        onClick={() => setDialogOpen(true)}
+        title="클릭하면 레퍼런스 연결 창이 열립니다"
+      >
+        <Link2 size={13} className={linked ? 'text-accent' : 'text-muted'} />
+        <span className="text-[12px] text-muted">레퍼런스 연결</span>
+        <div className="flex-1" />
+        {linked ? (
+          <>
+            <span className="truncate text-[11px] text-muted">
+              {typeLabel} · 강도 {linked.strength.toFixed(2)} · 충실도 {linked.fidelity.toFixed(2)}
+            </span>
+            {linked.thumbnail && (
+              <img
+                src={`data:image/webp;base64,${linked.thumbnail}`}
+                className="size-8 shrink-0 rounded-md object-cover"
+                alt=""
+              />
+            )}
+          </>
+        ) : (
+          <span className="text-[11px] text-faint">없음 — 클릭해서 선택</span>
+        )}
+      </button>
+      <CharRefLinkDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        char={char}
+        onLink={onLink}
+      />
+    </>
+  )
+}
+
+/** 레퍼런스 연결 전용 대형 창 (커스텀) — 큰 그리드로 고르고, 우측 패널에서 유형/게이지 조절 */
+function CharRefLinkDialog({
+  open,
+  onOpenChange,
+  char,
+  onLink
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  char: CharacterCard
+  onLink: (refId: number | null) => void
+}): React.JSX.Element {
+  const refs = useCharRefsStore((s) => s.items)
+  const update = useCharRefsStore((s) => s.update)
+  const linked = char.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
+
+  /** 파일 선택 → 라이브러리에 추가 → 전역 적용은 끄고 이 캐릭터에 연결 */
+  const addFromFile = async (): Promise<void> => {
+    const before = new Set(useCharRefsStore.getState().items.map((r) => r.id))
+    const { count } = await window.nais.invoke('crefs:add', { folderId: null })
+    if (count === 0) return
+    await useCharRefsStore.getState().load()
+    const added = useCharRefsStore.getState().items.filter((r) => !before.has(r.id))
+    const target = added[added.length - 1]
+    if (target) {
+      // 연결 전용 — 전역 enabled를 꺼서 이 캐릭터가 포함될 때만 적용되게
+      useCharRefsStore.getState().update(target.id, { enabled: false })
+      onLink(target.id)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[80vh] max-h-[86vh] max-w-[960px] flex-col">
+        <div className="border-b border-line px-4 py-3">
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 size={15} /> 레퍼런스 연결
+            {char.name ? ` — ${char.name}` : ''}
+          </DialogTitle>
+          <DialogDescription className="mt-0.5">
+            이 캐릭터가 생성에 포함되면 연결된 레퍼런스가 자동으로 함께 적용됩니다.
+          </DialogDescription>
+        </div>
+        <div className="flex min-h-0 flex-1">
+          {/* 좌: 라이브러리 그리드 (크게) */}
+          <div className="flex min-w-0 flex-1 flex-col border-r border-line">
+            <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+              <Button size="sm" className="gap-1.5" onClick={() => void addFromFile()}>
+                <ImagePlus size={13} /> 내 파일에서 추가
+              </Button>
+              <span className="text-[11.5px] text-faint">
+                추가한 이미지는 자동으로 이 캐릭터에 연결됩니다
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {refs.length === 0 ? (
+                <p className="py-12 text-center text-[13px] text-faint">
+                  라이브러리가 비어 있습니다 — 위 버튼으로 이미지를 추가하세요
+                </p>
+              ) : (
+                <div className="grid grid-cols-4 gap-2.5">
+                  {refs.map((r) => (
+                    <button
+                      key={r.id}
+                      className={cn(
+                        'group relative aspect-square overflow-hidden rounded-lg border transition',
+                        r.id === char.charRefId
+                          ? 'border-accent ring-2 ring-accent/40'
+                          : 'border-line opacity-75 hover:opacity-100 hover:border-accent/50'
+                      )}
+                      title={r.name}
+                      onClick={() => onLink(r.id === char.charRefId ? null : r.id)}
+                    >
+                      {r.thumbnail ? (
+                        <img
+                          src={`data:image/webp;base64,${r.thumbnail}`}
+                          className="h-full w-full object-cover"
+                          alt=""
+                        />
+                      ) : (
+                        <span className="grid h-full w-full place-items-center bg-surface-2 text-faint">
+                          <UserRound size={20} />
+                        </span>
+                      )}
+                      {r.name && (
+                        <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-4 text-left text-[11px] text-white">
+                          {r.name}
+                        </span>
+                      )}
+                      {r.id === char.charRefId && (
+                        <span className="absolute right-1.5 top-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          연결됨
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 우: 연결된 레퍼런스 미리보기 + NAI 옵션 */}
+          <div className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto p-3.5">
+            {linked ? (
+              <>
+                <div className="overflow-hidden rounded-lg border border-line bg-paper">
+                  {linked.thumbnail ? (
+                    <img
+                      src={`data:image/webp;base64,${linked.thumbnail}`}
+                      className="max-h-64 w-full object-contain"
+                      alt=""
+                    />
+                  ) : (
+                    <div className="grid h-40 place-items-center text-faint">
+                      <UserRound size={28} />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[12px] font-medium text-muted">유형</p>
+                  <Select value={linked.refType} onValueChange={(v) => update(linked.id, { refType: v })}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REF_TYPE_LABELS.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[12px] font-medium text-muted">
+                    강도 <span className="font-mono text-ink">{linked.strength.toFixed(2)}</span>
+                  </p>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[linked.strength]}
+                    onValueChange={([v]) =>
+                      update(linked.id, { strength: Math.round(v * 100) / 100 })
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[12px] font-medium text-muted">
+                    충실도 <span className="font-mono text-ink">{linked.fidelity.toFixed(2)}</span>
+                  </p>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[linked.fidelity]}
+                    onValueChange={([v]) =>
+                      update(linked.id, { fidelity: Math.round(v * 100) / 100 })
+                    }
+                  />
+                </div>
+                <div className="flex-1" />
+                <Button
+                  variant="ghost"
+                  className="w-full gap-1.5 text-danger"
+                  onClick={() => onLink(null)}
+                >
+                  <X size={14} /> 연결 해제
+                </Button>
+              </>
+            ) : (
+              <p className="py-12 text-center text-[12.5px] leading-relaxed text-faint">
+                왼쪽에서 레퍼런스를 클릭해
+                <br />이 캐릭터에 연결하세요
+              </p>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

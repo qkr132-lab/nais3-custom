@@ -87,6 +87,12 @@ export function PreviewPane(): React.JSX.Element {
         }
         const file = e.dataTransfer.files?.[0]
         if (!file?.type.startsWith('image/')) return
+        // 로컬 파일이면 경로로 (webp 등 DB 메타데이터 조회 가능) — 히스토리 네이티브 드래그 포함
+        const localPath = window.nais.pathForFile(file)
+        if (localPath) {
+          void showMeta({ filePath: localPath })
+          return
+        }
         const reader = new FileReader()
         reader.onload = (ev) => {
           const base64 = (ev.target?.result as string) ?? ''
@@ -105,7 +111,12 @@ export function PreviewPane(): React.JSX.Element {
             <img
               src={src}
               className="h-full w-full rounded-md object-contain"
-              draggable={false}
+              // 탐색기/타 앱으로 끌어 저장 (NAIS2 기능)
+              draggable
+              onDragStart={(e) => {
+                e.preventDefault()
+                void window.nais.invoke('images:startDrag', { filePath: viewingFilePath })
+              }}
               // 파일이 밖에서 지워진 경우 깨진 이미지 대신 빈 상태로 (B8)
               onError={() => view(null)}
               alt=""

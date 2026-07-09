@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Palette,
   RotateCcw,
+  Save,
   Trash2,
   Upload
 } from 'lucide-react'
@@ -26,7 +27,7 @@ import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { usePromptPresetsStore } from '../stores/prompt-presets-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { useUpdateStore } from '../stores/update-store'
-import { askConfirm } from '../stores/dialog-store'
+import { askConfirm, getConfirmsDisabled, setConfirmsDisabled } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import {
   SHORTCUT_LABELS,
@@ -141,6 +142,13 @@ function GenerationSection(): React.JSX.Element {
   const [delay, setDelay] = useState(600)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const setPromptSplitEnabled = useGenerationStore((s) => s.setPromptSplitEnabled)
+  // 확인 창 전역 끄기 (커스텀)
+  const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
+  const confirmsOff = confirmsOffState
+  const setConfirmsOff = (v: boolean): void => {
+    setConfirmsOffState(v)
+    setConfirmsDisabled(v)
+  }
 
   useEffect(() => {
     void window.nais.invoke('settings:get', { key: 'gen_streaming' }).then(({ value }) => {
@@ -175,6 +183,9 @@ function GenerationSection(): React.JSX.Element {
           onValueChange={([v]) => setDelay(v)}
           onValueCommit={([v]) => void window.nais.invoke('gen:setDelay', { ms: v })}
         />
+      </Row>
+      <Row label="확인 창 끄기" hint="삭제 등 '정말 하시겠어요?' 확인을 건너뜀 (주의)">
+        <Switch checked={confirmsOff} onCheckedChange={setConfirmsOff} />
       </Row>
     </div>
   )
@@ -310,6 +321,88 @@ function StorageSection(): React.JSX.Element {
         <p className="text-[13px] text-ink">데이터 백업</p>
         <p className="mt-0.5 text-[11.5px] text-faint">라이브러리 전체 JSON (NAIS2 백업 호환)</p>
         <BackupButtons />
+      </div>
+
+      <AutoBackupSection />
+    </div>
+  )
+}
+
+/** 자동 DB 백업 섹션 (커스텀) — 사용량 표시 + 용량 상한 설정 */
+function AutoBackupSection(): React.JSX.Element {
+  const [info, setInfo] = useState<{ count: number; totalBytes: number }>({
+    count: 0,
+    totalBytes: 0
+  })
+  const [maxMb, setMaxMb] = useState('512')
+
+  const refresh = (): void => {
+    void window.nais.invoke('backup:info', undefined).then(setInfo)
+  }
+  useEffect(() => {
+    refresh()
+    void window.nais.invoke('settings:get', { key: 'backup_max_mb' }).then(({ value }) => {
+      if (value) setMaxMb(value)
+    })
+  }, [])
+
+  const usedLabel =
+    info.totalBytes >= 1024 * 1024 * 1024
+      ? `${(info.totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+      : `${Math.round(info.totalBytes / (1024 * 1024))} MB`
+
+  return (
+    <div className="mt-1 border-t border-line pt-3">
+      <p className="text-[13px] text-ink">자동 백업</p>
+      <p className="mt-0.5 text-[11.5px] text-faint">
+        앱을 켤 때마다 하루 1회 전체 DB를 자동 백업합니다. 아래 용량 상한을 넘으면 오래된
+        백업부터 자동 삭제돼요 (최신 3개는 항상 보존). 복원은 백업 폴더의 .db를 nais3.db 위치에
+        덮어쓰면 됩니다.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <span className="text-[12px] text-muted">
+          현재 <span className="font-medium text-ink">{info.count}개 · {usedLabel}</span>
+        </span>
+        <div className="flex-1" />
+        <span className="text-[12px] text-muted">최대 용량</span>
+        <Select
+          value={maxMb}
+          onValueChange={(v) => {
+            setMaxMb(v)
+            void window.nais.invoke('settings:set', { key: 'backup_max_mb', value: v })
+          }}
+        >
+          <SelectTrigger className="h-7 w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="100">100 MB</SelectItem>
+            <SelectItem value="512">512 MB</SelectItem>
+            <SelectItem value="1024">1 GB</SelectItem>
+            <SelectItem value="2048">2 GB</SelectItem>
+            <SelectItem value="0">무제한</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <Button
+          variant="default"
+          className="gap-1.5"
+          onClick={async () => {
+            await window.nais.invoke('backup:now', undefined)
+            toast('백업 스냅샷 생성됨', 'success')
+            refresh()
+          }}
+        >
+          <Save size={14} /> 지금 백업
+        </Button>
+        <Button
+          variant="default"
+          className="gap-1.5"
+          onClick={() => void window.nais.invoke('backup:openFolder', undefined)}
+        >
+          <FolderOpen size={14} /> 백업 폴더 열기
+        </Button>
       </div>
     </div>
   )

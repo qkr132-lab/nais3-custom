@@ -228,8 +228,9 @@ export function deleteRefFolder(kind: Kind, id: number): void {
   })()
 }
 
-/** 생성 시 사용할 enabled 항목들의 원본 데이터 */
-export function enabledVibeRows(): {
+/** 생성 시 사용할 enabled 항목들의 원본 데이터.
+ *  ids 지정 시 enabled 무시하고 해당 id들만 (씬 큐 반복/씬별 추가 오버라이드) */
+export function enabledVibeRows(ids?: number[]): {
   id: number
   filePath: string
   strength: number
@@ -237,13 +238,16 @@ export function enabledVibeRows(): {
   encoded: string | null
   encodedIe: number | null
 }[] {
+  const where = ids
+    ? `id IN (${ids.map(() => '?').join(',') || 'NULL'})`
+    : 'enabled = 1'
   return (
     getDb()
       .prepare(
         `SELECT id, file_path, strength, info_extracted, encoded, encoded_ie
-         FROM vibe_images WHERE enabled = 1 ORDER BY sort_order, id`
+         FROM vibe_images WHERE ${where} ORDER BY sort_order, id`
       )
-      .all() as {
+      .all(...(ids ?? [])) as {
       id: number
       file_path: string
       strength: number
@@ -267,18 +271,21 @@ export function saveVibeEncoding(id: number, encoded: string, ie: number): void 
     .run(encoded, ie, id)
 }
 
-export function enabledCharRefRows(): {
+export function enabledCharRefRows(ids?: number[]): {
   filePath: string
   refType: string
   strength: number
   fidelity: number
 }[] {
+  const where = ids
+    ? `id IN (${ids.map(() => '?').join(',') || 'NULL'})`
+    : 'enabled = 1'
   const rows = getDb()
     .prepare(
       `SELECT file_path, ref_type, strength, fidelity
-       FROM charref_images WHERE enabled = 1 ORDER BY sort_order, id`
+       FROM charref_images WHERE ${where} ORDER BY sort_order, id`
     )
-    .all() as { file_path: string; ref_type: string; strength: number; fidelity: number }[]
+    .all(...(ids ?? [])) as { file_path: string; ref_type: string; strength: number; fidelity: number }[]
   return rows.map((r) => ({
     filePath: r.file_path,
     refType: r.ref_type,
