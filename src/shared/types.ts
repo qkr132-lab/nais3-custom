@@ -596,6 +596,50 @@ export interface IpcInvokeMap {
   'crefs:folderCollapse': { req: { id: number; collapsed: boolean }; res: void }
   'crefs:folderColor': { req: { id: number; color: string | null }; res: void }
   'crefs:folderDelete': { req: { id: number }; res: void }
+  // ── Cloudflare R2 업로드 (커스텀) — 인증은 safeStorage 암호화, 로컬 저장만 ──
+  /** 검증(버킷 목록 호출) 성공 시에만 저장 */
+  'r2:setAuth': {
+    req: { accountId: string; accessKeyId: string; secretAccessKey: string }
+    res: { ok: boolean; error?: string }
+  }
+  'r2:authStatus': { req: void; res: { connected: boolean; accountId: string } }
+  'r2:deleteAuth': { req: void; res: void }
+  /** R2 API 토큰 발급 페이지를 기본 브라우저로 */
+  'r2:openTokenPage': { req: void; res: void }
+  'r2:listBuckets': { req: void; res: { buckets: string[] } }
+  /** prefix 하위 폴더(CommonPrefixes)와 객체 목록 (1000개 페이지네이션 전부) */
+  'r2:list': { req: { bucket: string; prefix: string }; res: { folders: string[]; objects: R2Object[] } }
+  'r2:createFolder': { req: { bucket: string; prefix: string; name: string }; res: void }
+  /** 파일/폴더 선택 다이얼로그 → 업로드 큐에 추가 (폴더는 재귀, 개수 제한 없음) */
+  'r2:pickUpload': {
+    req: { bucket: string; prefix: string; kind: 'files' | 'folder' }
+    res: { queued: number }
+  }
+  /** 드래그 앤 드롭된 경로들을 업로드 큐에 추가 */
+  'r2:uploadPaths': { req: { bucket: string; prefix: string; paths: string[] }; res: { queued: number } }
+  'r2:uploadStatus': { req: void; res: R2UploadStatus }
+  'r2:retryFailed': { req: void; res: { queued: number } }
+  'r2:cancelUpload': { req: void; res: void }
+  'r2:clearUploadHistory': { req: void; res: void }
+}
+
+/** R2 객체 (표시용) */
+export interface R2Object {
+  key: string
+  size: number
+  lastModified: string
+}
+
+/** R2 업로드 큐 상태 (커스텀) */
+export interface R2UploadStatus {
+  running: boolean
+  bucket: string
+  total: number
+  done: number
+  failedCount: number
+  /** 실패 항목 (표시 상한 200) — 재시도 대상 */
+  failed: { name: string; key: string; error: string }[]
+  currentName: string
 }
 
 /** 메인 → 렌더러 이벤트 채널 */
@@ -621,4 +665,6 @@ export interface IpcEventMap {
     percent?: number
     message?: string
   }
+  /** R2 업로드 진행 상황 (커스텀) */
+  'r2:progress': R2UploadStatus
 }

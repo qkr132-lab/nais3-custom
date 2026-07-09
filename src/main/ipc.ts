@@ -116,6 +116,20 @@ import {
   updateRefImage
 } from './refs/repo'
 import { lookupTags, searchTags } from './tags'
+import {
+  cancelUpload,
+  clearUploadHistory,
+  createR2Folder,
+  deleteR2Auth,
+  enqueueUpload,
+  listBuckets,
+  listObjects,
+  openR2TokenPage,
+  r2AuthStatus,
+  retryFailed,
+  setR2Auth,
+  uploadStatus
+} from './r2/client'
 import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, extname, join } from 'path'
@@ -346,6 +360,40 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:exportToFolder', ({ ids, mode, dir, policy }) =>
     exportToFolder({ ids, mode }, { dir, policy })
   )
+
+  // ── Cloudflare R2 업로드 (커스텀) ──────────────────────────────────
+  handle('r2:setAuth', (auth) => setR2Auth(auth))
+  handle('r2:authStatus', () => r2AuthStatus())
+  handle('r2:deleteAuth', () => {
+    deleteR2Auth()
+  })
+  handle('r2:openTokenPage', () => {
+    openR2TokenPage()
+  })
+  handle('r2:listBuckets', async () => ({ buckets: await listBuckets() }))
+  handle('r2:list', ({ bucket, prefix }) => listObjects(bucket, prefix))
+  handle('r2:createFolder', ({ bucket, prefix, name }) => createR2Folder(bucket, prefix, name))
+  handle('r2:pickUpload', async ({ bucket, prefix, kind }) => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const r = await dialog.showOpenDialog(win, {
+      title: kind === 'folder' ? '업로드할 폴더 선택' : '업로드할 파일 선택',
+      properties:
+        kind === 'folder' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']
+    })
+    if (r.canceled || r.filePaths.length === 0) return { queued: 0 }
+    return { queued: enqueueUpload(bucket, prefix, r.filePaths) }
+  })
+  handle('r2:uploadPaths', ({ bucket, prefix, paths }) => ({
+    queued: enqueueUpload(bucket, prefix, paths)
+  }))
+  handle('r2:uploadStatus', () => uploadStatus())
+  handle('r2:retryFailed', () => ({ queued: retryFailed() }))
+  handle('r2:cancelUpload', () => {
+    cancelUpload()
+  })
+  handle('r2:clearUploadHistory', () => {
+    clearUploadHistory()
+  })
 
   handle('settings:get', ({ key }) => ({ value: getSetting(key) }))
   handle('settings:set', ({ key, value }) => {

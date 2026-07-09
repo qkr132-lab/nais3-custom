@@ -10,6 +10,7 @@ import { MetadataDialog } from './components/metadata-dialog'
 import { PromptPanel } from './components/prompt-panel'
 import { SceneMode } from './components/scene-mode'
 import { LibraryMode } from './components/library-mode'
+import { UploadMode } from './components/upload-mode'
 import { WebMode } from './components/web-mode'
 import { Titlebar } from './components/titlebar'
 import { SettingsDialog } from './components/token-dialog'
@@ -138,6 +139,8 @@ export default function App(): React.JSX.Element {
             <DirectorMode />
           ) : centerMode === 'library' ? (
             <LibraryMode />
+          ) : centerMode === 'upload' ? (
+            <UploadMode />
           ) : centerMode === 'main' ? (
             <PreviewPane />
           ) : null}
