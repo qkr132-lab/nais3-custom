@@ -103,7 +103,7 @@ import {
 } from './prompts/repo'
 import { exportAll, importAll } from './backup/repo'
 import { importNais2 } from './backup/nais2'
-import { startUpdateDownload } from './updater'
+import { checkForUpdatesNow, startUpdateDownload } from './updater'
 import { countTokens } from './nai/tokenizer'
 import {
   addRefImages,
@@ -232,6 +232,9 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
 
   handle('update:start', () => {
     startUpdateDownload()
+  })
+  handle('update:check', () => {
+    checkForUpdatesNow()
   })
 
   handle('backup:export', async () => {

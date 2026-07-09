@@ -8,7 +8,9 @@ import {
   Keyboard,
   KeyRound,
   Image as ImageIcon,
+  Loader2,
   Palette,
+  RefreshCw,
   RotateCcw,
   Save,
   Trash2,
@@ -664,6 +666,11 @@ function AboutSection(): React.JSX.Element {
 
   useEffect(() => {
     void window.nais.invoke('app:version', undefined).then((r) => setVersion(r.version))
+    // 정보 화면을 열 때마다 실시간 재확인 (커스텀) — 다운로드/설치 중엔 방해하지 않음
+    const s = useUpdateStore.getState().status
+    if (s !== 'downloading' && s !== 'downloaded') {
+      void window.nais.invoke('update:check', undefined)
+    }
   }, [])
 
   return (
@@ -673,8 +680,8 @@ function AboutSection(): React.JSX.Element {
       <p className="mt-1">NovelAI Image Studio 3</p>
       <p className="font-mono text-[11.5px] text-faint">버전 {version || '…'}</p>
 
-      {/* 업데이트 상태 */}
-      <div className="mt-1">
+      {/* 업데이트 상태 — 열 때마다 새로 확인 */}
+      <div className="mt-1 flex items-center gap-2">
         {updateStatus === 'available' ? (
           <Button variant="accent" className="gap-1.5" onClick={startUpdate}>
             <Download size={14} /> 새 버전 {updateVersion} 업데이트
@@ -683,11 +690,28 @@ function AboutSection(): React.JSX.Element {
           <span className="text-[12px] text-accent">업데이트 다운로드 중 {updatePercent}%…</span>
         ) : updateStatus === 'downloaded' ? (
           <span className="text-[12px] text-accent">업데이트 설치 — 곧 재시작됩니다</span>
+        ) : updateStatus === 'checking' ? (
+          <span className="flex items-center gap-1.5 text-[12px] text-muted">
+            <Loader2 size={12} className="animate-spin" /> 업데이트 확인 중…
+          </span>
+        ) : updateStatus === 'error' ? (
+          <span className="text-[12px] text-danger">업데이트 확인 실패</span>
         ) : (
           <span className="text-[12px] text-faint">최신 버전입니다</span>
         )}
+        {/* 수동 재확인 */}
+        {updateStatus !== 'checking' &&
+          updateStatus !== 'downloading' &&
+          updateStatus !== 'downloaded' && (
+            <button
+              className="grid size-6 place-items-center rounded-md text-faint transition-colors hover:bg-surface-2 hover:text-ink"
+              title="업데이트 다시 확인"
+              onClick={() => void window.nais.invoke('update:check', undefined)}
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
       </div>
-
     </div>
   )
 }

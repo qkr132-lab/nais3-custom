@@ -64,6 +64,22 @@ export function setupUpdater(): void {
   )
 }
 
+/** 지금 업데이트 확인 (커스텀) — 정보 화면을 열 때마다 실시간 재확인. 결과는 update:status로 */
+export function checkForUpdatesNow(): void {
+  if (!app.isPackaged) {
+    broadcast('update:status', { state: 'none' }) // dev에선 확인 안 함
+    return
+  }
+  broadcast('update:status', { state: 'checking' })
+  if (process.platform === 'darwin') {
+    void checkMacUpdate()
+    return
+  }
+  void autoUpdater.checkForUpdates().catch((err) => {
+    broadcast('update:status', { state: 'error', message: err?.message ?? String(err) })
+  })
+}
+
 /** 다운로드 시작 (타이틀바/설정 버튼 클릭) */
 export function startUpdateDownload(): void {
   if (process.platform === 'darwin') {
@@ -100,7 +116,10 @@ async function checkMacUpdate(): Promise<void> {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' }
     })
-    if (!res.ok) return
+    if (!res.ok) {
+      broadcast('update:status', { state: 'none' }) // "확인 중"으로 남지 않게
+      return
+    }
     const rel = (await res.json()) as { tag_name?: string; assets?: GhAsset[] }
     const version = String(rel.tag_name ?? '').replace(/^v/, '')
     if (!version || !isNewer(version, app.getVersion())) {
@@ -109,11 +128,14 @@ async function checkMacUpdate(): Promise<void> {
     }
     // 아키텍처에 맞는 mac zip (예: nais3-1.0.1-arm64-mac.zip)
     const asset = (rel.assets ?? []).find((a) => a.name.endsWith(`${process.arch}-mac.zip`))
-    if (!asset) return
+    if (!asset) {
+      broadcast('update:status', { state: 'none' })
+      return
+    }
     macAsset = asset
     broadcast('update:status', { state: 'available', version })
   } catch {
-    /* 조용히 무시 */
+    broadcast('update:status', { state: 'none' }) // 네트워크 오류 — 조용히, 단 "확인 중" 해제
   }
 }
 

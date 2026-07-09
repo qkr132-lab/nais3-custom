@@ -459,6 +459,8 @@ export interface IpcInvokeMap {
   'promptPresets:delete': { req: { id: number }; res: void }
   /** 업데이트 다운로드 시작 (완료 시 자동 설치/재시작) */
   'update:start': { req: void; res: void }
+  /** 지금 업데이트 확인 (커스텀 — 정보 화면 열 때 실시간 재확인). 결과는 update:status 이벤트로 */
+  'update:check': { req: void; res: void }
   /** 전체 데이터 JSON 내보내기 (저장 다이얼로그) */
   'backup:export': { req: void; res: { saved: boolean } }
   /** DB 백업 폴더 열기 (커스텀 — 자동 스냅샷 보관소) */
@@ -671,7 +673,7 @@ export interface IpcEventMap {
   'vibes:encoded': Record<string, never>
   /** 자동 업데이트 상태 (GitHub release) */
   'update:status': {
-    state: 'available' | 'none' | 'downloading' | 'downloaded' | 'error'
+    state: 'checking' | 'available' | 'none' | 'downloading' | 'downloaded' | 'error'
     version?: string
     percent?: number
     message?: string
