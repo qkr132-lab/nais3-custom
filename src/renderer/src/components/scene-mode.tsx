@@ -643,23 +643,44 @@ function BulkBar({
       >
         즐겨찾기 해제
       </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={disabled}
-        onClick={async () => {
-          if (
-            await askConfirm('이미지 비우기', {
-              message: `선택한 ${n}개 씬의 생성 이미지를 모두 삭제합니다. 되돌릴 수 없습니다.`,
-              confirmLabel: '비우기',
-              danger: true
-            })
-          )
-            void bulkClearImages()
-        }}
-      >
-        이미지 비우기
-      </Button>
+      {/* 이미지 비우기 — 전체 / 즐겨찾기 제외 선택 (커스텀) */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost" disabled={disabled}>
+            이미지 비우기
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-52 p-1">
+          <MenuItem
+            icon={<ImageOff size={13} />}
+            label="전체 비우기"
+            onClick={async () => {
+              if (
+                await askConfirm('이미지 비우기', {
+                  message: `선택한 ${n}개 씬의 생성 이미지를 모두 삭제합니다. (파일은 휴지통으로)`,
+                  confirmLabel: '비우기',
+                  danger: true
+                })
+              )
+                void bulkClearImages(false)
+            }}
+          />
+          <MenuItem
+            icon={<Star size={13} />}
+            label="즐겨찾기 제외 비우기"
+            onClick={async () => {
+              if (
+                await askConfirm('즐겨찾기 제외 비우기', {
+                  message: `선택한 ${n}개 씬에서 즐겨찾기를 뺀 이미지만 삭제합니다. (파일은 휴지통으로)`,
+                  confirmLabel: '비우기',
+                  danger: true
+                })
+              )
+                void bulkClearImages(true)
+            }}
+          />
+        </PopoverContent>
+      </Popover>
       <Button
         size="sm"
         variant="ghost"

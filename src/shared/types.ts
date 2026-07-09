@@ -509,7 +509,10 @@ export interface IpcInvokeMap {
   'scenes:bulkDelete': { req: { ids: number[] }; res: void }
   'scenes:bulkSetResolution': { req: { ids: number[]; width: number; height: number }; res: void }
   'scenes:bulkClearFavorites': { req: { ids: number[] }; res: void }
-  'scenes:bulkClearImages': { req: { ids: number[] }; res: { deleted: number } }
+  'scenes:bulkClearImages': {
+    req: { ids: number[]; keepFavorites?: boolean }
+    res: { deleted: number }
+  }
   'scenes:bulkExportZip': { req: { ids: number[] }; res: { count: number } }
   /** 씬 상세 이미지 페이지네이션 (수만 장 대비) */
   'scenes:images': {

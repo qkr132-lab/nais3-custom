@@ -322,7 +322,9 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:bulkClearFavorites', ({ ids }) => {
     bulkClearFavorites(ids)
   })
-  handle('scenes:bulkClearImages', ({ ids }) => ({ deleted: bulkClearImages(ids) }))
+  handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => ({
+    deleted: bulkClearImages(ids, keepFavorites)
+  }))
   handle('scenes:bulkExportZip', async ({ ids }) => ({ count: await bulkExportZip(ids) }))
   handle('scenes:images', ({ sceneId, limit, offset, favoritesOnly }) =>
     sceneImages(sceneId, limit, offset, favoritesOnly)

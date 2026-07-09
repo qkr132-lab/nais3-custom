@@ -328,14 +328,18 @@ export function bulkClearFavorites(ids: number[]): void {
     .run(...ids)
 }
 
-/** 선택 씬들의 생성 이미지를 전부 삭제 (DB 행 + 파일은 OS 휴지통으로 — 복원 가능) */
-export function bulkClearImages(ids: number[]): number {
+/** 선택 씬들의 생성 이미지를 삭제 (DB 행 + 파일은 OS 휴지통으로 — 복원 가능).
+ *  keepFavorites=true면 즐겨찾기는 남긴다 (커스텀) */
+export function bulkClearImages(ids: number[], keepFavorites = false): number {
   if (ids.length === 0) return 0
   const db = getDb()
+  const favClause = keepFavorites ? ' AND favorite = 0' : ''
   const rows = db
-    .prepare(`SELECT file_path FROM images WHERE scene_id IN (${placeholders(ids.length)})`)
+    .prepare(`SELECT file_path FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`)
     .all(...ids) as { file_path: string }[]
-  db.prepare(`DELETE FROM images WHERE scene_id IN (${placeholders(ids.length)})`).run(...ids)
+  db.prepare(`DELETE FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`).run(
+    ...ids
+  )
   // 파일은 OS 휴지통으로 (백그라운드 — 대량이라 await로 UI 막지 않음)
   void Promise.all(rows.map((r) => trashFile(r.file_path)))
   return rows.length

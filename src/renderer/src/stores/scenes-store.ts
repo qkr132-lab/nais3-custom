@@ -87,7 +87,7 @@ interface ScenesState {
   bulkDuplicate: () => Promise<void>
   bulkSetResolution: (width: number, height: number) => Promise<void>
   bulkClearFavorites: () => Promise<void>
-  bulkClearImages: () => Promise<void>
+  bulkClearImages: (keepFavorites?: boolean) => Promise<void>
   bulkExportZip: () => Promise<void>
 
   /** 완료 즉시 카드 썸네일을 새 원본으로 낙관적 갱신 (튐 방지) */
@@ -469,8 +469,11 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   bulkClearFavorites: async () => {
     await window.nais.invoke('scenes:bulkClearFavorites', { ids: [...get().selection] })
   },
-  bulkClearImages: async () => {
-    await window.nais.invoke('scenes:bulkClearImages', { ids: [...get().selection] })
+  bulkClearImages: async (keepFavorites = false) => {
+    await window.nais.invoke('scenes:bulkClearImages', {
+      ids: [...get().selection],
+      keepFavorites
+    })
     set({ selection: new Set() })
     await get().load()
   },
