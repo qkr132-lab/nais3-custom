@@ -1,5 +1,6 @@
-appId: com.sunanakgo.nais3
-productName: NAIS3
+# NAIS3 Custom — 공식 NAIS3와 별도 앱으로 설치 (appId/이름 분리, 데이터는 첫 실행 시 이관)
+appId: com.nais3.custom
+productName: NAIS3 Custom
 directories:
   buildResources: build
 files:
@@ -15,7 +16,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: NAIS3
+  executableName: NAIS3 Custom
   # Windows는 둥근 모서리·여백 규칙이 없어 mac용(여백 큼) 대신 여백 최소 버전 사용
   icon: build/icon-win.png
   target:
