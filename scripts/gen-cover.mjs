@@ -1,6 +1,7 @@
-// NAIS3 Custom 배포용 표지 PNG 생성 (sharp SVG 렌더)
+// NAIS3 Custom 배포용 표지 PNG 생성 (sharp SVG 렌더). 인자: 출력경로 버전
 import sharp from 'sharp'
 
+const ver = process.argv[3] ?? 'v1.1.1'
 const svg = `
 <svg width="1200" height="675" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -16,7 +17,7 @@ const svg = `
   <rect width="1200" height="675" fill="url(#bg)"/>
   <rect x="60" y="330" width="120" height="6" rx="3" fill="url(#ac)"/>
   <text x="60" y="240" font-family="Segoe UI, sans-serif" font-size="88" font-weight="800" fill="#f2f2f5">NAIS3 Custom</text>
-  <text x="60" y="305" font-family="Segoe UI, sans-serif" font-size="34" fill="#9a9aa5">v1.1.0 — NovelAI Image Studio 3 커스텀판</text>
+  <text x="60" y="305" font-family="Segoe UI, sans-serif" font-size="34" fill="#9a9aa5">${ver} — NovelAI Image Studio 3 커스텀판</text>
   <text x="60" y="400" font-family="Segoe UI, sans-serif" font-size="24" fill="#c9c9d2">큐 반복 · 씬별 캐릭터 · 한글 태그 검색 · 태그 탐색기 · 휴지통/자동백업</text>
   <text x="60" y="440" font-family="Segoe UI, sans-serif" font-size="24" fill="#c9c9d2">내장 브라우저 · 라이브러리 · 드래그 저장 · Ctrl+Z 실행취소</text>
   <rect x="60" y="500" width="1080" height="110" rx="14" fill="#26262e"/>

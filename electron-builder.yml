@@ -53,5 +53,5 @@ dmg:
 npmRebuild: false
 publish:
   provider: github
-  owner: sunanakgo
-  repo: NAIS3
+  owner: qkr132-lab
+  repo: nais3-custom

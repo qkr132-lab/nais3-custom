@@ -1,72 +1,63 @@
 <div align="center">
 
-# NAIS3
+# NAIS3 Custom
 
-<img src="build/icon-win.png" width="128" alt="NAIS3" />
+**NovelAI Image Studio 3 커스텀판** — [sunanakgo/NAIS3](https://github.com/sunanakgo/NAIS3) 기반 비공식 빌드
 
-**NovelAI Image Studio 3** — NovelAI 이미지 생성을 위한 데스크톱 앱
-
-[![Discord](https://img.shields.io/badge/Discord-문의-5865F2?logo=discord&logoColor=white)](https://discord.gg/bFxP5Qvaz)
-[![Patreon](https://img.shields.io/badge/Patreon-후원-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/c/sunakgo)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/qkr132-lab/nais3-custom)](https://github.com/qkr132-lab/nais3-custom/releases/latest)
 
 </div>
 
 ---
 
-NAIS3는 NAIS2의 후속작으로, NovelAI 이미지 생성을 빠르고 안정적으로 다룰 수 있게 만든 데스크톱 애플리케이션입니다. 수백 개의 캐릭터·프리셋을 저장하고 수만 장의 이미지를 생성하는 헤비 유저를 염두에 두고 설계했습니다.
+> ⚠️ **비공식 커스텀 빌드입니다.** 원작 [NAIS3](https://github.com/sunanakgo/NAIS3)(sunanakgo)를 기반으로
+> NAIS2 Custom의 기능과 여러 편의 기능을 추가했습니다. 문제가 생겨도 **원작자에게 문의하지 마세요.**
 
-## 주요 기능
+## 설치
 
-- **생성** — 텍스트→이미지, i2i, 인페인트. NAI 웹과 바이트 단위로 동일한 payload(시드 일관성) + 실시간 스트리밍 미리보기
-- **프롬프트 주석** — `#`부터 그 줄 끝까지 주석으로 처리되어 전송에서 제외됩니다 (기본·캐릭터·조각 프롬프트 공통, 회색 배경으로 표시)
-- **캐릭터 프롬프트** — 라이브러리로 저장·폴더 정리, 위치 지정, 동시 6명까지 활성
-- **조각(와일드카드)** — `<이름>`으로 프롬프트에 삽입, 여러 줄 중 랜덤 선택
-- **바이브 트랜스퍼 / 캐릭터 레퍼런스** — 이미지 라이브러리로 관리, 인코딩 캐시
-- **씬 모드** — 씬별 프롬프트를 미리 저장하고 예약→일괄 생성
-- **디렉터 툴** — 배경 제거·라인아트·스케치·색칠·표정 변경·이미지 정리·업스케일
-- **메타데이터** — PNG/스텔스 청크에서 프롬프트·파라미터·캐릭터·UC 프리셋·퀄리티 태그 읽기
-- **프롬프트 프리셋** — 자주 쓰는 프롬프트+네거티브 저장/불러오기
-- **백업** — 라이브러리 전체를 JSON으로 내보내기/불러오기 (NAIS2 백업 가져오기 지원)
-- **자동 업데이트** — GitHub Release 기반
-- **기타** — 라이트/다크 테마, Anlas 소모 예상 표시, 태그 자동완성(작가 태그 포함), 단축키
+[**최신 릴리즈**](https://github.com/qkr132-lab/nais3-custom/releases/latest)에서 `nais3-custom-x.x.x-setup.exe`를 받아 실행하세요.
 
-## 다운로드
+- 공식 NAIS3와 **별도 앱**으로 설치됩니다 (같이 써도 충돌 없음).
+- 첫 실행 때 공식 NAIS3의 데이터(씬·캐릭터·프롬프트·설정)를 **자동으로 복사**해옵니다. 원본은 건드리지 않습니다.
+- **자동 업데이트**를 지원합니다 — 새 버전이 나오면 앱이 알아서 받아 설치합니다.
+- NovelAI 구독과 API 토큰이 필요한 건 공식판과 동일합니다.
 
-[Releases](../../releases)에서 최신 버전을 받으세요. (macOS `.dmg` / Windows `.exe`)
+## 공식 NAIS3에 추가된 기능
 
-## 기술 스택
+### 씬 모드
+- **큐 반복** — 캐릭터/캐릭레퍼/바이브 조합을 바꿔가며 예약 전체를 반복 생성
+- **씬별 캐릭터 추가** — 특정 씬에만 캐릭터/레퍼런스 추가 적용 (다중 씬 일괄 가능)
+- **씬별 Variety+** — 씬마다 개별 적용 (카드에 배지 표시)
+- **선택 예약** — 편집 모드에서 고른 씬들만 예약 ±/일괄 복제, Shift+클릭 범위 선택
+- 생성 중 씬마다 남은 개수 실시간 표시, 생성 중 + 누르면 바로 큐에 이어붙음, 취소 시 남은 예약 자동 복원
 
-- [Electron](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/)
-- [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/)
-- [Tailwind CSS](https://tailwindcss.com/) v4
-- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (로컬 DB) · [Zustand](https://github.com/pmndrs/zustand) · [sharp](https://sharp.pixelplumbing.com/)
+### 안전장치
+- **씬 휴지통** — 삭제 복원, 보관 기간 설정 + **Ctrl+Z 연속 실행취소**
+- 이미지 삭제는 Windows 휴지통으로 (영구삭제 아님)
+- **매일 자동 DB 백업** — 용량 상한 설정 가능
 
-## 개발
+### 태그
+- **한글 태그 자동완성** — "홍채", "핑크 동공", "미드리프트"처럼 한글로 쳐도 단부루 태그를 찾아줌
+  (사전 4,200+개 + 발음 매칭 + 조합 검색)
+- **태그 탐색기** — 신체/의상/악세서리 등 카테고리별로 태그를 둘러보고 클릭 삽입
 
-```bash
-npm install      # 의존성 설치
-npm run dev      # 개발 모드 실행
-npm run build    # 타입체크 + 빌드
-npm test         # 테스트
-
-# 패키징
-npm run build:mac    # macOS (.dmg)
-npm run build:win    # Windows (.exe)
-```
-
-## 문의 · 후원
-
-- 💬 **Discord**: <https://discord.gg/bFxP5Qvaz>
-- ❤️ **Patreon**: <https://www.patreon.com/c/sunakgo>
-
-## Thanks to
-
-NovelAI API 동작을 이해하는 데 아래 프로젝트들을 참고했습니다.
-
-- **SDStudio**
-- **NAIA 2.0**
+### 그 밖에
+- 캐릭터 카드에 **레퍼런스 연결** (캐릭터 포함 시 자동 적용, 대형 설정 창)
+- **내장 브라우저** (단부루/태그 사전 퀵링크, 프록시 설정)
+- **이미지 라이브러리** (참고 이미지 모음, 메타데이터/i2i/태그 분석)
+- 이미지를 **드래그로 밖에 저장** (드래그 중 창 투명 + 클릭 통과)
+- 메타데이터 창 가독성 개선 (항목별/전체 복사)
+- 스타일 태그 분석 (Kaloscope)
 
 ## 라이선스
 
-이 프로젝트는 [GNU General Public License v3.0](LICENSE) 하에 배포됩니다.
+GPL-3.0. 원작 [sunanakgo/NAIS3](https://github.com/sunanakgo/NAIS3)를 따릅니다.
+누구나 소스를 수정·재배포할 수 있으며, 재배포 시 GPL-3.0을 지켜야 합니다.
+
+## 빌드
+
+```bash
+npm install
+npm run build:win   # Windows 설치본 (dist/)
+```
