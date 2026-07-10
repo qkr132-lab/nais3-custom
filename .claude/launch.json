@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs-site",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "http-server", "docs", "-c-1"],
+      "port": 8952,
+      "autoPort": true
+    }
+  ]
+}

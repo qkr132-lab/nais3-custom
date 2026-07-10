@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAIS3 Custom 가이드 — 기능 대백과</title>
+<meta name="description" content="NAIS3 Custom의 모든 기능을 쉽게 — 입문 가이드, 기능 검색, 용어사전, FAQ">
+<style>
+  :root {
+    --bg: #0f1014; --surface: #16181e; --surface2: #1d2028; --line: #2a2e3a;
+    --ink: #e8eaf0; --muted: #9aa1b2; --faint: #626a7d;
+    --accent: #7c8cf8; --accent-soft: rgba(124,140,248,.14);
+    --gold: #c9a34f; --danger: #e5636b; --ok: #4fbf76;
+    --radius: 14px; --maxw: 1080px;
+  }
+  [data-theme="light"] {
+    --bg: #f6f7fa; --surface: #ffffff; --surface2: #eef0f5; --line: #dde1ea;
+    --ink: #1c2030; --muted: #5a6274; --faint: #8b93a6;
+    --accent: #5163e8; --accent-soft: rgba(81,99,232,.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: var(--surface2); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: .88em; font-family: Consolas, "D2Coding", monospace;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  /* ── 헤더 ── */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(14px); border-bottom: 1px solid var(--line);
+  }
+  .header-inner {
+    max-width: var(--maxw); margin: 0 auto; padding: 10px 20px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 16px; white-space: nowrap; color: var(--ink); }
+  .logo:hover { text-decoration: none; }
+  .logo-mark {
+    width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent), #b18cf8);
+    display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 900;
+  }
+  .logo small { color: var(--faint); font-weight: 600; font-size: 11px; margin-left: 2px; }
+  nav.top { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+  nav.top a {
+    padding: 6px 11px; border-radius: 8px; color: var(--muted); font-size: 13.5px; font-weight: 600;
+  }
+  nav.top a:hover { background: var(--surface2); color: var(--ink); text-decoration: none; }
+  .theme-btn {
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    width: 32px; height: 32px; border-radius: 9px; cursor: pointer; font-size: 15px;
+  }
+  .theme-btn:hover { color: var(--ink); }
+
+  /* ── 검색 ── */
+  .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 380px; }
+  .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+  #search {
+    width: 100%; padding: 8px 12px 8px 34px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    font-size: 13.5px; font-family: inherit; outline: none; transition: border-color .15s;
+  }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--faint); }
+
+  main { max-width: var(--maxw); margin: 0 auto; padding: 0 20px 80px; }
+  section { scroll-margin-top: 80px; }
+
+  /* ── 히어로 ── */
+  .hero { text-align: center; padding: 72px 0 56px; }
+  .hero .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 5px 14px; border-radius: 99px; font-size: 12.5px; font-weight: 700; margin-bottom: 20px;
+  }
+  .hero h1 { font-size: clamp(30px, 5.5vw, 46px); font-weight: 900; letter-spacing: -.02em; line-height: 1.25; }
+  .hero h1 .grad {
+    background: linear-gradient(100deg, var(--accent), #b18cf8, #e78cd0);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.sub { color: var(--muted); font-size: clamp(14.5px, 2.2vw, 17px); margin: 16px auto 0; max-width: 620px; }
+  .hero-actions { display: flex; gap: 10px; justify-content: center; margin-top: 30px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 12px; font-size: 14.5px; font-weight: 700;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    cursor: pointer; transition: transform .12s, box-shadow .12s;
+  }
+  .btn:hover { transform: translateY(-1px); text-decoration: none; }
+  .btn.primary {
+    background: linear-gradient(120deg, var(--accent), #9a7ef0); color: #fff; border: none;
+    box-shadow: 0 6px 22px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  .hero .note { margin-top: 14px; font-size: 12px; color: var(--faint); }
+
+  /* ── 섹션 제목 ── */
+  .sec-head { margin: 64px 0 8px; }
+  .sec-head h2 { font-size: clamp(21px, 3.4vw, 27px); font-weight: 800; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+  .sec-head .em { color: var(--accent); }
+  .sec-head p { color: var(--muted); margin-top: 6px; font-size: 14.5px; }
+
+  /* ── 시작하기 스텝 ── */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 22px; }
+  .step {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 20px 18px; position: relative;
+  }
+  .step .n {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent); font-weight: 800; font-size: 14px; margin-bottom: 12px;
+  }
+  .step h3 { font-size: 15.5px; font-weight: 750; margin-bottom: 6px; }
+  .step p { font-size: 13.5px; color: var(--muted); }
+
+  /* ── 페이지 투어 ── */
+  .tour { display: flex; flex-direction: column; gap: 14px; margin-top: 22px; }
+  .tour-item {
+    display: grid; grid-template-columns: 240px 1fr; gap: 22px; align-items: center;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px;
+  }
+  .tour-item:nth-child(even) { grid-template-columns: 1fr 240px; }
+  .tour-item:nth-child(even) .mock { order: 2; }
+  .tour-item h3 { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .tour-item h3 .chip { font-size: 11px; background: var(--accent-soft); color: var(--accent); border-radius: 99px; padding: 2px 9px; font-weight: 700; }
+  .tour-item p { color: var(--muted); font-size: 14px; margin-top: 7px; }
+  .tour-item .links { margin-top: 10px; font-size: 13px; }
+  .mock { width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+  .mock svg { display: block; width: 100%; height: auto; }
+  @media (max-width: 680px) {
+    .tour-item, .tour-item:nth-child(even) { grid-template-columns: 1fr; }
+    .tour-item:nth-child(even) .mock { order: 0; }
+  }
+
+  /* ── 기능 카드 ── */
+  .filter-bar { display: flex; gap: 7px; flex-wrap: wrap; margin: 18px 0 16px; }
+  .chip-btn {
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    padding: 6px 13px; border-radius: 99px; font-size: 13px; font-weight: 650; cursor: pointer;
+    font-family: inherit; transition: all .13s;
+  }
+  .chip-btn:hover { color: var(--ink); border-color: var(--faint); }
+  .chip-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 13px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 17px 17px 15px; cursor: pointer; transition: border-color .14s, transform .14s;
+  }
+  .card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); transform: translateY(-2px); }
+  .card .cat-tag { font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: .02em; }
+  .card h3 { font-size: 15.5px; font-weight: 760; margin: 5px 0 6px; display: flex; align-items: center; gap: 7px; }
+  .card .short { font-size: 13.5px; color: var(--muted); }
+  .card .more { margin-top: 10px; font-size: 12.5px; color: var(--accent); font-weight: 650; }
+  .card .detail { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 13.5px; color: var(--muted); }
+  .card .detail b { color: var(--ink); }
+  .card .detail p + p, .card .detail p + ul, .card .detail ul + p { margin-top: 8px; }
+  .card .detail ul { padding-left: 18px; }
+  .card.open .detail { display: block; }
+  .card.open .more .arr { transform: rotate(90deg); }
+  .more .arr { display: inline-block; transition: transform .15s; }
+  .no-result { text-align: center; color: var(--faint); padding: 42px 0; font-size: 14.5px; display: none; }
+  .result-count { font-size: 12.5px; color: var(--faint); margin-bottom: 10px; }
+
+  /* ── 용어사전 ── */
+  .glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 11px; margin-top: 20px; }
+  .g-item { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .g-item dt { font-weight: 750; font-size: 14.5px; color: var(--ink); }
+  .g-item dd { font-size: 13px; color: var(--muted); margin-top: 5px; }
+
+  /* ── FAQ ── */
+  .faq { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+  .faq details {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0 18px;
+  }
+  .faq summary {
+    padding: 15px 0; cursor: pointer; font-weight: 700; font-size: 14.5px; list-style: none;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .faq summary::before { content: "Q."; color: var(--accent); font-weight: 800; }
+  .faq details[open] summary { border-bottom: 1px dashed var(--line); }
+  .faq .a { padding: 13px 0 16px; font-size: 13.5px; color: var(--muted); }
+
+  /* ── 푸터 ── */
+  footer { border-top: 1px solid var(--line); margin-top: 80px; }
+  .footer-inner { max-width: var(--maxw); margin: 0 auto; padding: 28px 20px; font-size: 12.5px; color: var(--faint); display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
+
+  .kbd-hint { font-size: 11.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  mark { background: color-mix(in srgb, var(--gold) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="logo" href="#top">
+      <span class="logo-mark">N</span>
+      NAIS3 Custom <small>가이드</small>
+    </a>
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="search" type="search" placeholder="궁금한 걸 검색해보세요 — 예약, 바이브, 번호, 업로드…" autocomplete="off">
+    </div>
+    <nav class="top">
+      <a href="#start">시작하기</a>
+      <a href="#tour">둘러보기</a>
+      <a href="#features">기능</a>
+      <a href="#glossary">용어사전</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <button class="theme-btn" id="themeBtn" title="테마 전환">🌙</button>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- 히어로 -->
+  <div class="hero">
+    <span class="badge">✦ NovelAI 이미지 생성을 더 편하게</span>
+    <h1>NAIS3 Custom의 모든 기능,<br><span class="grad">여기서 쉽게 찾아보세요</span></h1>
+    <p class="sub">씬 대량 생성부터 한글 태그 검색, 클라우드 업로드까지 — 뭐가 있는지, 어디 있는지, 어떻게 쓰는지 전부 담았습니다. 위 검색창에 아무거나 쳐보세요.</p>
+    <div class="hero-actions">
+      <a class="btn primary" href="https://github.com/qkr132-lab/nais3-custom/releases/latest" target="_blank">⬇ 최신 버전 다운로드</a>
+      <a class="btn" href="#start">5분 만에 시작하기</a>
+    </div>
+    <p class="note">Windows · 무료 · 오픈소스(GPL-3.0) · 릴리즈에서 setup.exe 하나만 받으면 됩니다</p>
+  </div>
+
+  <!-- 시작하기 -->
+  <section id="start">
+    <div class="sec-head">
+      <h2>🚀 <span>5분 만에 <span class="em">시작하기</span></span></h2>
+      <p>설치부터 첫 이미지까지, 이 순서면 끝납니다.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>설치</h3><p><a href="https://github.com/qkr132-lab/nais3-custom/releases/latest" target="_blank">릴리즈 페이지</a>에서 <code>setup.exe</code>를 받아 실행하세요. 기존 NAIS3를 쓰던 분은 데이터가 그대로 이어집니다.</p></div>
+      <div class="step"><div class="n">2</div><h3>토큰 연결</h3><p>NovelAI 사이트 → 계정 설정 → <b>Get Persistent API Token</b> 복사 → 앱 설정(⚙) → 토큰에 붙여넣기. 토큰은 내 PC에만 암호화 저장됩니다.</p></div>
+      <div class="step"><div class="n">3</div><h3>첫 생성</h3><p>왼쪽에 프롬프트를 쓰고 생성 버튼! 한글로 "핑크 동공"처럼 쳐도 태그를 추천해줍니다.</p></div>
+      <div class="step"><div class="n">4</div><h3>씬으로 대량 생성</h3><p>상단 <b>씬</b> 탭에서 프롬프트를 카드로 저장하고 예약을 쌓으면, 수십·수백 장이 자동으로 뽑힙니다.</p></div>
+    </div>
+  </section>
+
+  <!-- 페이지 둘러보기 -->
+  <section id="tour">
+    <div class="sec-head">
+      <h2>🧭 <span>화면 <span class="em">둘러보기</span></span></h2>
+      <p>상단 네비게이션의 6개 페이지가 각각 뭘 하는 곳인지.</p>
+    </div>
+    <div class="tour">
+
+      <div class="tour-item">
+        <div class="mock"><svg viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+          <rect width="240" height="150" fill="var(--surface2)"/>
+          <rect x="8" y="8" width="70" height="134" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="14" y="16" width="58" height="8" rx="3" fill="var(--accent)" opacity=".7"/>
+          <rect x="14" y="30" width="58" height="26" rx="4" fill="var(--surface2)"/>
+          <rect x="14" y="60" width="58" height="26" rx="4" fill="var(--surface2)"/>
+          <rect x="14" y="92" width="44" height="7" rx="3" fill="var(--line)"/>
+          <rect x="14" y="104" width="52" height="7" rx="3" fill="var(--line)"/>
+          <rect x="14" y="122" width="58" height="13" rx="6" fill="var(--accent)"/>
+          <rect x="86" y="8" width="106" height="134" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <circle cx="139" cy="66" r="26" fill="var(--accent-soft)"/>
+          <path d="M126 74 l10 -14 8 10 6 -7 10 13 z" fill="var(--accent)" opacity=".85"/>
+          <circle cx="132" cy="55" r="4" fill="var(--gold)"/>
+          <rect x="200" y="8" width="32" height="134" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="205" y="14" width="22" height="22" rx="4" fill="var(--surface2)"/>
+          <rect x="205" y="40" width="22" height="22" rx="4" fill="var(--surface2)"/>
+          <rect x="205" y="66" width="22" height="22" rx="4" fill="var(--surface2)"/>
+        </svg></div>
+        <div>
+          <h3>메인 <span class="chip">기본 생성</span></h3>
+          <p>프롬프트·캐릭터·바이브를 왼쪽에서 설정하고 한 장씩 생성하는 기본 화면. 가운데 큰 미리보기, 오른쪽 히스토리. 인페인트·i2i도 여기서.</p>
+          <p class="links"><a href="#" data-goto="first-gen">첫 생성 방법 →</a></p>
+        </div>
+      </div>
+
+      <div class="tour-item">
+        <div class="mock"><svg viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+          <rect width="240" height="150" fill="var(--surface2)"/>
+          <rect x="8" y="8" width="224" height="18" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="14" y="13" width="46" height="8" rx="3" fill="var(--accent)" opacity=".6"/>
+          <g>
+            <rect x="8" y="34" width="52" height="72" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="8" y="34" width="52" height="50" rx="6" fill="var(--accent-soft)"/>
+            <rect x="13" y="90" width="30" height="6" rx="3" fill="var(--line)"/>
+            <circle cx="52" cy="98" r="7" fill="var(--accent)"/>
+            <text x="52" y="101" font-size="9" fill="#fff" text-anchor="middle" font-weight="bold">3</text>
+          </g>
+          <g>
+            <rect x="66" y="34" width="52" height="72" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="66" y="34" width="52" height="50" rx="6" fill="var(--gold)" opacity=".25"/>
+            <rect x="71" y="90" width="30" height="6" rx="3" fill="var(--line)"/>
+          </g>
+          <g>
+            <rect x="124" y="34" width="52" height="72" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="124" y="34" width="52" height="50" rx="6" fill="var(--danger)" opacity=".18"/>
+            <rect x="129" y="90" width="30" height="6" rx="3" fill="var(--line)"/>
+          </g>
+          <rect x="182" y="34" width="52" height="72" rx="6" fill="none" stroke="var(--line)" stroke-dasharray="4 3"/>
+          <text x="208" y="75" font-size="16" fill="var(--faint)" text-anchor="middle">＋</text>
+          <rect x="8" y="114" width="224" height="28" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="14" y="122" width="36" height="12" rx="5" fill="var(--accent-soft)"/>
+          <rect x="56" y="122" width="36" height="12" rx="5" fill="var(--surface2)"/>
+          <rect x="98" y="122" width="36" height="12" rx="5" fill="var(--surface2)"/>
+        </svg></div>
+        <div>
+          <h3>씬 <span class="chip">대량 생성</span></h3>
+          <p>프롬프트+해상도를 카드로 저장하고 예약을 쌓아 자동 생성. 편집 모드로 수십 개 씬을 한 번에 조작하고, 번호 매기기·폴더 내보내기까지. <b>이 앱의 심장</b>입니다.</p>
+          <p class="links"><a href="#" data-goto="scene-basic">씬 사용법 →</a> <a href="#" data-goto="edit-mode">편집 모드 →</a></p>
+        </div>
+      </div>
+
+      <div class="tour-item">
+        <div class="mock"><svg viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+          <rect width="240" height="150" fill="var(--surface2)"/>
+          <g>
+            <rect x="8" y="8" width="70" height="90" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="8" y="8" width="70" height="70" rx="6" fill="var(--accent-soft)"/>
+            <rect x="86" y="8" width="70" height="90" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="86" y="8" width="70" height="70" rx="6" fill="var(--gold)" opacity=".2"/>
+            <rect x="164" y="8" width="70" height="90" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <rect x="164" y="8" width="70" height="70" rx="6" fill="var(--ok)" opacity=".15"/>
+          </g>
+          <rect x="8" y="106" width="226" height="36" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="16" y="114" width="120" height="8" rx="3" fill="var(--line)"/>
+          <rect x="16" y="127" width="80" height="8" rx="3" fill="var(--accent)" opacity=".55"/>
+        </svg></div>
+        <div>
+          <h3>디렉터 · 라이브러리 <span class="chip">도구</span></h3>
+          <p><b>디렉터</b>는 이미지 후처리 도구, <b>라이브러리</b>는 참고 이미지를 모아두는 갤러리입니다. 라이브러리의 이미지는 바이브·레퍼런스 재료로 쓰기 좋아요.</p>
+          <p class="links"><a href="#" data-goto="library">라이브러리 →</a> <a href="#" data-goto="style-analysis">스타일 분석 →</a></p>
+        </div>
+      </div>
+
+      <div class="tour-item">
+        <div class="mock"><svg viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+          <rect width="240" height="150" fill="var(--surface2)"/>
+          <rect x="8" y="8" width="224" height="20" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <circle cx="20" cy="18" r="5" fill="var(--danger)" opacity=".7"/>
+          <circle cx="34" cy="18" r="5" fill="var(--gold)" opacity=".7"/>
+          <circle cx="48" cy="18" r="5" fill="var(--ok)" opacity=".7"/>
+          <rect x="62" y="12" width="140" height="12" rx="6" fill="var(--surface2)"/>
+          <rect x="8" y="36" width="224" height="106" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <g opacity=".9">
+            <rect x="18" y="46" width="60" height="60" rx="4" fill="var(--accent-soft)"/>
+            <rect x="86" y="46" width="60" height="60" rx="4" fill="var(--gold)" opacity=".2"/>
+            <rect x="154" y="46" width="60" height="60" rx="4" fill="var(--ok)" opacity=".15"/>
+            <rect x="18" y="114" width="196" height="8" rx="3" fill="var(--line)"/>
+            <rect x="18" y="128" width="140" height="8" rx="3" fill="var(--line)"/>
+          </g>
+        </svg></div>
+        <div>
+          <h3>웹 <span class="chip">내장 브라우저</span></h3>
+          <p>단보루 같은 태그 사이트를 앱 안에서. 퀵링크 등록, 로그인 유지, 프록시 우회까지. 태그 구경하다가 바로 프롬프트로.</p>
+          <p class="links"><a href="#" data-goto="web-mode">웹 모드 →</a> <a href="#" data-goto="korean-tags">한글 태그 검색 →</a></p>
+        </div>
+      </div>
+
+      <div class="tour-item">
+        <div class="mock"><svg viewBox="0 0 240 150" xmlns="http://www.w3.org/2000/svg">
+          <rect width="240" height="150" fill="var(--surface2)"/>
+          <rect x="8" y="8" width="224" height="22" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="14" y="14" width="56" height="10" rx="4" fill="var(--surface2)"/>
+          <rect x="150" y="13" width="50" height="12" rx="6" fill="var(--accent)"/>
+          <text x="175" y="22" font-size="8" fill="#fff" text-anchor="middle">올리기</text>
+          <rect x="8" y="36" width="224" height="16" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="18" y="47" font-size="9" fill="var(--gold)">★</text>
+          <rect x="30" y="40" width="40" height="8" rx="4" fill="var(--accent-soft)"/>
+          <rect x="76" y="40" width="40" height="8" rx="4" fill="var(--surface2)"/>
+          <rect x="8" y="58" width="224" height="66" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="18" y="74" font-size="10" fill="var(--gold)">📁</text><rect x="34" y="66" width="70" height="8" rx="3" fill="var(--line)"/>
+          <text x="18" y="92" font-size="10" fill="var(--accent)">🖼</text><rect x="34" y="84" width="90" height="8" rx="3" fill="var(--line)"/>
+          <text x="18" y="110" font-size="10" fill="var(--accent)">🖼</text><rect x="34" y="102" width="80" height="8" rx="3" fill="var(--line)"/>
+          <rect x="8" y="130" width="224" height="12" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+          <rect x="8" y="130" width="150" height="12" rx="6" fill="var(--accent)" opacity=".5"/>
+        </svg></div>
+        <div>
+          <h3>업로드 <span class="chip">Cloudflare R2</span></h3>
+          <p>이미지를 R2 버킷에 <b>개수 제한 없이</b> 바로 업로드. 폴더 탐색, 드래그 앤 드롭, 실패 재시도, 즐겨찾기 별명까지. 100개 제한은 잊으세요.</p>
+          <p class="links"><a href="#" data-goto="r2-upload">R2 업로드 →</a> <a href="#" data-goto="r2-auth">연결 방법 →</a></p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 기능 대백과 -->
+  <section id="features">
+    <div class="sec-head">
+      <h2>📚 <span>기능 <span class="em">대백과</span></span></h2>
+      <p>카드를 클릭하면 자세한 사용법이 펼쳐집니다. 위 검색창으로 바로 찾을 수도 있어요.</p>
+    </div>
+    <div class="filter-bar" id="filterBar"></div>
+    <div class="result-count" id="resultCount"></div>
+    <div class="cards" id="cards"></div>
+    <div class="no-result" id="noResult">검색 결과가 없어요. 다른 말로 검색해보세요 — 예: "여러 장", "폴더", "한글"</div>
+  </section>
+
+  <!-- 용어사전 -->
+  <section id="glossary">
+    <div class="sec-head">
+      <h2>📖 <span>이거 <span class="em">뭐지?</span> — 용어사전</span></h2>
+      <p>처음 보는 단어가 나오면 여기서 찾아보세요. 검색창에도 걸립니다.</p>
+    </div>
+    <dl class="glossary" id="glossaryList"></dl>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="sec-head">
+      <h2>💬 <span>자주 묻는 <span class="em">질문</span></span></h2>
+    </div>
+    <div class="faq" id="faqList"></div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span>NAIS3 Custom — <a href="https://github.com/qkr132-lab/nais3-custom" target="_blank">GitHub</a> · GPL-3.0 · 원작 <a href="https://github.com/sunanakgo/NAIS3" target="_blank">sunanakgo/NAIS3</a></span>
+    <span>문제·제안은 <a href="https://github.com/qkr132-lab/nais3-custom/issues" target="_blank">Issues</a>로</span>
+  </div>
+</footer>
+
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict'
+
+  // ── 테마 ──
+  const themeBtn = document.getElementById('themeBtn')
+  const applyTheme = (t) => {
+    document.documentElement.setAttribute('data-theme', t)
+    themeBtn.textContent = t === 'light' ? '☀️' : '🌙'
+    localStorage.setItem('guide_theme', t)
+  }
+  applyTheme(localStorage.getItem('guide_theme') || 'dark')
+  themeBtn.addEventListener('click', () =>
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'))
+
+  // ── 렌더: 카테고리 필터 ──
+  const filterBar = document.getElementById('filterBar')
+  let activeCat = 'all'
+  const cats = [{ id: 'all', name: '전체', icon: '✦' }].concat(CATEGORIES)
+  cats.forEach((c) => {
+    const b = document.createElement('button')
+    b.className = 'chip-btn' + (c.id === 'all' ? ' on' : '')
+    b.textContent = c.icon + ' ' + c.name
+    b.dataset.cat = c.id
+    b.addEventListener('click', () => {
+      activeCat = c.id
+      filterBar.querySelectorAll('.chip-btn').forEach((x) => x.classList.toggle('on', x === b))
+      update()
+    })
+    filterBar.appendChild(b)
+  })
+
+  // ── 렌더: 기능 카드 ──
+  const cardsEl = document.getElementById('cards')
+  const catName = (id) => (CATEGORIES.find((c) => c.id === id) || {}).name || ''
+  const catIcon = (id) => (CATEGORIES.find((c) => c.id === id) || {}).icon || ''
+  FEATURES.forEach((f) => {
+    const el = document.createElement('article')
+    el.className = 'card'
+    el.id = 'f-' + f.id
+    el.dataset.cat = f.cat
+    el.dataset.text = (f.title + ' ' + f.short + ' ' + f.detail.replace(/<[^>]+>/g, ' ') + ' ' + f.keywords.join(' ')).toLowerCase()
+    el.innerHTML =
+      '<div class="cat-tag">' + catIcon(f.cat) + ' ' + catName(f.cat) + '</div>' +
+      '<h3>' + f.title + '</h3>' +
+      '<p class="short">' + f.short + '</p>' +
+      '<div class="more"><span class="arr">▸</span> 자세히 보기</div>' +
+      '<div class="detail">' + f.detail + '</div>'
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return
+      el.classList.toggle('open')
+      el.querySelector('.more').innerHTML = el.classList.contains('open')
+        ? '<span class="arr">▸</span> 접기'
+        : '<span class="arr">▸</span> 자세히 보기'
+    })
+    cardsEl.appendChild(el)
+  })
+
+  // ── 렌더: 용어사전 ──
+  const glossaryEl = document.getElementById('glossaryList')
+  GLOSSARY.forEach((g) => {
+    const el = document.createElement('div')
+    el.className = 'g-item'
+    el.dataset.text = (g.term + ' ' + g.def + ' ' + (g.keywords || []).join(' ')).toLowerCase()
+    el.innerHTML = '<dt>' + g.term + '</dt><dd>' + g.def + '</dd>'
+    glossaryEl.appendChild(el)
+  })
+
+  // ── 렌더: FAQ ──
+  const faqEl = document.getElementById('faqList')
+  FAQ.forEach((f) => {
+    const el = document.createElement('details')
+    el.dataset.text = (f.q + ' ' + f.a).toLowerCase()
+    el.innerHTML = '<summary>' + f.q + '</summary><div class="a">' + f.a + '</div>'
+    faqEl.appendChild(el)
+  })
+
+  // ── 검색 + 필터 ──
+  const searchEl = document.getElementById('search')
+  const noResult = document.getElementById('noResult')
+  const resultCount = document.getElementById('resultCount')
+
+  function update() {
+    const q = searchEl.value.trim().toLowerCase()
+    const terms = q.split(/\s+/).filter(Boolean)
+    const match = (el) => terms.every((t) => el.dataset.text.includes(t))
+
+    let shown = 0
+    cardsEl.querySelectorAll('.card').forEach((el) => {
+      const ok = (activeCat === 'all' || el.dataset.cat === activeCat) && (terms.length === 0 || match(el))
+      el.style.display = ok ? '' : 'none'
+      if (ok) shown++
+      if (terms.length > 0 && ok) el.classList.add('open')
+      else if (terms.length === 0) el.classList.remove('open')
+    })
+    noResult.style.display = shown === 0 ? 'block' : 'none'
+    resultCount.textContent = terms.length > 0 ? '기능 ' + shown + '개 일치' : ''
+
+    // 용어사전·FAQ도 함께 필터 (검색어 있을 때만)
+    glossaryEl.querySelectorAll('.g-item').forEach((el) => {
+      el.style.display = terms.length === 0 || match(el) ? '' : 'none'
+    })
+    faqEl.querySelectorAll('details').forEach((el) => {
+      const ok = terms.length === 0 || match(el)
+      el.style.display = ok ? '' : 'none'
+      if (terms.length > 0 && ok) el.open = true
+    })
+  }
+  searchEl.addEventListener('input', update)
+
+  // "/" 키로 검색 포커스
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== searchEl) {
+      e.preventDefault()
+      searchEl.focus()
+    }
+  })
+
+  // 투어의 "→" 링크: 해당 기능 카드로 스크롤 + 펼침
+  document.querySelectorAll('[data-goto]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault()
+      const el = document.getElementById('f-' + a.dataset.goto)
+      if (!el) return
+      searchEl.value = ''
+      activeCat = 'all'
+      filterBar.querySelectorAll('.chip-btn').forEach((x) => x.classList.toggle('on', x.dataset.cat === 'all'))
+      update()
+      el.classList.add('open')
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  })
+})()
+</script>
+</body>
+</html>

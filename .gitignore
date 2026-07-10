@@ -29,6 +29,5 @@ coverage
 Thumbs.db
 .idea
 
-# 내부 문서 (공개 제외)
-docs
+# 내부 문서 (공개 제외) — docs/는 이제 가이드 사이트(GitHub Pages)라 공개
 RESEARCH.md
