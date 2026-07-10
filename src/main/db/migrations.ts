@@ -305,5 +305,14 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // v15 (커스텀): 씬 내보내기 번호 — 내보낼 때 파일명이 "01" 등 번호로 (클라우드 업로드용 ASCII)
   (db) => {
     db.exec(`ALTER TABLE gen_scenes ADD COLUMN export_no INTEGER;`)
+  },
+
+  // v16 (커스텀): 이미지 소프트삭제 — 삭제해도 유예시간 동안은 파일 보존(복원 가능),
+  // 지나면 백그라운드가 OS 휴지통으로. deleted_at IS NULL = 살아있음
+  (db) => {
+    db.exec(`
+      ALTER TABLE images ADD COLUMN deleted_at TEXT;
+      CREATE INDEX idx_images_deleted ON images(deleted_at);
+    `)
   }
 ]

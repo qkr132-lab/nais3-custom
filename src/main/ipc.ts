@@ -93,6 +93,7 @@ import {
   bulkSetResolution,
   bulkClearFavorites,
   bulkClearImages,
+  restoreImages,
   bulkExportZip,
   exportToFolder,
   sceneImages,
@@ -360,16 +361,21 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:bulkClearFavorites', ({ ids }) => {
     bulkClearFavorites(ids)
   })
-  handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => ({
-    deleted: bulkClearImages(ids, keepFavorites)
-  }))
+  handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => {
+    const imageIds = bulkClearImages(ids, keepFavorites)
+    return { deleted: imageIds.length, ids: imageIds }
+  })
   handle('scenes:bulkExportZip', async ({ ids }) => ({ count: await bulkExportZip(ids) }))
   handle('scenes:images', ({ sceneId, limit, offset, favoritesOnly }) =>
     sceneImages(sceneId, limit, offset, favoritesOnly)
   )
-  handle('scenes:deleteNonFavorites', ({ sceneId }) => ({
-    deleted: deleteNonFavorites(sceneId)
-  }))
+  handle('scenes:deleteNonFavorites', ({ sceneId }) => {
+    const imageIds = deleteNonFavorites(sceneId)
+    return { deleted: imageIds.length, ids: imageIds }
+  })
+  handle('scenes:restoreImages', ({ ids }) => {
+    restoreImages(ids)
+  })
   handle('images:setFavorite', ({ id, favorite }) => {
     setImageFavorite(id, favorite)
   })

@@ -18,7 +18,7 @@ import { logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance, generateImageStream, generateImageZip } from './nai/client'
 import { prepareCharRefs, prepareVibes } from './refs/prepare'
 import { GenerationQueue } from './queue/generation-queue'
-import { getPresetName, getScene, purgeOldTrash } from './scenes/repo'
+import { getPresetName, getScene, purgeOldTrash, purgeOldDeletedImages } from './scenes/repo'
 
 // 앱 이름 (dev 메뉴바·dock에서 'Electron' 대신 표시). 패키징 앱은 productName 사용
 app.setName('NAIS3 Custom')
@@ -112,6 +112,9 @@ app.whenReady().then(() => {
   // 시작 시 자동 백업(하루 1회) + 보관 기간 지난 휴지통 씬 자동 영구삭제 (커스텀 — 실수 대비)
   autoBackupIfDue()
   void purgeOldTrash()
+  // 유예시간 지난 소프트삭제 이미지 정리 (앱 시작 + 5분마다 — 켜둔 채로도 시각 계산). 커스텀
+  void purgeOldDeletedImages()
+  setInterval(() => void purgeOldDeletedImages(), 5 * 60 * 1000)
 
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
   const queue = new GenerationQueue(async (rawRequest, id, signal) => {

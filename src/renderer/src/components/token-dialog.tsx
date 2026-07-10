@@ -271,6 +271,7 @@ function StorageSection(): React.JSX.Element {
   const [autoSave, setAutoSave] = useState(true)
   const [format, setFormat] = useState('png')
   const [dateFolders, setDateFolders] = useState(true)
+  const [imgTrash, setImgTrash] = useState('60') // 이미지 삭제 유예 분 (커스텀, 기본 60)
 
   useEffect(() => {
     void window.nais
@@ -282,6 +283,9 @@ function StorageSection(): React.JSX.Element {
     void window.nais
       .invoke('settings:get', { key: 'date_folders' })
       .then(({ value }) => setDateFolders(value !== '0'))
+    void window.nais
+      .invoke('settings:get', { key: 'image_trash_minutes' })
+      .then(({ value }) => setImgTrash(value || '60'))
   }, [])
 
   return (
@@ -319,6 +323,25 @@ function StorageSection(): React.JSX.Element {
             <SelectContent>
               <SelectItem value="png">PNG</SelectItem>
               <SelectItem value="webp">WEBP</SelectItem>
+            </SelectContent>
+          </Select>
+        </Row>
+        <Row label="이미지 삭제 유예" hint="이 시간 안엔 Ctrl+Z로 복원 가능, 지나면 휴지통으로">
+          <Select
+            value={imgTrash}
+            onValueChange={(v) => {
+              setImgTrash(v)
+              void window.nais.invoke('settings:set', { key: 'image_trash_minutes', value: v })
+            }}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10분</SelectItem>
+              <SelectItem value="60">1시간</SelectItem>
+              <SelectItem value="360">6시간</SelectItem>
+              <SelectItem value="1440">24시간</SelectItem>
             </SelectContent>
           </Select>
         </Row>

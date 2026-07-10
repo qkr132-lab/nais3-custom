@@ -218,6 +218,21 @@ async function ensureExtrasData(): Promise<void> {
   await Promise.all(jobs)
 }
 
+/**
+ * 이미지 소프트삭제 실행취소 등록 (커스텀). 유예시간 안이면 deleted_at을 해제해 복원.
+ * 복원 후 씬 목록·현재 씬 상세·히스토리를 갱신한다.
+ */
+function registerImageDeleteUndo(get: () => ScenesState, ids: number[]): void {
+  if (ids.length === 0) return
+  pushUndo(`이미지 ${ids.length}장 삭제`, async () => {
+    await window.nais.invoke('scenes:restoreImages', { ids })
+    await get().load()
+    const sid = get().selectedId
+    if (sid != null) await get().loadImages(sid, true)
+    void useGenerationStore.getState().refreshHistory()
+  })
+}
+
 export const useScenesStore = create<ScenesState>((set, get) => ({
   presets: [],
   activePresetId: 1,
@@ -489,16 +504,18 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await window.nais.invoke('scenes:bulkClearFavorites', { ids: [...get().selection] })
   },
   bulkClearImages: async (keepFavorites = false) => {
-    await window.nais.invoke('scenes:bulkClearImages', {
+    const { ids } = await window.nais.invoke('scenes:bulkClearImages', {
       ids: [...get().selection],
       keepFavorites
     })
     set({ selection: new Set() })
     await get().load()
+    registerImageDeleteUndo(get, ids)
   },
   clearSceneImages: async (id, keepFavorites = false) => {
-    await window.nais.invoke('scenes:bulkClearImages', { ids: [id], keepFavorites })
+    const { ids } = await window.nais.invoke('scenes:bulkClearImages', { ids: [id], keepFavorites })
     await get().load()
+    registerImageDeleteUndo(get, ids)
   },
   bulkExportZip: async () => {
     await window.nais.invoke('scenes:bulkExportZip', { ids: [...get().selection] })
@@ -548,9 +565,10 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     // 메인 프리뷰가 이 파일을 보고 있으면 정리 — 삭제 후 깨진(NULL) 이미지 방지 (B8)
     const gen = useGenerationStore.getState()
     if (target && gen.viewingFilePath === target.filePath) gen.view(null)
-    // 씬 상세의 명시적 삭제 — 파일까지 삭제 (히스토리 삭제와 달리)
+    // 씬 상세의 명시적 삭제 — 소프트삭제(유예 후 파일 휴지통). 실행취소 가능 (커스텀)
     await window.nais.invoke('images:delete', { id: imageId, deleteFile: true })
     void gen.refreshHistory()
+    registerImageDeleteUndo(get, [imageId])
   },
   setFavoritesOnly: (v) => {
     if (v === get().favoritesOnly) return
@@ -559,11 +577,12 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     if (id != null) void get().loadImages(id, true)
   },
   deleteNonFavorites: async (sceneId) => {
-    const { deleted } = await window.nais.invoke('scenes:deleteNonFavorites', { sceneId })
+    const { deleted, ids } = await window.nais.invoke('scenes:deleteNonFavorites', { sceneId })
     if (deleted > 0) {
       await get().loadImages(sceneId, true)
       void get().load() // 카드 썸네일/카운트 갱신
       void useGenerationStore.getState().refreshHistory()
+      registerImageDeleteUndo(get, ids)
     }
     return deleted
   },

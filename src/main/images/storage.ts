@@ -213,11 +213,13 @@ export interface HistoryItem {
 
 export function listImages(limit: number, offset: number): { items: HistoryItem[]; total: number } {
   const db = getDb()
-  const total = (db.prepare('SELECT COUNT(*) AS c FROM images').get() as { c: number }).c
+  const total = (
+    db.prepare('SELECT COUNT(*) AS c FROM images WHERE deleted_at IS NULL').get() as { c: number }
+  ).c
   const rows = db
     .prepare(
       `SELECT id, file_path, thumbnail, kind, seed, created_at
-       FROM images ORDER BY id DESC LIMIT ? OFFSET ?`
+       FROM images WHERE deleted_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?`
     )
     .all(limit, offset) as {
     id: number

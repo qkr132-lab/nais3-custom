@@ -101,9 +101,9 @@ export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
       `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
-              (SELECT COUNT(*) FROM images WHERE scene_id = s.id) AS image_count,
-              (SELECT thumbnail FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb,
-              (SELECT file_path FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb_path
+              (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
+              (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
+              (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
        FROM gen_scenes s WHERE s.preset_id = ? AND s.deleted_at IS NULL ORDER BY s.sort_order, s.id`
     )
     .all(presetId) as (Row & {
@@ -121,9 +121,9 @@ export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: s
       `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
-              (SELECT COUNT(*) FROM images WHERE scene_id = s.id) AS image_count,
-              (SELECT thumbnail FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb,
-              (SELECT file_path FROM images WHERE scene_id = s.id ORDER BY id DESC LIMIT 1) AS thumb_path
+              (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
+              (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
+              (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
        FROM gen_scenes s WHERE s.deleted_at IS NOT NULL ORDER BY s.deleted_at DESC`
     )
     .all() as (Row & {
@@ -209,7 +209,7 @@ export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
       `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, export_no,
-              (SELECT COUNT(*) FROM images WHERE scene_id = ?) AS image_count
+              (SELECT COUNT(*) FROM images WHERE scene_id = ? AND deleted_at IS NULL) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
     .get(id, id) as (Row & { image_count: number }) | undefined
@@ -360,23 +360,50 @@ export function bulkClearFavorites(ids: number[]): void {
     .run(...ids)
 }
 
-/** 선택 씬들의 생성 이미지를 삭제 (DB 행 + 파일은 OS 휴지통으로 — 복원 가능).
- *  keepFavorites=true면 즐겨찾기는 남긴다 (커스텀) */
-export function bulkClearImages(ids: number[], keepFavorites = false): number {
-  if (ids.length === 0) return 0
+/** 선택 씬들의 생성 이미지를 소프트삭제 (표시만 지움 — 유예 후 purge가 파일을 OS 휴지통으로).
+ *  keepFavorites=true면 즐겨찾기는 남긴다 (커스텀). 반환: 소프트삭제된 이미지 id들(실행취소용) */
+export function bulkClearImages(ids: number[], keepFavorites = false): number[] {
+  if (ids.length === 0) return []
   const db = getDb()
   const favClause = keepFavorites ? ' AND favorite = 0' : ''
   const rows = db
     .prepare(
-      `SELECT file_path FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`
+      `SELECT id FROM images WHERE scene_id IN (${placeholders(ids.length)}) AND deleted_at IS NULL${favClause}`
     )
-    .all(...ids) as { file_path: string }[]
-  db.prepare(`DELETE FROM images WHERE scene_id IN (${placeholders(ids.length)})${favClause}`).run(
-    ...ids
+    .all(...ids) as { id: number }[]
+  const imageIds = rows.map((r) => r.id)
+  if (imageIds.length > 0) {
+    db.prepare(
+      `UPDATE images SET deleted_at = datetime('now') WHERE id IN (${placeholders(imageIds.length)})`
+    ).run(...imageIds)
+  }
+  return imageIds
+}
+
+/** 소프트삭제된 이미지 복원 (실행취소) — deleted_at 해제 */
+export function restoreImages(imageIds: number[]): void {
+  if (imageIds.length === 0) return
+  getDb()
+    .prepare(`UPDATE images SET deleted_at = NULL WHERE id IN (${placeholders(imageIds.length)})`)
+    .run(...imageIds)
+}
+
+/** 유예시간 지난 소프트삭제 이미지를 실제 정리 (레코드 삭제 + 파일 OS 휴지통).
+ *  유예는 설정 image_trash_minutes (기본 60분). 앱 시작 시 + 주기적으로 호출. 커스텀 */
+export async function purgeOldDeletedImages(): Promise<void> {
+  const raw = Number(getSetting('image_trash_minutes') ?? '60')
+  const minutes = Number.isFinite(raw) && raw >= 0 ? raw : 60
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT id, file_path FROM images WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
+    )
+    .all(`-${minutes} minutes`) as { id: number; file_path: string }[]
+  if (rows.length === 0) return
+  db.prepare(`DELETE FROM images WHERE id IN (${placeholders(rows.length)})`).run(
+    ...rows.map((r) => r.id)
   )
-  // 파일은 OS 휴지통으로 (백그라운드 — 대량이라 await로 UI 막지 않음)
-  void Promise.all(rows.map((r) => trashFile(r.file_path)))
-  return rows.length
+  for (const r of rows) await trashFile(r.file_path)
 }
 
 // ── 씬 상세 이미지 (페이지네이션) ────────────────────────
@@ -389,14 +416,16 @@ export function sceneImages(
   const db = getDb()
   const fav = favoritesOnly ? ' AND favorite = 1' : ''
   const total = (
-    db.prepare(`SELECT COUNT(*) AS c FROM images WHERE scene_id = ?${fav}`).get(sceneId) as {
+    db
+      .prepare(`SELECT COUNT(*) AS c FROM images WHERE scene_id = ? AND deleted_at IS NULL${fav}`)
+      .get(sceneId) as {
       c: number
     }
   ).c
   const rows = db
     .prepare(
       `SELECT id, file_path, thumbnail, seed, favorite FROM images
-       WHERE scene_id = ?${fav} ORDER BY id DESC LIMIT ? OFFSET ?`
+       WHERE scene_id = ? AND deleted_at IS NULL${fav} ORDER BY id DESC LIMIT ? OFFSET ?`
     )
     .all(sceneId, limit, offset) as {
     id: number
@@ -417,15 +446,19 @@ export function sceneImages(
   }
 }
 
-/** 씬의 즐겨찾기 제외 전체 삭제 (파일은 OS 휴지통으로 — 복원 가능) — 반환: 삭제 수 (N5) */
-export function deleteNonFavorites(sceneId: number): number {
+/** 씬의 즐겨찾기 제외 전체 소프트삭제 (유예 후 파일 휴지통) — 반환: 소프트삭제된 이미지 id들 (N5) */
+export function deleteNonFavorites(sceneId: number): number[] {
   const db = getDb()
   const rows = db
-    .prepare('SELECT id, file_path FROM images WHERE scene_id = ? AND favorite = 0')
-    .all(sceneId) as { id: number; file_path: string }[]
-  db.prepare('DELETE FROM images WHERE scene_id = ? AND favorite = 0').run(sceneId)
-  void Promise.all(rows.map((r) => trashFile(r.file_path)))
-  return rows.length
+    .prepare('SELECT id FROM images WHERE scene_id = ? AND favorite = 0 AND deleted_at IS NULL')
+    .all(sceneId) as { id: number }[]
+  const ids = rows.map((r) => r.id)
+  if (ids.length > 0) {
+    db.prepare(
+      `UPDATE images SET deleted_at = datetime('now') WHERE id IN (${placeholders(ids.length)})`
+    ).run(...ids)
+  }
+  return ids
 }
 
 export function setImageFavorite(id: number, favorite: boolean): void {
@@ -457,20 +490,21 @@ export function clearAllImages(): number {
 
 /**
  * 이미지 삭제.
- * - deleteFile=true: 파일까지 삭제 (씬 상세의 명시적 삭제)
- * - deleteFile=false: 기록만 삭제, 파일 보존 (히스토리 삭제 — 내부 라이브러리 파일만 정리)
+ * - deleteFile=true: 씬 상세의 명시적 삭제 → **소프트삭제**(표시만 지움, 유예 후 purge가 파일을 휴지통으로).
+ *   실행취소 가능. 커스텀.
+ * - deleteFile=false: 히스토리 기록만 삭제, 파일 보존 (내부 라이브러리 파일만 정리) — 기존 동작
  */
 export function deleteImage(id: number, deleteFile: boolean): void {
   const db = getDb()
-  const r = db.prepare('SELECT file_path FROM images WHERE id = ?').get(id) as
-    { file_path: string } | undefined
-  db.prepare('DELETE FROM images WHERE id = ?').run(id)
-  if (!r) return
   if (deleteFile) {
-    void trashFile(r.file_path) // 명시적 삭제 → OS 휴지통 (복원 가능)
-  } else {
-    unlinkIfInternal(r.file_path)
+    db.prepare(`UPDATE images SET deleted_at = datetime('now') WHERE id = ?`).run(id)
+    return
   }
+  const r = db.prepare('SELECT file_path FROM images WHERE id = ?').get(id) as
+    | { file_path: string }
+    | undefined
+  db.prepare('DELETE FROM images WHERE id = ?').run(id)
+  if (r) unlinkIfInternal(r.file_path)
 }
 
 // ── JSON / ZIP ──────────────────────────────────────────
@@ -649,17 +683,19 @@ function collectExportRows(scope: ExportScope): ExportRow[] {
   const db = getDb()
   const select = `SELECT i.file_path, i.thumbnail, s.name AS scene_name, s.export_no FROM images i
        LEFT JOIN gen_scenes s ON s.id = i.scene_id`
+  // 소프트삭제된 이미지는 내보내기에서 제외
+  const alive = 'i.deleted_at IS NULL'
   // 씬 순서(프리셋 순 → 씬 순) → 이미지 생성 순. 씬 없는(고아) 이미지는 맨 뒤
   const order = ` ORDER BY (s.id IS NULL),
        (SELECT sort_order FROM scene_presets WHERE id = s.preset_id), s.preset_id,
        s.sort_order, s.id, i.id`
   if (scope.mode === 'favorites') {
-    return db.prepare(`${select} WHERE i.favorite = 1${order}`).all() as ExportRow[]
+    return db.prepare(`${select} WHERE i.favorite = 1 AND ${alive}${order}`).all() as ExportRow[]
   }
   if (scope.mode === 'sceneTop') {
     return db
       .prepare(
-        `${select} WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL GROUP BY scene_id)${order}`
+        `${select} WHERE i.id IN (SELECT MAX(id) FROM images WHERE scene_id IS NOT NULL AND deleted_at IS NULL GROUP BY scene_id)${order}`
       )
       .all() as ExportRow[]
   }
@@ -667,7 +703,9 @@ function collectExportRows(scope: ExportScope): ExportRow[] {
   if (ids.length === 0) return []
   const favFilter = scope.favoritesOnly ? ' AND i.favorite = 1' : ''
   return db
-    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)})${favFilter}${order}`)
+    .prepare(
+      `${select} WHERE i.scene_id IN (${placeholders(ids.length)}) AND ${alive}${favFilter}${order}`
+    )
     .all(...ids) as ExportRow[]
 }
 

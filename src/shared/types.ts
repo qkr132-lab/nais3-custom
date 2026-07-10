@@ -528,16 +528,18 @@ export interface IpcInvokeMap {
   'scenes:bulkClearFavorites': { req: { ids: number[] }; res: void }
   'scenes:bulkClearImages': {
     req: { ids: number[]; keepFavorites?: boolean }
-    res: { deleted: number }
+    res: { deleted: number; ids: number[] }
   }
+  /** 소프트삭제된 이미지 복원 (실행취소, 커스텀) */
+  'scenes:restoreImages': { req: { ids: number[] }; res: void }
   'scenes:bulkExportZip': { req: { ids: number[] }; res: { count: number } }
   /** 씬 상세 이미지 페이지네이션 (수만 장 대비) */
   'scenes:images': {
     req: { sceneId: number; limit: number; offset: number; favoritesOnly?: boolean }
     res: { items: SceneImage[]; total: number }
   }
-  /** 씬의 즐겨찾기 제외 전체 삭제 (파일 포함) */
-  'scenes:deleteNonFavorites': { req: { sceneId: number }; res: { deleted: number } }
+  /** 씬의 즐겨찾기 제외 전체 소프트삭제 — 반환에 복원용 이미지 id 포함 */
+  'scenes:deleteNonFavorites': { req: { sceneId: number }; res: { deleted: number; ids: number[] } }
   'images:setFavorite': { req: { id: number; favorite: boolean }; res: void }
   /** 이미지 삭제 — deleteFile=true면 파일까지(씬 상세), 아니면 기록만(히스토리, 파일 보존) */
   'images:delete': { req: { id: number; deleteFile?: boolean }; res: void }
