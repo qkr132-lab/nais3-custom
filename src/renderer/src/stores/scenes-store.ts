@@ -108,8 +108,8 @@ interface ScenesState {
   generateReserved: () => Promise<void>
   /** 취소된 대기 항목을 예약으로 복원 (커스텀 — cancelAll이 호출) */
   restoreReserves: (bySceneId: Map<number, number>) => Promise<void>
-  /** 이 씬 1장 바로 생성 (예약 없이 — NAIS2식 즉석 생성) */
-  generateOne: (sceneId: number) => Promise<void>
+  /** 씬 상세 "생성" — 예약이 0이면 이 씬 1개 예약 후, 메인 '씬 생성'과 동일한 예약 생성 (커스텀) */
+  reserveAndGenerateScene: (sceneId: number) => Promise<void>
 }
 
 /** 씬 프롬프트를 기본 프롬프트 뒤에 이어붙임 (콤마 정리) */
@@ -623,15 +623,12 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await get().load()
   },
 
-  generateOne: async (sceneId) => {
+  reserveAndGenerateScene: async (sceneId) => {
+    // 씬 상세 "생성"용 (커스텀) — 예약이 0이면 이 씬만 1개 예약 후, 메인과 동일한 예약 생성 흐름
     const scene = get().scenes.find((s) => s.id === sceneId)
     if (!scene) return
-    // 즉석 1장은 큐 반복 미적용 (NAIS2 Custom의 상세 생성과 동일) — 씬별 추가는 적용
-    await ensureExtrasData()
-    await window.nais.invoke('queue:enqueue', {
-      request: { ...buildSceneRequest(scene), seed: sceneSeed(0) },
-      count: 1
-    })
+    if (scene.reserveCount === 0) await get().adjustReserve(sceneId, 1)
+    await get().generateReserved()
   }
 }))
 

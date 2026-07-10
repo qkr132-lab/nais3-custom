@@ -25,7 +25,7 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const loadImages = useScenesStore((s) => s.loadImages)
   const toggleFavorite = useScenesStore((s) => s.toggleFavorite)
   const deleteImage = useScenesStore((s) => s.deleteImage)
-  const generateOne = useScenesStore((s) => s.generateOne)
+  const reserveAndGenerateScene = useScenesStore((s) => s.reserveAndGenerateScene)
   const favoritesOnly = useScenesStore((s) => s.favoritesOnly)
   const setFavoritesOnly = useScenesStore((s) => s.setFavoritesOnly)
   const deleteNonFavorites = useScenesStore((s) => s.deleteNonFavorites)
@@ -39,6 +39,15 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     (s) => s.queue?.items.find((i) => i.state === 'generating')?.request.sceneId ?? null
   )
   const streaming = generatingSceneId === scene.id
+  // 이 씬의 큐 잔여(대기+생성 중) — 생성 중 추가한 예약이 여기 반영돼 숫자가 실시간으로 오른다
+  const queueRemaining = useGenerationStore(
+    (s) =>
+      (s.queue?.items ?? []).filter(
+        (i) => (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
+      ).length
+  )
+  // 표시할 예약/잔여 수 = 아직 안 뽑은 예약 + 큐에 든 것 (둘 중 하나만 값이 있음)
+  const pendingCount = scene.reserveCount + queueRemaining
   const sentinelRef = useRef<HTMLDivElement>(null)
   const [cols, setCols] = useState(3)
   const [lightboxIdx, setLightboxIdx] = useState(-1)
@@ -146,17 +155,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           height={scene.height}
           onPick={(width, height) => void update(scene.id, { width, height })}
         />
-        {/* 바로 생성 — 예약 없이 이 씬 1장 (NAIS2식) */}
+        {/* 생성 — 메인 "씬 생성"과 동일한 예약 생성 흐름 (예약 0이면 이 씬 1개 예약 후) */}
         <Button
           size="sm"
           variant="accent"
           className="gap-1"
-          title="이 씬 1장 바로 생성"
-          onClick={() => void generateOne(scene.id)}
+          title="예약한 만큼 생성 (좌측 '씬 생성'과 동일 · 예약 0이면 1개)"
+          onClick={() => void reserveAndGenerateScene(scene.id)}
         >
           <Play size={13} /> 생성
         </Button>
-        {/* 예약 +/- */}
+        {/* 예약 +/- — 숫자는 아직 안 뽑은 예약 + 큐 잔여를 합산 표시 (생성 중 추가도 즉시 반영) */}
         <div className="flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5">
           <button
             className="grid size-6 place-items-center rounded-full text-muted hover:bg-paper disabled:opacity-30"
@@ -165,9 +174,7 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           >
             <Minus size={14} />
           </button>
-          <span className="min-w-6 text-center text-[13px] font-semibold">
-            {scene.reserveCount}
-          </span>
+          <span className="min-w-6 text-center text-[13px] font-semibold">{pendingCount}</span>
           <button
             className="grid size-6 place-items-center rounded-full text-muted hover:bg-paper"
             onClick={() => void adjustReserve(scene.id, 1)}
