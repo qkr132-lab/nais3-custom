@@ -454,6 +454,38 @@ const GLOSSARY = [
   { term: '_이미지목록.md', def: '번호로 내보낼 때 함께 저장되는 "번호 ↔ 씬 이름" 매핑 표. AI에게 지침을 만들게 할 때 그대로 주면 됩니다.', keywords: ['매핑', '설명서', '번호'] }
 ]
 
+// ── 시뮬레이터용 데이터 ────────────────────────────────────
+
+// 한글 태그 자동완성 체험용 미니 사전 (실제 앱은 4,000개+)
+const SIM_TAG_DICT = [
+  { ko: '핑크 동공', en: 'pink pupils', alt: ['핑크동공', '분홍 동공'] },
+  { ko: '파란 눈', en: 'blue eyes', alt: ['블루 아이즈', '파란눈'] },
+  { ko: '미소', en: 'smile', alt: ['스마일', '웃음'] },
+  { ko: '교복', en: 'school uniform', alt: ['스쿨 유니폼'] },
+  { ko: '배꼽/복부 노출', en: 'midriff', alt: ['미드리프', '미드리프트', '미드립'] },
+  { ko: '긴 머리', en: 'long hair', alt: ['롱헤어', '긴머리'] },
+  { ko: '트윈테일', en: 'twintails', alt: ['트윈 테일', '양갈래'] },
+  { ko: '고양이 귀', en: 'cat ears', alt: ['캣이어', '냥귀', '고양이귀'] },
+  { ko: '메이드복', en: 'maid', alt: ['메이드'] },
+  { ko: '안경', en: 'glasses', alt: ['글래시스'] },
+  { ko: '홍조', en: 'blush', alt: ['블러쉬', '얼굴 빨개짐'] },
+  { ko: '눈물', en: 'tears', alt: ['우는', '티어즈'] },
+  { ko: '밤하늘', en: 'night sky', alt: ['나이트 스카이', '밤 하늘'] },
+  { ko: '벚꽃', en: 'cherry blossoms', alt: ['체리 블라썸'] },
+  { ko: '해변', en: 'beach', alt: ['비치', '바닷가'] },
+  { ko: '전신', en: 'full body', alt: ['풀바디', '풀 바디'] },
+  { ko: '상반신', en: 'upper body', alt: ['어퍼 바디'] },
+  { ko: '옆모습', en: 'profile', alt: ['프로필', '옆 모습'] },
+  { ko: '역광', en: 'backlighting', alt: ['백라이트', '백라이팅'] },
+  { ko: '은발', en: 'silver hair', alt: ['실버 헤어', '은색 머리'] }
+]
+
+// 조각 프롬프트 체험용 조각 세트
+const SIM_FRAGMENTS = {
+  표정: ['smile', 'laughing', 'crying', 'angry', 'surprised'],
+  배경: ['beach', 'forest', 'classroom', 'night city', 'snowy town']
+}
+
 const FAQ = [
   {
     q: '무료인가요? NovelAI 계정이 꼭 필요한가요?',
