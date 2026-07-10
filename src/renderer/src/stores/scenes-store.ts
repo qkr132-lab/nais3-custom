@@ -90,6 +90,8 @@ interface ScenesState {
   bulkSetResolution: (width: number, height: number) => Promise<void>
   bulkClearFavorites: () => Promise<void>
   bulkClearImages: (keepFavorites?: boolean) => Promise<void>
+  /** 단일 씬의 이미지 삭제 (우클릭 메뉴용, 커스텀). 파일은 OS 휴지통으로 */
+  clearSceneImages: (id: number, keepFavorites?: boolean) => Promise<void>
   bulkExportZip: () => Promise<void>
 
   /** 완료 즉시 카드 썸네일을 새 원본으로 낙관적 갱신 (튐 방지) */
@@ -492,6 +494,10 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       keepFavorites
     })
     set({ selection: new Set() })
+    await get().load()
+  },
+  clearSceneImages: async (id, keepFavorites = false) => {
+    await window.nais.invoke('scenes:bulkClearImages', { ids: [id], keepFavorites })
     await get().load()
   },
   bulkExportZip: async () => {

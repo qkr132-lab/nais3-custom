@@ -40,7 +40,15 @@ import {
 } from '@dnd-kit/core'
 import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
 import { AnimatePresence, motion } from 'motion/react'
-import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties
+} from 'react'
 import type { Scene } from '@shared/types'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
@@ -334,6 +342,30 @@ function SceneGrid(): React.JSX.Element {
     void folderExport.run({ ids: scenes.filter((s) => (s.imageCount ?? 0) > 0).map((s) => s.id) })
   }
 
+  // 씬 카드 우클릭 메뉴용 안정 콜백 (커스텀) — folderExport.run은 렌더마다 바뀌므로 ref로 감싸
+  // SceneCard memo가 깨지지 않게 한다
+  const clearSceneImages = useScenesStore((s) => s.clearSceneImages)
+  const runExportRef = useRef(folderExport.run)
+  useEffect(() => {
+    runExportRef.current = folderExport.run
+  })
+  const onExportSceneFavorites = useCallback((id: number): void => {
+    void runExportRef.current({ ids: [id], favoritesOnly: true })
+  }, [])
+  const onClearSceneImages = useCallback(
+    async (id: number, name: string): Promise<void> => {
+      if (
+        await askConfirm('이미지 모두 삭제', {
+          message: `"${name}" 씬의 생성 이미지를 모두 삭제합니다. (파일은 휴지통으로 이동)`,
+          confirmLabel: '삭제',
+          danger: true
+        })
+      )
+        await clearSceneImages(id)
+    },
+    [clearSceneImages]
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
       {/* 툴바 — 한 행: 프리셋 드롭다운 + 아이콘(툴팁) */}
@@ -563,6 +595,8 @@ function SceneGrid(): React.JSX.Element {
                   live={scene.id === generatingSceneId ? previewPng : null}
                   generating={scene.id === generatingSceneId}
                   onOpenAddition={setAdditionSceneIds}
+                  onExportFavorites={onExportSceneFavorites}
+                  onClearImages={onClearSceneImages}
                 />
               ))}
               <button
@@ -632,7 +666,11 @@ function SceneGrid(): React.JSX.Element {
 }
 
 /** 폴더 내보내기 대상 (커스텀). ids=씬들의 모든 이미지, mode=즐겨찾기/각 씬 최상단(전역) */
-type FolderExportScope = { ids?: number[]; mode?: 'favorites' | 'sceneTop' }
+type FolderExportScope = {
+  ids?: number[]
+  mode?: 'favorites' | 'sceneTop'
+  favoritesOnly?: boolean
+}
 
 /**
  * 폴더로 내보내기 로직 (커스텀) — 상단 툴바와 편집 모드에서 공유.
@@ -1057,12 +1095,16 @@ const SceneCard = memo(function SceneCard({
   scene,
   live,
   generating,
-  onOpenAddition
+  onOpenAddition,
+  onExportFavorites,
+  onClearImages
 }: {
   scene: Scene
   live: string | null
   generating: boolean
   onOpenAddition: (sceneIds: number[]) => void
+  onExportFavorites: (id: number) => void
+  onClearImages: (id: number, name: string) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
@@ -1337,9 +1379,22 @@ const SceneCard = memo(function SceneCard({
           <Sparkles size={13} className={scene.varietyPlus ? 'text-violet-400' : undefined} />
           Variety+ {scene.varietyPlus ? '끄기' : '켜기'}
         </ContextMenuItem>
+        {scene.imageCount > 0 && (
+          <>
+            <ContextMenuSeparator />
+            {/* 이 씬의 즐겨찾기 이미지만 폴더로 내보내기 (커스텀) */}
+            <ContextMenuItem onSelect={() => onExportFavorites(scene.id)}>
+              <Star size={13} className="text-amber-400" /> 즐겨찾기 이미지 내보내기
+            </ContextMenuItem>
+            {/* 이 씬의 생성 이미지 모두 삭제 (커스텀) */}
+            <ContextMenuItem danger onSelect={() => onClearImages(scene.id, scene.name)}>
+              <ImageOff size={13} /> 이미지 모두 삭제
+            </ContextMenuItem>
+          </>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem danger onSelect={() => void removeScene()}>
-          <Trash2 size={13} /> 삭제
+          <Trash2 size={13} /> 씬 삭제
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

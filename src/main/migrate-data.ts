@@ -70,6 +70,9 @@ export function migrateFromSharedFolder(): void {
       //    공유 폴더를 가리키고 있으므로 자체 폴더로 바꿔 완전히 독립시킨다
       rewriteAbsolutePaths(join(customDir, 'nais3.db'), sharedDir, customDir)
 
+      // ②-b 첫 실행 안내 플래그 — 렌더러가 "폴더가 옮겨졌다"는 1회성 안내창을 띄우게 (커스텀)
+      setDbFlag(join(customDir, 'nais3.db'), 'folder_moved_notice', '1')
+
       // ③ 공식 NAIS3 복구
       repairOfficialDb(sharedDir)
     }
@@ -77,6 +80,21 @@ export function migrateFromSharedFolder(): void {
   } catch (e) {
     // 이관 실패 시 마커를 쓰지 않으므로 다음 실행에서 재시도. 앱 자체는 계속 뜬다
     console.error('[migrate-data] 이관 실패:', e)
+  }
+}
+
+/** 복사된 DB의 settings 테이블에 KV 하나 기록 (렌더러 안내 플래그용) */
+function setDbFlag(dbPath: string, key: string, value: string): void {
+  if (!existsSync(dbPath)) return
+  const db = new Database(dbPath)
+  try {
+    db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).run(key, value)
+  } catch {
+    // settings 테이블이 없는 구버전 DB면 무시
+  } finally {
+    db.close()
   }
 }
 

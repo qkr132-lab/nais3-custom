@@ -141,6 +141,7 @@ function AppearanceSection(): React.JSX.Element {
 function GenerationSection(): React.JSX.Element {
   const [streaming, setStreaming] = useState(true)
   const [delay, setDelay] = useState(600)
+  const [notify, setNotify] = useState(true) // 생성 완료 알림 (커스텀, 기본 켜짐)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const setPromptSplitEnabled = useGenerationStore((s) => s.setPromptSplitEnabled)
   // 확인 창 전역 끄기 (커스텀)
@@ -157,6 +158,9 @@ function GenerationSection(): React.JSX.Element {
     })
     void window.nais.invoke('settings:get', { key: 'gen_delay_ms' }).then(({ value }) => {
       if (value != null && value !== '') setDelay(Number(value))
+    })
+    void window.nais.invoke('settings:get', { key: 'notify_on_complete' }).then(({ value }) => {
+      setNotify(value !== '0')
     })
   }, [])
 
@@ -187,6 +191,18 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row label="확인 창 끄기" hint="삭제 등 '정말 하시겠어요?' 확인을 건너뜀 (주의)">
         <Switch checked={confirmsOff} onCheckedChange={setConfirmsOff} />
+      </Row>
+      <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">
+        <Switch
+          checked={notify}
+          onCheckedChange={(v) => {
+            setNotify(v)
+            void window.nais.invoke('settings:set', {
+              key: 'notify_on_complete',
+              value: v ? '1' : '0'
+            })
+          }}
+        />
       </Row>
     </div>
   )

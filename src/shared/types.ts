@@ -320,6 +320,8 @@ export interface IpcInvokeMap {
   'db:status': { req: void; res: { version: number; path: string } }
   /** 앱 버전 */
   'app:version': { req: void; res: { version: string } }
+  /** 데이터 폴더(userData) 탐색기로 열기 (커스텀) */
+  'app:openDataFolder': { req: void; res: void }
   'nai:verifyToken': {
     req: { token: string }
     res: { valid: boolean; subscription?: SubscriptionInfo; error?: string }
@@ -554,6 +556,8 @@ export interface IpcInvokeMap {
     req: {
       ids?: number[]
       mode?: 'favorites' | 'sceneTop'
+      /** ids와 함께: 해당 씬들의 즐겨찾기 이미지만 (커스텀) */
+      favoritesOnly?: boolean
       dir?: string
       policy?: 'overwrite' | 'rename' | 'skip'
     }

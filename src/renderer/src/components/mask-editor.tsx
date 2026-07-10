@@ -23,7 +23,7 @@ export function MaskEditor({
   onCancel: () => void
 }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [brush, setBrush] = useState(40)
+  const [brush, setBrush] = useState(20)
   const [erasing, setErasing] = useState(false)
   const drawing = useRef(false)
   const last = useRef<{ x: number; y: number } | null>(null)
@@ -53,8 +53,10 @@ export function MaskEditor({
     // 붓 크기는 원본 해상도 기준으로 스케일 (화면에서 보이는 크기 유지)
     const r = (brush / dispW) * width
     ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over'
-    ctx.strokeStyle = 'rgba(233, 94, 80, 0.7)'
-    ctx.fillStyle = 'rgba(233, 94, 80, 0.7)'
+    // 캔버스엔 불투명하게 칠하고(마스크 데이터·겹침 얼룩 없이 깨끗) 화면 표시만 CSS로 반투명 →
+    // 어디를 칠했는지 밑그림이 비쳐 보인다 (커스텀)
+    ctx.strokeStyle = 'rgba(233, 94, 80, 1)'
+    ctx.fillStyle = 'rgba(233, 94, 80, 1)'
     ctx.lineWidth = r * 2
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
@@ -118,7 +120,8 @@ export function MaskEditor({
               width={width}
               height={height}
               className="absolute inset-0 h-full w-full cursor-crosshair"
-              style={{ touchAction: 'none' }}
+              // 표시만 반투명 — 칠한 영역 아래 원본이 비쳐 보이게 (마스크 export는 불투명 알파 기준)
+              style={{ touchAction: 'none', opacity: 0.5 }}
               onPointerDown={(e) => {
                 e.currentTarget.setPointerCapture(e.pointerId)
                 drawing.current = true

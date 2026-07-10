@@ -6,6 +6,7 @@ import { Toaster } from './components/toaster'
 import { PreviewPane } from './components/preview-pane'
 import { DirectorMode } from './components/director-mode'
 import { InpaintHost } from './components/inpaint-host'
+import { FolderMovedNotice } from './components/folder-moved-notice'
 import { MetadataDialog } from './components/metadata-dialog'
 import { PromptPanel } from './components/prompt-panel'
 import { SceneMode } from './components/scene-mode'
@@ -165,6 +166,7 @@ export default function App(): React.JSX.Element {
         <TextPromptHost />
         <InpaintHost />
         <MetadataDialog />
+        <FolderMovedNotice />
         <Toaster />
         <AnimatePresence>{!ready && <LoadingScreen key="loading" />}</AnimatePresence>
       </div>

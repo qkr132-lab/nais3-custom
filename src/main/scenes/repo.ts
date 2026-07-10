@@ -630,7 +630,12 @@ export interface ExportFolderResult {
 }
 
 /** 내보내기 대상 선택 (커스텀). ids=씬들의 모든 이미지, mode=즐겨찾기/각 씬 최상단(전역) */
-export type ExportScope = { ids?: number[]; mode?: 'favorites' | 'sceneTop' }
+export type ExportScope = {
+  ids?: number[]
+  mode?: 'favorites' | 'sceneTop'
+  /** ids와 함께 쓰면 해당 씬들의 즐겨찾기 이미지만 (커스텀) */
+  favoritesOnly?: boolean
+}
 type ExportRow = {
   file_path: string
   thumbnail: Buffer | null
@@ -660,8 +665,9 @@ function collectExportRows(scope: ExportScope): ExportRow[] {
   }
   const ids = scope.ids ?? []
   if (ids.length === 0) return []
+  const favFilter = scope.favoritesOnly ? ' AND i.favorite = 1' : ''
   return db
-    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)})${order}`)
+    .prepare(`${select} WHERE i.scene_id IN (${placeholders(ids.length)})${favFilter}${order}`)
     .all(...ids) as ExportRow[]
 }
 

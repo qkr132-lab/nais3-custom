@@ -1,4 +1,14 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  Notification,
+  session,
+  shell
+} from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
 import { removeComments } from '../shared/nai-presets'
 import {
@@ -157,6 +167,9 @@ export function broadcast<C extends keyof IpcEventMap>(channel: C, payload: IpcE
 export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQueue }): void {
   handle('db:status', () => ({ version: ctx.dbVersion, path: getDbPath() }))
   handle('app:version', () => ({ version: app.getVersion() }))
+  handle('app:openDataFolder', () => {
+    void shell.openPath(app.getPath('userData'))
+  })
 
   handle('nai:verifyToken', ({ token }) => verifyToken(token))
 
@@ -367,8 +380,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:exportJson', async ({ presetId }) => ({ saved: await exportScenesJson(presetId) }))
   handle('scenes:importJson', async ({ presetId }) => ({ count: await importScenesJson(presetId) }))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
-  handle('scenes:exportToFolder', ({ ids, mode, dir, policy }) =>
-    exportToFolder({ ids, mode }, { dir, policy })
+  handle('scenes:exportToFolder', ({ ids, mode, favoritesOnly, dir, policy }) =>
+    exportToFolder({ ids, mode, favoritesOnly }, { dir, policy })
   )
 
   // ── Cloudflare R2 업로드 (커스텀) ──────────────────────────────────
@@ -786,5 +799,24 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(color)
   })
 
-  ctx.queue.on('changed', (status) => broadcast('queue:changed', status))
+  // 생성 완료 알림 (커스텀) — 큐가 idle로 전환될 때 이번 실행에서 끝난 장수를 Windows 알림으로.
+  // 소리 없음(silent). 설정 notify_on_complete !== '0' 일 때만 (기본 켜짐).
+  let queueWasRunning = false
+  let doneAtRunStart = 0
+  ctx.queue.on('changed', (status) => {
+    broadcast('queue:changed', status)
+    const doneNow = status.items.filter((i) => i.state === 'done').length
+    if (status.running && !queueWasRunning) doneAtRunStart = doneNow
+    if (!status.running && queueWasRunning) {
+      const completed = doneNow - doneAtRunStart
+      if (completed > 0 && getSetting('notify_on_complete') !== '0' && Notification.isSupported()) {
+        new Notification({
+          title: 'NAIS3 Custom — 생성 완료',
+          body: `이미지 ${completed}장 생성이 끝났어요`,
+          silent: true
+        }).show()
+      }
+    }
+    queueWasRunning = status.running
+  })
 }
