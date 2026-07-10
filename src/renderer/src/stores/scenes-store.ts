@@ -568,6 +568,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     // 씬 상세의 명시적 삭제 — 소프트삭제(유예 후 파일 휴지통). 실행취소 가능 (커스텀)
     await window.nais.invoke('images:delete', { id: imageId, deleteFile: true })
     void gen.refreshHistory()
+    void get().load() // 씬 그리드 카드 썸네일·장수 즉시 갱신 (지운 이미지가 카드에 남던 문제)
     registerImageDeleteUndo(get, [imageId])
   },
   setFavoritesOnly: (v) => {
