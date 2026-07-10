@@ -18,6 +18,35 @@ function headers(token: string): Record<string, string> {
   }
 }
 
+/**
+ * 속도 제한(HTTP 429) 전용 에러 (커스텀). 일반 실패와 구분해서, 큐가 이 항목을
+ * "실패"로 버리지 않고 retryAfterMs 만큼 기다렸다 **같은 항목을 재시도**하게 한다.
+ * (취소 직후 바로 재생성 → 429 폭주로 예약분이 싹 날아가던 문제 해결)
+ */
+export class RateLimitError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`속도 제한(429) — ${Math.ceil(retryAfterMs / 1000)}초 후 재시도`)
+    this.name = 'RateLimitError'
+  }
+}
+
+/** Retry-After 헤더(초 또는 HTTP-date) → ms. 없거나 못 읽으면 fallback */
+function parseRetryAfter(res: Response, fallbackMs: number): number {
+  const h = res.headers.get('retry-after')
+  if (h) {
+    const secs = Number(h)
+    if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+    const date = Date.parse(h)
+    if (!Number.isNaN(date)) return Math.max(0, date - Date.now())
+  }
+  return fallbackMs
+}
+
+/** 429면 RateLimitError를 던진다 (생성 경로 공통). 그 외 non-OK는 호출부에서 처리 */
+async function throwIfRateLimited(res: Response): Promise<void> {
+  if (res.status === 429) throw new RateLimitError(parseRetryAfter(res, 5000))
+}
+
 export async function verifyToken(
   token: string
 ): Promise<{ valid: boolean; subscription?: SubscriptionInfo; error?: string }> {
@@ -82,6 +111,7 @@ export async function generateImageStream(
     body: sentPayload,
     signal
   })
+  await throwIfRateLimited(res)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`생성 실패 ${res.status}: ${text.slice(0, 300)}`)
@@ -179,6 +209,7 @@ export async function generateImageZip(
     body: sentPayload,
     signal
   })
+  await throwIfRateLimited(res)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`생성 실패 ${res.status}: ${text.slice(0, 300)}`)

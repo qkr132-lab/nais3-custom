@@ -337,6 +337,8 @@ export interface IpcInvokeMap {
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
   'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
+  /** 우선 등록 (커스텀) — 생성 중인 항목 바로 다음에 끼워넣어 다음 차례로 */
+  'queue:enqueueNext': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
   'queue:cancel': { req: { ids: string[] }; res: void }
   'queue:status': { req: void; res: QueueStatus }
   'images:list': {

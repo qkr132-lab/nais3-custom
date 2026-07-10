@@ -34,10 +34,14 @@ const DEFAULT_LINKS: QuickLink[] = [
   { name: 'Danbooru', url: 'https://danbooru.donmai.us' },
   { name: '태그 사전', url: 'https://danbooru-tag.mephistopheles.moe/' },
   { name: 'novelai.app', url: 'https://novelai.app/' },
+  // 이미지 호스팅 — 여기서 로그인해두면 드래그앤드롭으로 바로 업로드 (커스텀)
+  { name: 'itimg.kr 업로드', url: 'https://itimg.kr/' },
   { name: '구글 번역', url: 'https://translate.google.co.kr/?sl=ko&tl=en&op=translate' }
 ]
 
 const LINKS_KEY = 'web_quick_links'
+// itimg 링크를 기존 사용자에게 한 번만 주입했는지 표시 (커스텀)
+const ITIMG_INJECTED_KEY = 'web_itimg_link_injected'
 const PROXY_KEY = 'web_proxy_rules'
 
 function normalizeUrl(raw: string): string {
@@ -67,7 +71,20 @@ export function WebMode(): React.JSX.Element {
       if (value) {
         try {
           const parsed = JSON.parse(value) as QuickLink[]
-          if (Array.isArray(parsed) && parsed.length > 0) setLinks(parsed)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // 기존 사용자에게도 itimg 업로드 링크를 한 번만 주입 (이후 삭제하면 다시 안 넣음)
+            const { value: injected } = await window.nais.invoke('settings:get', {
+              key: ITIMG_INJECTED_KEY
+            })
+            let next = parsed
+            if (!injected && !parsed.some((l) => l.url.includes('itimg.kr'))) {
+              next = [...parsed, { name: 'itimg.kr 업로드', url: 'https://itimg.kr/' }]
+              void window.nais.invoke('settings:set', { key: LINKS_KEY, value: JSON.stringify(next) })
+            }
+            if (!injected)
+              void window.nais.invoke('settings:set', { key: ITIMG_INJECTED_KEY, value: '1' })
+            setLinks(next)
+          }
         } catch {
           // 손상된 값 무시
         }

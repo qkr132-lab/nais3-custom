@@ -387,8 +387,9 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       for (let i = 0; i < step; i++) {
         requests.push({ ...buildSceneRequest(scene), seed: sceneSeed(i) })
       }
-      await window.nais.invoke('queue:enqueueMany', { requests })
-      toast(`"${scene.name}" ${step}장 생성 큐에 추가됨`, 'success')
+      // 맨 뒤가 아니라 "지금 생성 중인 것 바로 다음"에 끼워넣어 곧바로 뽑히게 (커스텀)
+      await window.nais.invoke('queue:enqueueNext', { requests })
+      toast(`"${scene.name}" ${step}장 — 다음 차례로 추가됨`, 'success')
       return
     }
     const reserveCount = Math.max(0, scene.reserveCount + step)

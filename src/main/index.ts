@@ -12,6 +12,7 @@ import { removeComments } from '../shared/nai-presets'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
+import { migrateFromSharedFolder } from './migrate-data'
 import { setupUpdater } from './updater'
 import { logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance, generateImageStream, generateImageZip } from './nai/client'
@@ -22,12 +23,12 @@ import { getPresetName, getScene, purgeOldTrash } from './scenes/repo'
 // 앱 이름 (dev 메뉴바·dock에서 'Electron' 대신 표시). 패키징 앱은 productName 사용
 app.setName('NAIS3 Custom')
 
-// 데이터 폴더는 기존 NAIS3(%APPDATA%\NAIS3)를 "그대로" 공유한다 (커스텀).
-// 예전 커스텀 빌드가 이 폴더에 데이터를 쌓았고, 사용자가 폴더·토큰·설정을 끊김 없이
-// 이어 쓰길 원하므로 별도 폴더로 분리하지 않는다. 설치 프로그램만 별도(appId 분리)이고
-// 데이터는 한 곳을 본다 → 업데이트해도 토큰/설정이 초기화되지 않는다.
-// userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
-app.setPath('userData', join(app.getPath('appData'), 'NAIS3'))
+// 데이터 폴더: 자체 폴더(%APPDATA%\NAIS3 Custom) — v1.5.0부터 공식 NAIS3와 완전 분리.
+// (v1.1.6~1.4.3의 공유 방식은 커스텀 DB 마이그레이션이 공식 NAIS3를 못 켜게 만드는
+//  사고를 일으켜 폐기. 첫 실행 시 migrateFromSharedFolder가 기존 데이터를 복사해오고
+//  공식 DB를 복구한다.) userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
+app.setPath('userData', join(app.getPath('appData'), 'NAIS3 Custom'))
+migrateFromSharedFolder()
 
 // 중복 실행 방지 (특히 Windows) — 두 번째 실행은 기존 창을 앞으로
 if (!app.requestSingleInstanceLock()) {
