@@ -7,8 +7,6 @@
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/qkr132-lab/nais3-custom)](https://github.com/qkr132-lab/nais3-custom/releases/latest)
 
-**📖 [가이드 사이트](https://qkr132-lab.github.io/nais3-custom/)** — 모든 기능을 검색하고 사용법을 찾아보세요
-
 </div>
 
 ---
