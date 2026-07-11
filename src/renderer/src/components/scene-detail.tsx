@@ -71,9 +71,10 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     return () => clearTimeout(t)
   }, [streaming, heldFrame])
   // 스트리밍이 끝났는데 아직 새 이미지가 안 들어왔으면 프레임 유지, 들어와 로드되면 해제
-  const newTop = !streaming && heldFrame && images[0] && images[0].id !== baselineTopId.current
-    ? images[0]
-    : null
+  const newTop =
+    !streaming && heldFrame && images[0] && images[0].id !== baselineTopId.current
+      ? images[0]
+      : null
   const showTile = streaming || heldFrame != null
 
   // F9: 씬 에디터 토큰 수를 base(메인)+씬 합산으로 표시 — 실제 전송은 base 뒤에 씬을 붙이므로
@@ -135,11 +136,10 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     return () => io.disconnect()
   }, [scene.id, images.length, imagesTotal, imagesLoading, loadImages])
 
-
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
       {/* 헤더 */}
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <Button size="sm" variant="ghost" className="gap-1" onClick={() => select(null)}>
           <ArrowLeft size={15} /> 씬 목록
         </Button>
@@ -187,8 +187,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
 
       {source && (
         <p className="border-b border-line bg-surface-2 px-3 py-1 text-[11px] text-muted">
-          i2i/인페인트 소스가 설정돼 있어 씬 해상도 대신 소스 해상도({source.width}×{source.height})로
-          생성됩니다.
+          i2i/인페인트 소스가 설정돼 있어 씬 해상도 대신 소스 해상도({source.width}×{source.height}
+          )로 생성됩니다.
         </p>
       )}
 
@@ -222,7 +222,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             onClick={() => setFavoritesOnly(!favoritesOnly)}
             className={cn(
               'flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium transition-colors',
-              favoritesOnly ? 'bg-amber-400/90 text-black' : 'bg-surface-2 text-muted hover:text-ink'
+              favoritesOnly
+                ? 'bg-amber-400/90 text-black'
+                : 'bg-surface-2 text-muted hover:text-ink'
             )}
             title="즐겨찾기만 보기"
           >
@@ -232,13 +234,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           <button
             onClick={async () => {
               const ok = await askConfirm('즐겨찾기 제외 삭제', {
-                message: '이 씬에서 즐겨찾기하지 않은 이미지를 모두 삭제합니다 (파일 포함). 되돌릴 수 없습니다.',
+                message:
+                  '이 씬에서 즐겨찾기하지 않은 이미지를 모두 삭제합니다 (파일 포함). 되돌릴 수 없습니다.',
                 confirmLabel: '삭제',
                 danger: true
               })
               if (!ok) return
               const n = await deleteNonFavorites(scene.id)
-              toast(n > 0 ? `${n.toLocaleString()}장 삭제됨` : '삭제할 이미지가 없습니다', n > 0 ? 'success' : 'info')
+              toast(
+                n > 0 ? `${n.toLocaleString()}장 삭제됨` : '삭제할 이미지가 없습니다',
+                n > 0 ? 'success' : 'info'
+              )
             }}
             className="flex h-6 items-center gap-1 rounded-md bg-surface-2 px-2 text-[11.5px] font-medium text-muted transition-colors hover:text-danger"
             title="즐겨찾기 제외 전체 삭제"
@@ -268,7 +274,10 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
               : '아직 생성된 이미지가 없습니다. 위에서 예약(+)하고 좌측 생성 버튼을 누르세요.'}
           </p>
         ) : (
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+          >
             {/* F1: 스트리밍 타일 — 완성본이 로드될 때까지 마지막 프레임을 붙든다 (튐 방지) */}
             {showTile && (
               <div
@@ -276,9 +285,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                 style={{ aspectRatio: `${scene.width} / ${scene.height}` }}
               >
                 {streaming && previewPng ? (
-                  <img src={`data:image/png;base64,${previewPng}`} className="h-full w-full object-cover" alt="" />
+                  <img
+                    src={`data:image/png;base64,${previewPng}`}
+                    className="h-full w-full object-cover"
+                    alt=""
+                  />
                 ) : heldFrame ? (
-                  <img src={`data:image/png;base64,${heldFrame}`} className="h-full w-full object-cover" alt="" />
+                  <img
+                    src={`data:image/png;base64,${heldFrame}`}
+                    className="h-full w-full object-cover"
+                    alt=""
+                  />
                 ) : (
                   <div className="grid h-full w-full place-items-center">
                     <Loader2 size={26} className="animate-spin text-accent" />
@@ -307,39 +324,39 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                 filePath={img.filePath}
                 onDelete={() => void deleteImage(img.id)}
               >
-              <div
-                className="group relative overflow-hidden rounded-md bg-surface-2"
-                style={{ aspectRatio: `${scene.width} / ${scene.height}` }}
-              >
-                <img
-                  src={imageUrl(img.filePath)}
-                  className="h-full w-full cursor-pointer object-cover"
-                  loading="lazy"
-                  // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
-                  {...imageDragOutProps(img.filePath)}
-                  onClick={() => setLightboxIdx(newTop ? i + 1 : i)}
-                  alt=""
-                />
-                <button
-                  className={cn(
-                    'absolute left-1 top-1 grid size-6 place-items-center rounded-full backdrop-blur transition',
-                    img.favorite
-                      ? 'bg-amber-400/90 text-black'
-                      : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'
-                  )}
-                  onClick={() => void toggleFavorite(img.id)}
-                  title="즐겨찾기"
+                <div
+                  className="group relative overflow-hidden rounded-md bg-surface-2"
+                  style={{ aspectRatio: `${scene.width} / ${scene.height}` }}
                 >
-                  <Star size={13} fill={img.favorite ? 'currentColor' : 'none'} />
-                </button>
-                <button
-                  className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-black/40 text-white opacity-0 backdrop-blur transition hover:bg-danger group-hover:opacity-100"
-                  onClick={() => void deleteImage(img.id)}
-                  title="삭제"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
+                  <img
+                    src={imageUrl(img.filePath)}
+                    className="h-full w-full cursor-pointer object-cover"
+                    loading="lazy"
+                    // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
+                    {...imageDragOutProps(img.filePath)}
+                    onClick={() => setLightboxIdx(newTop ? i + 1 : i)}
+                    alt=""
+                  />
+                  <button
+                    className={cn(
+                      'absolute left-1 top-1 grid size-6 place-items-center rounded-full backdrop-blur transition',
+                      img.favorite
+                        ? 'bg-amber-400/90 text-black'
+                        : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'
+                    )}
+                    onClick={() => void toggleFavorite(img.id)}
+                    title="즐겨찾기"
+                  >
+                    <Star size={13} fill={img.favorite ? 'currentColor' : 'none'} />
+                  </button>
+                  <button
+                    className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-black/40 text-white opacity-0 backdrop-blur transition hover:bg-danger group-hover:opacity-100"
+                    onClick={() => void deleteImage(img.id)}
+                    title="삭제"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </ImageContextMenu>
             ))}
           </div>

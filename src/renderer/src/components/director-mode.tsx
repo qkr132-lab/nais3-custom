@@ -38,12 +38,44 @@ const TOOLS: {
   color: string
   opt?: Opt
 }[] = [
-  { method: 'bg-removal', label: '배경 제거', desc: '캐릭터만 남기고 배경을 투명하게', icon: Eraser, color: 'text-rose-400' },
+  {
+    method: 'bg-removal',
+    label: '배경 제거',
+    desc: '캐릭터만 남기고 배경을 투명하게',
+    icon: Eraser,
+    color: 'text-rose-400'
+  },
   { method: 'lineart', label: '라인아트', desc: '선화 추출', icon: PenTool, color: 'text-sky-400' },
-  { method: 'sketch', label: '스케치', desc: '스케치풍으로 변환', icon: Pencil, color: 'text-amber-400' },
-  { method: 'colorize', label: '색칠', desc: '선화를 채색 (프롬프트로 유도)', icon: Droplets, color: 'text-emerald-400', opt: 'colorize' },
-  { method: 'emotion', label: '표정 변경', desc: '얼굴 표정을 교체', icon: Smile, color: 'text-fuchsia-400', opt: 'emotion' },
-  { method: 'declutter', label: '이미지 정리', desc: '워터마크·잡요소 제거', icon: Sparkles, color: 'text-violet-400' },
+  {
+    method: 'sketch',
+    label: '스케치',
+    desc: '스케치풍으로 변환',
+    icon: Pencil,
+    color: 'text-amber-400'
+  },
+  {
+    method: 'colorize',
+    label: '색칠',
+    desc: '선화를 채색 (프롬프트로 유도)',
+    icon: Droplets,
+    color: 'text-emerald-400',
+    opt: 'colorize'
+  },
+  {
+    method: 'emotion',
+    label: '표정 변경',
+    desc: '얼굴 표정을 교체',
+    icon: Smile,
+    color: 'text-fuchsia-400',
+    opt: 'emotion'
+  },
+  {
+    method: 'declutter',
+    label: '이미지 정리',
+    desc: '워터마크·잡요소 제거',
+    icon: Sparkles,
+    color: 'text-violet-400'
+  },
   {
     method: 'declutter-keep-bubbles',
     label: '정리 (말풍선 유지)',
@@ -107,7 +139,7 @@ export function DirectorMode(): React.JSX.Element {
   const shown = source ? `data:image/png;base64,${source}` : null
 
   return (
-    <div className="flex min-h-0 flex-1 gap-3">
+    <div className="flex min-h-0 flex-1 gap-3 max-[1200px]:flex-col max-[1200px]:gap-2">
       {/* 캔버스 */}
       <div
         className={cn(
@@ -128,7 +160,12 @@ export function DirectorMode(): React.JSX.Element {
       >
         {shown ? (
           <>
-            <img src={shown} className="h-full w-full object-contain p-2" draggable={false} alt="" />
+            <img
+              src={shown}
+              className="h-full w-full object-contain p-2"
+              draggable={false}
+              alt=""
+            />
             {isResult && (
               <span className="absolute left-3 top-3 rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium text-white">
                 결과
@@ -136,7 +173,13 @@ export function DirectorMode(): React.JSX.Element {
             )}
             {/* 하단 컨트롤 */}
             <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-paper/85 p-1 backdrop-blur">
-              <Button size="icon" variant="ghost" className="rounded-full" title="지우기" onClick={clear}>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="rounded-full"
+                title="지우기"
+                onClick={clear}
+              >
                 <X size={16} />
               </Button>
               <Button
@@ -172,7 +215,9 @@ export function DirectorMode(): React.JSX.Element {
           >
             <Upload size={44} strokeWidth={1.2} className="opacity-40" />
             <p className="text-[14px] font-medium">이미지를 열거나 드래그하세요</p>
-            <p className="text-[12px] opacity-60">히스토리 이미지를 우클릭해 바로 보낼 수도 있어요</p>
+            <p className="text-[12px] opacity-60">
+              히스토리 이미지를 우클릭해 바로 보낼 수도 있어요
+            </p>
           </div>
         )}
 
@@ -197,7 +242,7 @@ export function DirectorMode(): React.JSX.Element {
       </div>
 
       {/* 툴 패널 */}
-      <div className="flex w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="flex w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-surface max-[1200px]:h-[42%] max-[1200px]:w-full">
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <Wand2 size={16} className="text-accent" />
           <h2 className="text-[14px] font-semibold">디렉터 툴</h2>
@@ -297,7 +342,10 @@ function ToolCard({
           <p className="truncate text-[11px] text-faint">{tool.desc}</p>
         </div>
         <CostChip cost={cost} />
-        <ChevronRight size={16} className="shrink-0 text-faint transition-colors group-hover:text-accent" />
+        <ChevronRight
+          size={16}
+          className="shrink-0 text-faint transition-colors group-hover:text-accent"
+        />
       </div>
 
       {tool.opt === 'emotion' && (
@@ -365,7 +413,10 @@ function UpscaleCard({
           <p className="truncate text-[11px] text-faint">해상도를 배수로 키움</p>
         </div>
         <CostChip cost={cost} />
-        <ChevronRight size={16} className="shrink-0 text-faint transition-colors group-hover:text-accent" />
+        <ChevronRight
+          size={16}
+          className="shrink-0 text-faint transition-colors group-hover:text-accent"
+        />
       </div>
       {/* 배율 선택 — 클릭이 카드 실행으로 전파되지 않게 */}
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -375,7 +426,9 @@ function UpscaleCard({
             onClick={() => setScale(n)}
             className={cn(
               'flex-1 rounded-md border py-1 text-[12px] font-medium transition-colors',
-              scale === n ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:text-ink'
+              scale === n
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-line text-muted hover:text-ink'
             )}
           >
             {n}x
@@ -427,12 +480,21 @@ function SendToMainCard({
         <p className="text-[13px] font-medium text-ink">{label}</p>
         <p className="truncate text-[11px] text-faint">{desc}</p>
       </div>
-      <ChevronRight size={16} className="shrink-0 text-faint transition-colors group-hover:text-accent" />
+      <ChevronRight
+        size={16}
+        className="shrink-0 text-faint transition-colors group-hover:text-accent"
+      />
     </div>
   )
 }
 
-function DefryRow({ value, onChange }: { value: number; onChange: (v: number) => void }): React.JSX.Element {
+function DefryRow({
+  value,
+  onChange
+}: {
+  value: number
+  onChange: (v: number) => void
+}): React.JSX.Element {
   return (
     <div className="flex items-center gap-2 px-0.5">
       <span className="w-16 shrink-0 text-[11px] text-muted">약화 {value}</span>

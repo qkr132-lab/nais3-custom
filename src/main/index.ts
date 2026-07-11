@@ -9,6 +9,7 @@ import { getNaiToken } from './db/settings'
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
 import { removeComments } from '../shared/nai-presets'
+import { refreshScenePrompts } from '../shared/scene-request'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
@@ -52,8 +53,9 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1600,
     height: 900,
-    minWidth: 1080,
-    minHeight: 640,
+    // 작은 노트북/분할 화면에서도 사용 가능. 렌더러가 폭에 따라 패널을 세로 배치한다.
+    minWidth: 760,
+    minHeight: 520,
     show: false,
     autoHideMenuBar: true,
     frame: false,
@@ -153,13 +155,15 @@ app.whenReady().then(async () => {
     // 배치 항목마다 여기서 치환 — 매 장 다른 와일드카드 결과가 나온다.
     // 주석 제거가 반드시 먼저 — 주석 줄이 조각을 소모하거나(순차 카운터),
     // 와일드카드 처리의 재조립이 개행을 지워 주석 범위가 전체로 번지는 것 방지 (NAIS2와 동일 순서)
+    const latestScene = rawRequest.sceneId ? getScene(rawRequest.sceneId) : null
+    const queuedRequest = latestScene ? refreshScenePrompts(rawRequest, latestScene) : rawRequest
     const fragSource = fragmentSource()
     const sub = (text: string): string => processWildcards(removeComments(text), fragSource)
     let request = {
-      ...rawRequest,
-      prompt: sub(rawRequest.prompt),
-      negativePrompt: sub(rawRequest.negativePrompt),
-      characterPrompts: rawRequest.characterPrompts.map((c) => ({
+      ...queuedRequest,
+      prompt: sub(queuedRequest.prompt),
+      negativePrompt: sub(queuedRequest.negativePrompt),
+      characterPrompts: queuedRequest.characterPrompts.map((c) => ({
         ...c,
         prompt: sub(c.prompt),
         negativePrompt: sub(c.negativePrompt)
@@ -168,9 +172,9 @@ app.whenReady().then(async () => {
 
     // 바이브/캐릭레퍼는 DB의 enabled 항목에서 준비 (바이브는 필요 시 인코딩 — 2 Anlas, 캐시됨).
     // 요청에 vibeIds/charRefIds가 있으면 enabled 대신 그 id들만 (씬 큐 반복/씬별 추가)
-    const { vibes, newlyEncoded } = await prepareVibes(token, rawRequest.vibeIds)
+    const { vibes, newlyEncoded } = await prepareVibes(token, queuedRequest.vibeIds)
     if (newlyEncoded.length) broadcast('vibes:encoded', {}) // 카드 인코딩 표시 갱신
-    const characterReferences = await prepareCharRefs(rawRequest.charRefIds)
+    const characterReferences = await prepareCharRefs(queuedRequest.charRefIds)
 
     let source = request.source
     // i2i/인페인트: 소스 해상도를 유효 NAI 해상도(64 배수·픽셀 상한)로 스냅하고 이미지를 맞춰 리사이즈.

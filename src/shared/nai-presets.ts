@@ -9,13 +9,28 @@ import type { UcPresetIndex } from './types'
 /** 실캡처 확정 (V4.5 full): 프롬프트 "뒤"에 그대로 이어 붙는다 */
 export const QUALITY_TAGS_SUFFIX = ', very aesthetic, masterpiece, no text'
 
-const UC_HEAVY =
+const WEB_UC_HEAVY =
   'nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page'
+const WEB_UC_LIGHT =
+  'nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page'
 
-/** 인덱스 매핑 (실캡처): 0=Heavy, 1=Light, 3=Human Focus, 4=None. 2는 미사용 */
+/** NAI 웹 원본 UC. 과거 이미지 메타데이터 판독과 실캡처 회귀 테스트에 사용한다. */
+export const UC_PRESETS_V45_WEB_FULL: Record<UcPresetIndex, string> = {
+  0: WEB_UC_HEAVY,
+  1: WEB_UC_LIGHT,
+  2: '',
+  3: WEB_UC_HEAVY + ', @_@, mismatched pupils, glowing eyes, bad anatomy',
+  4: ''
+}
+
+/** 커스텀판은 NSFW 생성을 억제하지 않도록 자동 UC의 선두 nsfw만 제외한다. */
+const withoutNsfw = (preset: string): string => preset.replace(/^nsfw,\s*/, '')
+const UC_HEAVY = withoutNsfw(WEB_UC_HEAVY)
+
+/** 실제 앱 병합값: 0=Heavy, 1=Light, 3=Human Focus, 4=None. 2는 미사용 */
 export const UC_PRESETS_V45_FULL: Record<UcPresetIndex, string> = {
   0: UC_HEAVY,
-  1: 'nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page',
+  1: withoutNsfw(WEB_UC_LIGHT),
   2: '',
   3: UC_HEAVY + ', @_@, mismatched pupils, glowing eyes, bad anatomy',
   4: ''

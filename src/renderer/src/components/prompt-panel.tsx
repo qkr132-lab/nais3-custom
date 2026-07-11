@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  CalendarPlus,
   ChevronDown,
   ChevronUp,
   ImageUp,
@@ -68,6 +69,8 @@ export function PromptPanel(): React.JSX.Element {
   // 씬 모드: 생성은 예약된 씬들을 예약 수만큼 큐에 넣는다. 예약 0이면 생성 버튼 비활성.
   const centerMode = useLayoutStore((s) => s.centerMode)
   const sceneReserved = useScenesStore((s) => totalReserved(s.scenes))
+  const sceneCount = useScenesStore((s) => s.scenes.length)
+  const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const generateReserved = useScenesStore((s) => s.generateReserved)
   const isScene = centerMode === 'scene'
   // 프롬프트/네거티브 개별 접기 — 하나를 접으면 다른 하나가 넓어짐
@@ -380,24 +383,36 @@ export function PromptPanel(): React.JSX.Element {
             <Square size={14} /> 취소 ({queueCount})
           </Button>
         ) : isScene ? (
-          <Button
-            variant="accent"
-            size="lg"
-            className="flex-1 gap-2"
-            disabled={sceneReserved === 0}
-            title={
-              sceneReserved === 0
-                ? '씬에 예약(+)을 걸어야 생성할 수 있습니다'
-                : `예약된 ${sceneReserved}장 생성`
-            }
-            onClick={() => void generateReserved()}
-          >
-            씬 생성
-            {sceneReserved > 0 && (
-              // 한글 '장'이 mono 폴백(Windows Consolas)에서 깨져 보여 기본 폰트(Pretendard) 사용
-              <span className="text-[12px] opacity-75">{sceneReserved}장</span>
-            )}
-          </Button>
+          <>
+            <Button
+              variant="default"
+              size="lg"
+              className="shrink-0 gap-1.5 px-3 text-[12px]"
+              disabled={sceneCount === 0}
+              title={`현재 모듈의 모든 씬에 ${batchCount}장씩 예약 추가 (총 ${sceneCount * batchCount}장)`}
+              onClick={() => void adjustReserveAll(1)}
+            >
+              <CalendarPlus size={14} /> 전체 예약
+            </Button>
+            <Button
+              variant="accent"
+              size="lg"
+              className="flex-1 gap-2"
+              disabled={sceneReserved === 0}
+              title={
+                sceneReserved === 0
+                  ? '씬에 예약(+)을 걸어야 생성할 수 있습니다'
+                  : `예약된 ${sceneReserved}장 생성`
+              }
+              onClick={() => void generateReserved()}
+            >
+              씬 생성
+              {sceneReserved > 0 && (
+                // 한글 '장'이 mono 폴백(Windows Consolas)에서 깨져 보여 기본 폰트(Pretendard) 사용
+                <span className="text-[12px] opacity-75">{sceneReserved}장</span>
+              )}
+            </Button>
+          </>
         ) : (
           <Button
             variant="accent"

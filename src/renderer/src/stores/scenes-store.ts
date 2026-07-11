@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
+import { appendPrompt } from '@shared/scene-request'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
@@ -14,6 +15,7 @@ import { toast, toastUndo } from './toast-store'
 import { pushUndo } from './undo-store'
 
 const PAGE = 80 // 씬 상세 이미지 페이지 크기 (수만 장 대비: 한 번에 전부 로드 금지)
+let presetsSeq = 0 // 프리셋 요약 비동기 응답 순서 보장용
 let loadSeq = 0 // load() 비동기 응답 순서 보장용
 let imagesSeq = 0 // loadImages() 비동기 응답 순서 보장용
 
@@ -36,6 +38,8 @@ interface ScenesState {
   favoritesOnly: boolean
 
   loadPresets: () => Promise<void>
+  /** 구조 변경 뒤 프리셋별 씬 개수를 포함한 요약 목록을 최신화 */
+  refreshPresetCounts: () => Promise<void>
   setActivePreset: (id: number) => Promise<void>
   createPreset: (name: string) => Promise<void>
   /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
@@ -117,13 +121,7 @@ interface ScenesState {
 }
 
 /** 씬 프롬프트를 기본 프롬프트 뒤에 이어붙임 (콤마 정리) */
-export function appendPrompt(base: string, add: string): string {
-  const b = base.trim().replace(/,\s*$/, '')
-  const a = add.trim().replace(/^,\s*/, '')
-  if (!b) return a
-  if (!a) return b
-  return `${b}, ${a}`
-}
+export { appendPrompt } from '@shared/scene-request'
 
 /**
  * 씬 → 생성 요청. 사이드바의 모든 것(기본/네거 프롬프트·캐릭터·조각·바이브·레퍼런스·
@@ -175,11 +173,17 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     charRefIds = [...new Set([...entry.charRefIds, ...(add?.charRefIds ?? []), ...linked])]
   } else {
     if (add && add.vibeIds.length > 0) {
-      const enabled = useVibesStore.getState().items.filter((v) => v.enabled).map((v) => v.id)
+      const enabled = useVibesStore
+        .getState()
+        .items.filter((v) => v.enabled)
+        .map((v) => v.id)
       vibeIds = [...new Set([...enabled, ...add.vibeIds])]
     }
     if ((add && add.charRefIds.length > 0) || linked.length > 0) {
-      const enabled = useCharRefsStore.getState().items.filter((c) => c.enabled).map((c) => c.id)
+      const enabled = useCharRefsStore
+        .getState()
+        .items.filter((c) => c.enabled)
+        .map((c) => c.id)
       charRefIds = [...new Set([...enabled, ...(add?.charRefIds ?? []), ...linked])]
     }
   }
@@ -201,6 +205,10 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     vibeIds,
     charRefIds,
     sceneId: scene.id,
+    // 큐 실행 시 최신 씬 태그를 다시 붙일 수 있도록 기본 부분을 별도로 보존한다.
+    sceneBasePrompt: base.prompt,
+    sceneBaseNegativePrompt: base.negativePrompt,
+    sceneBaseDetailPrompt: base.promptParts?.detail,
     source: src
       ? {
           imageBase64: src.imageBase64,
@@ -255,15 +263,21 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   favoritesOnly: false,
 
   loadPresets: async () => {
-    const { items } = await window.nais.invoke('scenePresets:list', undefined)
-    set({ presets: items })
-    if (!items.some((p) => p.id === get().activePresetId) && items[0]) {
-      set({ activePresetId: items[0].id })
-    }
+    await get().refreshPresetCounts()
     await get().load()
   },
+  refreshPresetCounts: async () => {
+    const seq = ++presetsSeq
+    const { items } = await window.nais.invoke('scenePresets:list', undefined)
+    if (seq !== presetsSeq) return
+    const currentId = get().activePresetId
+    const activePresetId = items.some((p) => p.id === currentId)
+      ? currentId
+      : (items[0]?.id ?? currentId)
+    set({ presets: items, activePresetId })
+  },
   setActivePreset: async (id) => {
-    set({ activePresetId: id, selectedId: null, selection: new Set() })
+    set({ activePresetId: id, selectedId: null, selection: new Set(), lastSelectedId: null })
     await get().load()
   },
   createPreset: async (name) => {
@@ -307,7 +321,13 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     const presetId = get().activePresetId
     const { items } = await window.nais.invoke('scenes:list', { presetId })
     if (seq !== loadSeq || get().activePresetId !== presetId) return // 더 최신 로드가 있으면 폐기
-    set({ scenes: items })
+    set({
+      scenes: items,
+      // import처럼 이 load()만 호출하는 경로도 드롭다운의 활성 모듈 개수가 즉시 맞는다.
+      presets: get().presets.map((p) =>
+        p.id === presetId ? { ...p, sceneCount: items.length } : p
+      )
+    })
   },
   select: (selectedId) => {
     if (selectedId !== get().selectedId) recordNav() // 마우스 뒤로/앞으로용 히스토리
@@ -355,7 +375,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   restoreScenes: async (ids) => {
     if (ids.length === 0) return
     await window.nais.invoke('scenes:restore', { ids })
-    await Promise.all([get().load(), get().loadTrash()])
+    await Promise.all([get().load(), get().loadTrash(), get().refreshPresetCounts()])
   },
   purgeScenes: async (ids) => {
     if (ids.length === 0) return
@@ -365,7 +385,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
 
   create: async (name) => {
     await window.nais.invoke('scenes:create', { presetId: get().activePresetId, name })
-    await get().load()
+    await Promise.all([get().load(), get().refreshPresetCounts()])
   },
   update: async (id, patch) => {
     set({ scenes: get().scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) })
@@ -384,13 +404,13 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   duplicate: async (id) => {
     await window.nais.invoke('scenes:duplicate', { id })
-    await get().load()
+    await Promise.all([get().load(), get().refreshPresetCounts()])
   },
   remove: async (id) => {
     const name = get().scenes.find((s) => s.id === id)?.name ?? '씬'
     await window.nais.invoke('scenes:delete', { id })
     if (get().selectedId === id) set({ selectedId: null })
-    await get().load()
+    await Promise.all([get().load(), get().refreshPresetCounts()])
     // 소프트삭제 — 토스트 버튼 또는 Ctrl+Z로 복원 (휴지통에서도 가능)
     toastUndo(`"${name}" 삭제됨`, () => void get().restoreScenes([id]))
     pushUndo(`"${name}" 삭제`, () => void get().restoreScenes([id]))
@@ -464,7 +484,10 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     set({ scenes: next })
     for (const s of next) {
       if (ids.has(s.id))
-        void window.nais.invoke('scenes:update', { id: s.id, patch: { reserveCount: s.reserveCount } })
+        void window.nais.invoke('scenes:update', {
+          id: s.id,
+          patch: { reserveCount: s.reserveCount }
+        })
     }
   },
   bulkClearReserve: async () => {
@@ -498,18 +521,20 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   bulkDuplicate: async () => {
     // 목록 순서대로 복제 (선택 순서 아님)
-    const ids = get().scenes.filter((s) => get().selection.has(s.id)).map((s) => s.id)
+    const ids = get()
+      .scenes.filter((s) => get().selection.has(s.id))
+      .map((s) => s.id)
     if (ids.length === 0) return
     for (const id of ids) await window.nais.invoke('scenes:duplicate', { id })
     set({ selection: new Set(), lastSelectedId: null })
-    await get().load()
+    await Promise.all([get().load(), get().refreshPresetCounts()])
   },
 
   bulkMove: async (presetId) => {
     const ids = [...get().selection]
     await window.nais.invoke('scenes:bulkMove', { ids, presetId })
-    set({ selection: new Set() })
-    await get().load()
+    set({ selection: new Set(), lastSelectedId: null })
+    await Promise.all([get().load(), get().refreshPresetCounts()])
   },
   // 다른 프리셋으로 "복사" — 원본 유지 (커스텀, 이동=잘라내기와 짝)
   bulkCopy: async (presetId) => {
@@ -518,6 +543,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       .map((s) => s.id) // 목록 순서대로
     if (ids.length === 0) return 0
     const { copied } = await window.nais.invoke('scenes:bulkCopy', { ids, presetId })
+    await get().refreshPresetCounts()
     return copied
   },
   bulkDelete: async () => {
@@ -525,7 +551,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     if (ids.length === 0) return
     await window.nais.invoke('scenes:bulkDelete', { ids })
     set({ selection: new Set(), lastSelectedId: null })
-    await get().load()
+    await Promise.all([get().load(), get().refreshPresetCounts()])
     // 소프트삭제 — 토스트 버튼 또는 Ctrl+Z로 전부 되살림 (휴지통에서도 가능)
     toastUndo(`씬 ${ids.length}개 삭제됨`, () => void get().restoreScenes(ids))
     pushUndo(`씬 ${ids.length}개 삭제`, () => void get().restoreScenes(ids))

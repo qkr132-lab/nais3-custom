@@ -1,7 +1,11 @@
 import { gunzipSync, inflateSync } from 'zlib'
 import sharp from 'sharp'
 import type { ImageMetadata } from '../../shared/types'
-import { QUALITY_TAGS_SUFFIX, UC_PRESETS_V45_FULL } from '../../shared/nai-presets'
+import {
+  QUALITY_TAGS_SUFFIX,
+  UC_PRESETS_V45_FULL,
+  UC_PRESETS_V45_WEB_FULL
+} from '../../shared/nai-presets'
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const STEALTH_MAGIC = 'stealth_pngcomp'
@@ -138,10 +142,16 @@ function inferUcPreset(uc: string): number | undefined {
   let best: number | undefined
   let bestLen = -1
   for (const [k, preset] of Object.entries(UC_PRESETS_V45_FULL)) {
-    if (!preset) continue
-    if ((uc === preset || uc.startsWith(preset + ', ')) && preset.length > bestLen) {
-      best = Number(k)
-      bestLen = preset.length
+    const candidates = [
+      preset,
+      UC_PRESETS_V45_WEB_FULL[Number(k) as keyof typeof UC_PRESETS_V45_WEB_FULL]
+    ]
+    for (const candidate of new Set(candidates)) {
+      if (!candidate) continue
+      if ((uc === candidate || uc.startsWith(candidate + ', ')) && candidate.length > bestLen) {
+        best = Number(k)
+        bestLen = candidate.length
+      }
     }
   }
   return best

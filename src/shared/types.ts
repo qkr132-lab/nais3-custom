@@ -78,6 +78,11 @@ export interface GenerationRequest {
   source?: SourceImage
   /** 씬 생성이면 씬 id (저장 시 images.scene_id 연결) */
   sceneId?: number
+  /** 예약 후 씬 태그가 바뀌어도 실행 직전에 재병합하기 위한 예약 당시 기본 프롬프트 */
+  sceneBasePrompt?: string
+  sceneBaseNegativePrompt?: string
+  /** 분할 프롬프트 사용 시 예약 당시 detail 원문 */
+  sceneBaseDetailPrompt?: string
   /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
@@ -634,7 +639,10 @@ export interface IpcInvokeMap {
   'r2:openTokenPage': { req: void; res: void }
   'r2:listBuckets': { req: void; res: { buckets: string[] } }
   /** prefix 하위 폴더(CommonPrefixes)와 객체 목록 (1000개 페이지네이션 전부) */
-  'r2:list': { req: { bucket: string; prefix: string }; res: { folders: string[]; objects: R2Object[] } }
+  'r2:list': {
+    req: { bucket: string; prefix: string }
+    res: { folders: string[]; objects: R2Object[] }
+  }
   'r2:createFolder': { req: { bucket: string; prefix: string; name: string }; res: void }
   /** 파일/폴더 선택 다이얼로그 → 업로드 큐에 추가 (폴더는 재귀, 개수 제한 없음) */
   'r2:pickUpload': {
@@ -642,11 +650,46 @@ export interface IpcInvokeMap {
     res: { queued: number }
   }
   /** 드래그 앤 드롭된 경로들을 업로드 큐에 추가 */
-  'r2:uploadPaths': { req: { bucket: string; prefix: string; paths: string[] }; res: { queued: number } }
+  'r2:uploadPaths': {
+    req: { bucket: string; prefix: string; paths: string[] }
+    res: { queued: number }
+  }
   'r2:uploadStatus': { req: void; res: R2UploadStatus }
+  'r2sync:getConfig': { req: { presetId: number }; res: R2SyncConfig }
+  'r2sync:setConfig': { req: { presetId: number; config: R2SyncConfig }; res: void }
+  'r2sync:run': { req: { presetId: number }; res: R2SyncStatus }
+  'r2sync:status': { req: { presetId: number }; res: R2SyncStatus }
+  'r2sync:resolveConflicts': {
+    req: { presetId: number; choice: 'overwrite' | 'skip'; remember: boolean }
+    res: R2SyncStatus
+  }
   'r2:retryFailed': { req: void; res: { queued: number } }
   'r2:cancelUpload': { req: void; res: void }
   'r2:clearUploadHistory': { req: void; res: void }
+}
+
+/** Automatic R2 synchronization settings, stored independently for each scene preset. */
+export interface R2SyncConfig {
+  enabled: boolean
+  bucket: string
+  /** Target folder with a trailing slash, or an empty string for the bucket root. */
+  prefix: string
+  deleteOnUnfavorite: boolean
+  conflictPolicy: 'ask' | 'overwrite' | 'skip'
+}
+
+export interface R2SyncStatus {
+  presetId: number
+  running: boolean
+  conflicts: string[]
+  last: {
+    uploaded: number
+    renamed: number
+    deleted: number
+    skipped: number
+    errors: string[]
+    at: string
+  } | null
 }
 
 /** R2 객체 (표시용) */
@@ -693,4 +736,5 @@ export interface IpcEventMap {
   }
   /** R2 업로드 진행 상황 (커스텀) */
   'r2:progress': R2UploadStatus
+  'r2sync:status': R2SyncStatus
 }

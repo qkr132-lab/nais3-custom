@@ -21,15 +21,16 @@ export function PageNav(): React.JSX.Element {
   const setCenterMode = useLayoutStore((s) => s.setCenterMode)
 
   return (
-    <nav className="no-drag pointer-events-auto flex items-center gap-1 rounded-full border border-line/70 bg-surface/95 p-1 shadow-md backdrop-blur">
+    <nav className="no-drag pointer-events-auto flex items-center gap-1 rounded-full border border-line/70 bg-surface/95 p-1 shadow-md backdrop-blur max-[760px]:gap-0.5 max-[760px]:p-0.5">
       {PAGES.map((page) => {
         const active = centerMode === page.id
         return (
           <button
             key={page.id}
             onClick={() => setCenterMode(page.id)}
+            title={page.label}
             className={cn(
-              'relative z-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors',
+              'relative z-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors max-[1100px]:px-2.5 max-[900px]:px-2 max-[760px]:py-1',
               active ? 'text-ink' : 'text-muted hover:text-ink'
             )}
           >
@@ -42,7 +43,7 @@ export function PageNav(): React.JSX.Element {
             )}
             <span className="relative z-10 flex items-center gap-2">
               <page.icon className="size-4" />
-              {page.label}
+              <span className="max-[900px]:hidden">{page.label}</span>
             </span>
           </button>
         )

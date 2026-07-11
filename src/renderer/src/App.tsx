@@ -8,6 +8,7 @@ import { DirectorMode } from './components/director-mode'
 import { InpaintHost } from './components/inpaint-host'
 import { FolderMovedNotice } from './components/folder-moved-notice'
 import { MetadataDialog } from './components/metadata-dialog'
+import { R2SyncHost } from './components/r2-sync-dialog'
 import { PromptPanel } from './components/prompt-panel'
 import { SceneMode } from './components/scene-mode'
 import { LibraryMode } from './components/library-mode'
@@ -26,8 +27,28 @@ import { bindShortcuts, useShortcutsStore } from './stores/shortcuts-store'
 import { bindUndoShortcut } from './stores/undo-store'
 import { bindUpdateEvents } from './stores/update-store'
 import { bindNavMouse } from './lib/nav-history'
+import { cn } from './lib/utils'
 import { useLayoutStore } from './stores/layout-store'
 import { useThemeStore } from './stores/theme-store'
+
+function useViewportSize(): { width: number; height: number } {
+  const [size, setSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
+  useEffect(() => {
+    let frame = 0
+    const onResize = (): void => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() =>
+        setSize({ width: window.innerWidth, height: window.innerHeight })
+      )
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [])
+  return size
+}
 
 /** 웹 모드 keep-alive 래퍼 — 처음 방문 후엔 hidden으로 유지해 webview 세션 보존 */
 function WebModeKeepAlive({ active }: { active: boolean }): React.JSX.Element | null {
@@ -48,6 +69,18 @@ export default function App(): React.JSX.Element {
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth)
   const [ready, setReady] = useState(false)
   const [resizing, setResizing] = useState(false)
+  const viewport = useViewportSize()
+  const stacked = viewport.width < 860
+  const overlayHistory = viewport.width < 1240
+  const responsiveSidebarWidth = Math.min(
+    sidebarWidth,
+    Math.max(320, Math.floor(viewport.width * 0.38))
+  )
+  const stackedSidebarHeight = Math.max(
+    210,
+    Math.min(360, Math.round((viewport.height - (viewport.width <= 760 ? 48 : 56)) * 0.44))
+  )
+  const historyWidth = overlayHistory ? Math.min(280, viewport.width - 32) : 240
 
   // 사이드바 폭 드래그 조절
   const startResize = (e: React.MouseEvent): void => {
@@ -111,26 +144,42 @@ export default function App(): React.JSX.Element {
     <TooltipProvider>
       <div className="flex h-screen flex-col bg-paper">
         <Titlebar />
-        <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
+        <div
+          className={cn(
+            'relative flex min-h-0 flex-1',
+            stacked ? 'flex-col gap-2 px-2 pb-2' : 'gap-3 px-3 pb-3'
+          )}
+        >
           <AnimatePresence initial={false}>
             {leftOpen && (
               <motion.div
                 key="left"
-                className="relative h-full shrink-0 overflow-hidden"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: sidebarWidth, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
+                className={cn('relative shrink-0 overflow-hidden', stacked ? 'w-full' : 'h-full')}
+                initial={stacked ? { height: 0, opacity: 0 } : { width: 0, opacity: 0 }}
+                animate={
+                  stacked
+                    ? { width: '100%', height: stackedSidebarHeight, opacity: 1 }
+                    : { width: responsiveSidebarWidth, height: '100%', opacity: 1 }
+                }
+                exit={stacked ? { height: 0, opacity: 0 } : { width: 0, opacity: 0 }}
                 // 드래그 중엔 즉시 반영 (애니메이션이 따라오면 답답함)
-                transition={resizing ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                transition={
+                  resizing ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }
+                }
               >
-                <div style={{ width: sidebarWidth }} className="h-full">
+                <div
+                  style={{ width: stacked ? '100%' : responsiveSidebarWidth }}
+                  className="h-full"
+                >
                   <PromptPanel />
                 </div>
                 {/* 폭 조절 핸들 */}
-                <div
-                  className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-accent/30"
-                  onMouseDown={startResize}
-                />
+                {!stacked && (
+                  <div
+                    className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-accent/30"
+                    onMouseDown={startResize}
+                  />
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -151,9 +200,13 @@ export default function App(): React.JSX.Element {
             {rightOpen && (
               <motion.div
                 key="right"
-                className="h-full shrink-0 overflow-hidden"
+                className={cn(
+                  'h-full shrink-0 overflow-hidden',
+                  overlayHistory &&
+                    'absolute bottom-0 right-0 top-0 z-40 rounded-xl bg-paper/95 shadow-2xl backdrop-blur'
+                )}
                 initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 240, opacity: 1 }}
+                animate={{ width: historyWidth, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
@@ -167,6 +220,7 @@ export default function App(): React.JSX.Element {
         <InpaintHost />
         <MetadataDialog />
         <FolderMovedNotice />
+        <R2SyncHost />
         <Toaster />
         <AnimatePresence>{!ready && <LoadingScreen key="loading" />}</AnimatePresence>
       </div>

@@ -202,6 +202,43 @@ const MIME: Record<string, string> = {
   '.zip': 'application/zip'
 }
 
+// Low-level object operations used by per-preset synchronization.
+
+/** Upload one local file to an exact R2 object key. */
+export async function r2PutFile(bucket: string, key: string, filePath: string): Promise<void> {
+  const auth = await requireAuth()
+  const body = readFileSync(filePath)
+  const type = MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+  const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
+    method: 'PUT',
+    headers: { 'content-type': type },
+    body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+  })
+  if (!res.ok) throw new Error(`업로드 실패 (${res.status}): ${await errText(res)}`)
+}
+
+/** Delete one R2 object. A missing object is already in the desired state. */
+export async function r2DeleteObject(bucket: string, key: string): Promise<void> {
+  const auth = await requireAuth()
+  const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
+    method: 'DELETE'
+  })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`삭제 실패 (${res.status}): ${await errText(res)}`)
+  }
+}
+
+/** Check whether an exact R2 key already exists. */
+export async function r2ObjectExists(bucket: string, key: string): Promise<boolean> {
+  const auth = await requireAuth()
+  const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
+    method: 'HEAD'
+  })
+  if (res.ok) return true
+  if (res.status === 404) return false
+  throw new Error(`존재 확인 실패 (${res.status}): ${await errText(res)}`)
+}
+
 // ── 업로드 큐 (개수 제한 없음 · 동시 3개 · 실패 목록 · 재시도) ─────
 
 interface UploadItem {

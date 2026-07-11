@@ -27,9 +27,9 @@ export const RESOLUTIONS = [
 
 /** 실캡처 확정 매핑 — 2는 미사용이라 UI에 노출하지 않는다 */
 export const UC_PRESET_OPTIONS: { value: UcPresetIndex; label: string }[] = [
-  { value: 0, label: 'Heavy' },
-  { value: 1, label: 'Light' },
-  { value: 3, label: 'Human Focus' },
+  { value: 0, label: 'Heavy (nsfw 제외)' },
+  { value: 1, label: 'Light (nsfw 제외)' },
+  { value: 3, label: 'Human Focus (nsfw 제외)' },
   { value: 4, label: 'None' }
 ]
 

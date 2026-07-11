@@ -236,36 +236,41 @@ export function createScene(presetId: number, name: string): number {
 
 export function duplicateScene(id: number): number {
   const db = getDb()
-  const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as Row | undefined
-  if (!s) return 0
-  const max = db
-    .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM gen_scenes WHERE preset_id = ?')
-    .get(s.preset_id) as { m: number }
-  return Number(
-    db
-      .prepare(
-        `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
-      )
-      .run(
-        s.preset_id,
-        `${s.name} 복제`,
-        s.prompt,
-        s.negative_prompt,
-        s.width,
-        s.height,
-        max.m + 1,
-        s.variety_plus ?? 0
-      ).lastInsertRowid
-  )
+  return db.transaction(() => {
+    const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as
+      (Row & { sort_order: number }) | undefined
+    if (!s) return 0
+
+    // 복제본이 원본 바로 뒤에 오도록 뒤쪽 씬을 한 칸씩 민다.
+    db.prepare(
+      'UPDATE gen_scenes SET sort_order = sort_order + 1 WHERE preset_id = ? AND sort_order > ?'
+    ).run(s.preset_id, s.sort_order)
+
+    return Number(
+      db
+        .prepare(
+          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
+        )
+        .run(
+          s.preset_id,
+          `${s.name} 복제`,
+          s.prompt,
+          s.negative_prompt,
+          s.width,
+          s.height,
+          s.sort_order + 1,
+          s.variety_plus ?? 0
+        ).lastInsertRowid
+    )
+  })()
 }
 
 /** 모듈(프리셋) 복제 (커스텀) — 프리셋 + 안의 씬 전부(프롬프트/해상도/V+/번호, 예약 0) 사본 생성 */
 export function duplicatePreset(id: number): number {
   const db = getDb()
   const p = db.prepare('SELECT * FROM scene_presets WHERE id = ?').get(id) as
-    | Record<string, unknown>
-    | undefined
+    Record<string, unknown> | undefined
   if (!p) return 0
   const maxOrder = (
     db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM scene_presets').get() as { m: number }
@@ -583,8 +588,7 @@ export function deleteImage(id: number, deleteFile: boolean): void {
     return
   }
   const r = db.prepare('SELECT file_path FROM images WHERE id = ?').get(id) as
-    | { file_path: string }
-    | undefined
+    { file_path: string } | undefined
   db.prepare('DELETE FROM images WHERE id = ?').run(id)
   if (r) unlinkIfInternal(r.file_path)
 }

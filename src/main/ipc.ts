@@ -146,6 +146,20 @@ import {
   setR2Auth,
   uploadStatus
 } from './r2/client'
+import {
+  getSyncConfig,
+  presetIdsForAllImages,
+  presetIdsForImages,
+  presetIdsForScenes,
+  resolveConflicts,
+  runSync,
+  scheduleSync,
+  scheduleSyncForImages,
+  scheduleSyncForPresets,
+  scheduleSyncForScenes,
+  setSyncConfig,
+  syncStatus
+} from './r2/sync'
 import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, extname, join } from 'path'
@@ -215,6 +229,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('scenePresets:delete', ({ id }) => {
     deletePreset(id)
+    scheduleSync(id)
   })
   handle('scenePresets:reorder', ({ ids }) => {
     reorderPresets(ids)
@@ -326,26 +341,33 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:trash', () => ({ items: listTrashedScenes() }))
   handle('scenes:restore', ({ ids }) => {
     restoreScenes(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:purge', async ({ ids }) => {
+    const presetIds = presetIdsForScenes(ids)
     await purgeScenes(ids)
+    scheduleSyncForPresets(presetIds)
   })
   handle('scenes:create', ({ presetId, name }) => ({ id: createScene(presetId, name) }))
   handle('scenes:get', ({ id }) => ({ scene: getScene(id) }))
   handle('scenes:update', ({ id, patch }) => {
     updateScene(id, patch)
+    if (patch.name !== undefined) scheduleSyncForScenes([id])
   })
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
   handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
   handle('scenes:bulkCopy', ({ ids, presetId }) => ({ copied: bulkCopyScenes(ids, presetId) }))
   handle('scenes:delete', ({ id }) => {
     deleteScene(id)
+    scheduleSyncForScenes([id])
   })
   handle('scenes:reorder', ({ ids }) => {
     reorderScenes(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:assignExportNumbers', ({ ids, start }) => {
     assignExportNumbers(ids, start)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:setReserveAll', ({ presetId, count }) => {
     setReserveAll(presetId, count)
@@ -354,19 +376,24 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     adjustReserveAll(presetId, delta)
   })
   handle('scenes:bulkMove', ({ ids, presetId }) => {
+    const previousPresetIds = presetIdsForScenes(ids)
     bulkMove(ids, presetId)
+    scheduleSyncForPresets([...previousPresetIds, presetId])
   })
   handle('scenes:bulkDelete', ({ ids }) => {
     bulkDelete(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:bulkSetResolution', ({ ids, width, height }) => {
     bulkSetResolution(ids, width, height)
   })
   handle('scenes:bulkClearFavorites', ({ ids }) => {
     bulkClearFavorites(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => {
     const imageIds = bulkClearImages(ids, keepFavorites)
+    scheduleSyncForScenes(ids)
     return { deleted: imageIds.length, ids: imageIds }
   })
   handle('scenes:bulkExportZip', async ({ ids }) => ({ count: await bulkExportZip(ids) }))
@@ -375,18 +402,28 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   )
   handle('scenes:deleteNonFavorites', ({ sceneId }) => {
     const imageIds = deleteNonFavorites(sceneId)
+    scheduleSyncForScenes([sceneId])
     return { deleted: imageIds.length, ids: imageIds }
   })
   handle('scenes:restoreImages', ({ ids }) => {
     restoreImages(ids)
+    scheduleSyncForImages(ids)
   })
   handle('images:setFavorite', ({ id, favorite }) => {
     setImageFavorite(id, favorite)
+    scheduleSyncForImages([id])
   })
   handle('images:delete', ({ id, deleteFile }) => {
+    const presetIds = presetIdsForImages([id])
     deleteImage(id, deleteFile === true)
+    scheduleSyncForPresets(presetIds)
   })
-  handle('images:clearAll', () => ({ count: clearAllImages() }))
+  handle('images:clearAll', () => {
+    const presetIds = presetIdsForAllImages()
+    const count = clearAllImages()
+    scheduleSyncForPresets(presetIds)
+    return { count }
+  })
   handle('scenes:exportJson', async ({ presetId }) => ({ saved: await exportScenesJson(presetId) }))
   handle('scenes:importJson', async ({ presetId }) => ({ count: await importScenesJson(presetId) }))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
@@ -427,6 +464,16 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('r2:clearUploadHistory', () => {
     clearUploadHistory()
   })
+  handle('r2sync:getConfig', ({ presetId }) => getSyncConfig(presetId))
+  handle('r2sync:setConfig', ({ presetId, config }) => {
+    setSyncConfig(presetId, config)
+    if (config.enabled) scheduleSync(presetId)
+  })
+  handle('r2sync:run', ({ presetId }) => runSync(presetId))
+  handle('r2sync:status', ({ presetId }) => syncStatus(presetId))
+  handle('r2sync:resolveConflicts', ({ presetId, choice, remember }) =>
+    resolveConflicts(presetId, choice, remember)
+  )
 
   handle('settings:get', ({ key }) => ({ value: getSetting(key) }))
   handle('settings:set', ({ key, value }) => {
@@ -820,7 +867,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     if (!status.running && queueWasRunning) {
       const completed = doneNow - doneAtRunStart
       // 2장 이상일 때만 — 1장짜리 즉석 생성엔 알림이 과함 (사용자 결정)
-      if (completed >= 2 && getSetting('notify_on_complete') !== '0' && Notification.isSupported()) {
+      if (
+        completed >= 2 &&
+        getSetting('notify_on_complete') !== '0' &&
+        Notification.isSupported()
+      ) {
         new Notification({
           title: 'NAIS3 Custom — 생성 완료',
           body: `이미지 ${completed}장 생성이 끝났어요`,

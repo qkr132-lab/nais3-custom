@@ -3,6 +3,8 @@ import {
   CalendarPlus,
   CalendarX,
   ChevronDown,
+  Cloud,
+  CloudOff,
   Copy,
   FileDown,
   FileUp,
@@ -19,6 +21,7 @@ import {
   Plus,
   RectangleHorizontal,
   RectangleVertical,
+  RefreshCw,
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
@@ -49,7 +52,7 @@ import {
   useState,
   type CSSProperties
 } from 'react'
-import type { Scene } from '@shared/types'
+import type { R2SyncConfig, Scene, ScenePreset } from '@shared/types'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
@@ -59,6 +62,7 @@ import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { ResolutionPicker } from './resolution-picker'
+import { R2SyncDialog } from './r2-sync-dialog'
 import { SceneDetail } from './scene-detail'
 import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
@@ -67,7 +71,11 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuPortal,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger
 } from './ui/context-menu'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -93,6 +101,12 @@ export function SceneMode(): React.JSX.Element {
 }
 
 /** NAIS2식 프리셋 드롭다운 — 현재 프리셋 표시 + 전환/추가/이름변경/삭제 */
+function syncTargetLabel(config?: R2SyncConfig): string {
+  if (!config?.bucket) return ''
+  const prefix = config.prefix.replace(/\/$/, '')
+  return prefix ? `${config.bucket}/${prefix}` : `${config.bucket}/(루트)`
+}
+
 function PresetDropdown(): React.JSX.Element {
   const presets = useScenesStore((s) => s.presets)
   const activePresetId = useScenesStore((s) => s.activePresetId)
@@ -104,8 +118,53 @@ function PresetDropdown(): React.JSX.Element {
   const duplicatePreset = useScenesStore((s) => s.duplicatePreset)
   const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
   const [open, setOpen] = useState(false)
+  const [syncTarget, setSyncTarget] = useState<ScenePreset | null>(null)
+  const [syncConfigs, setSyncConfigs] = useState<Record<number, R2SyncConfig>>({})
 
   const active = presets.find((p) => p.id === activePresetId)
+  const activeSyncConfig = active ? syncConfigs[active.id] : undefined
+
+  const refreshSyncConfigs = useCallback(async (): Promise<void> => {
+    try {
+      const entries = await Promise.all(
+        presets.map(async (preset) => {
+          const config = await window.nais.invoke('r2sync:getConfig', { presetId: preset.id })
+          return [preset.id, config] as const
+        })
+      )
+      setSyncConfigs(Object.fromEntries(entries))
+    } catch (error) {
+      toast(
+        `모듈별 클플 연결 정보를 불러오지 못했습니다: ${error instanceof Error ? error.message : error}`,
+        'error'
+      )
+    }
+  }, [presets])
+
+  useEffect(() => {
+    void refreshSyncConfigs()
+  }, [refreshSyncConfigs])
+
+  const openSyncSettings = (preset: ScenePreset): void => {
+    setOpen(false)
+    setSyncTarget(preset)
+  }
+
+  const setSyncEnabled = async (presetId: number, enabled: boolean): Promise<void> => {
+    const current = syncConfigs[presetId]
+    if (!current) return
+    const next = { ...current, enabled }
+    setSyncConfigs((configs) => ({ ...configs, [presetId]: next }))
+    try {
+      await window.nais.invoke('r2sync:setConfig', { presetId, config: next })
+    } catch (error) {
+      void refreshSyncConfigs()
+      toast(
+        `클플 동기화 설정을 바꾸지 못했습니다: ${error instanceof Error ? error.message : error}`,
+        'error'
+      )
+    }
+  }
 
   // 프리셋 선택 + 닫기 — 닫기를 먼저 (선택의 store 재렌더가 끼어들기 전에 확정) (B9)
   const choose = (id: number): void => {
@@ -114,116 +173,216 @@ function PresetDropdown(): React.JSX.Element {
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button className="flex h-8 min-w-52 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-[13px] font-medium hover:bg-surface-2">
-          <span className="min-w-0 flex-1 truncate text-left">{active?.name ?? '프리셋'}</span>
-          {active && (
-            <span className="shrink-0 rounded-full bg-accent/12 px-2 py-0.5 text-[12px] font-medium text-accent">
-              씬 {active.sceneCount ?? 0}
-            </span>
-          )}
-          <ChevronDown size={14} className="shrink-0 text-muted" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1">
-        <div className="max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar">
-          {/* 드래그로 순서 변경 */}
-          <SortableList
-            ids={presets.map((p) => p.id)}
-            onReorder={(ids) => void reorderPresets(ids)}
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            className="flex h-8 min-w-52 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-[13px] font-medium hover:bg-surface-2 max-[1000px]:min-w-40"
+            title={
+              activeSyncConfig?.bucket
+                ? `클플 ${activeSyncConfig.enabled ? '연결됨' : '동기화 꺼짐'} · ${syncTargetLabel(activeSyncConfig)}`
+                : undefined
+            }
           >
-            {presets.map((p) => (
-              <SortableRow key={p.id} id={p.id} className="group gap-1" onTap={() => choose(p.id)}>
-                <div
-                  onClick={() => choose(p.id)}
-                  className={cn(
-                    'flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
-                    p.id === activePresetId && 'font-semibold text-accent'
-                  )}
-                >
-                  <span className="truncate">{p.name}</span>
-                  {/* 프리셋별 씬 개수 (커스텀) */}
-                  <span
-                    className={cn(
-                      'shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium',
-                      p.id === activePresetId
-                        ? 'bg-accent/15 text-accent'
-                        : 'bg-surface-2 text-muted'
-                    )}
+            <span className="min-w-0 flex-1 truncate text-left">{active?.name ?? '프리셋'}</span>
+            {activeSyncConfig?.bucket && (
+              <Cloud
+                size={12}
+                className={cn('shrink-0', activeSyncConfig.enabled ? 'text-accent' : 'text-faint')}
+              />
+            )}
+            {active && (
+              <span className="shrink-0 rounded-full bg-accent/12 px-2 py-0.5 text-[12px] font-medium text-accent">
+                씬 {active.sceneCount ?? 0}
+              </span>
+            )}
+            <ChevronDown size={14} className="shrink-0 text-muted" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1">
+          <div className="max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar">
+            {/* 드래그로 순서 변경 */}
+            <SortableList
+              ids={presets.map((p) => p.id)}
+              onReorder={(ids) => void reorderPresets(ids)}
+            >
+              {presets.map((p) => {
+                const syncConfig = syncConfigs[p.id]
+                const targetLabel = syncTargetLabel(syncConfig)
+                return (
+                  <SortableRow
+                    key={p.id}
+                    id={p.id}
+                    className="group gap-1"
+                    onTap={() => choose(p.id)}
                   >
-                    씬 {p.sceneCount ?? 0}
-                  </span>
-                </div>
-                <button
-                  className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
-                  onClick={async () => {
-                    const name = await askText('프리셋 이름', p.name)
-                    if (name) void renamePreset(p.id, name)
-                  }}
-                  title="이름 변경"
-                >
-                  <Pencil size={12} />
-                </button>
-                {/* 모듈 복제 — 씬 전부 포함 (커스텀) */}
-                <button
-                  className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
-                  onClick={() => {
-                    setOpen(false)
-                    void duplicatePreset(p.id)
-                  }}
-                  title="모듈 복제 (씬 전부 포함)"
-                >
-                  <Copy size={12} />
-                </button>
-                {presets.length > 1 && (
-                  <button
-                    className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-danger group-hover:opacity-100"
-                    onClick={async () => {
-                      if (
-                        await askConfirm('프리셋 삭제', {
-                          message: `"${p.name}" 프리셋과 그 안의 씬을 모두 삭제합니다.`,
-                          confirmLabel: '삭제',
-                          danger: true
-                        })
-                      )
-                        void deletePreset(p.id)
-                    }}
-                    title="삭제"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </SortableRow>
-            ))}
-          </SortableList>
-        </div>
-        <div className="my-1 h-px bg-line" />
-        {/* 활성 프리셋의 새 씬 기본 해상도 (N3) */}
-        {active && (
-          <div className="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted">
-            <span className="shrink-0">새 씬 기본 해상도</span>
-            <div className="flex-1" />
-            <ResolutionPicker
-              className="w-40"
-              width={active.defaultWidth ?? 832}
-              height={active.defaultHeight ?? 1216}
-              onPick={(w, h) => void setPresetDefaultResolution(active.id, w, h)}
-            />
+                    <ContextMenu>
+                      <ContextMenuTrigger asChild>
+                        <div className="flex min-w-0 flex-1 items-center gap-1">
+                          <div
+                            onClick={() => choose(p.id)}
+                            className={cn(
+                              'flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
+                              p.id === activePresetId && 'font-semibold text-accent'
+                            )}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate">{p.name}</span>
+                              {targetLabel && (
+                                <span
+                                  className={cn(
+                                    'mt-0.5 flex min-w-0 items-center gap-1 truncate text-[10.5px] font-normal',
+                                    syncConfig.enabled ? 'text-accent' : 'text-faint'
+                                  )}
+                                  title={targetLabel}
+                                >
+                                  <Cloud size={10} className="shrink-0" />
+                                  <span className="truncate">{targetLabel}</span>
+                                </span>
+                              )}
+                            </div>
+                            {/* 프리셋별 씬 개수 (커스텀) */}
+                            <span
+                              className={cn(
+                                'shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium',
+                                p.id === activePresetId
+                                  ? 'bg-accent/15 text-accent'
+                                  : 'bg-surface-2 text-muted'
+                              )}
+                            >
+                              씬 {p.sceneCount ?? 0}
+                            </span>
+                          </div>
+                          <button
+                            className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
+                            onClick={async () => {
+                              const name = await askText('프리셋 이름', p.name)
+                              if (name) void renamePreset(p.id, name)
+                            }}
+                            title="이름 변경"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          {/* 모듈 복제 — 씬 전부 포함, 클플 연결은 안전상 복제하지 않음 */}
+                          <button
+                            className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
+                            onClick={() => {
+                              setOpen(false)
+                              void duplicatePreset(p.id)
+                            }}
+                            title="모듈 복제 (씬 전부 포함, 클플 연결 제외)"
+                          >
+                            <Copy size={12} />
+                          </button>
+                          {presets.length > 1 && (
+                            <button
+                              className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-danger group-hover:opacity-100"
+                              onClick={async () => {
+                                if (
+                                  await askConfirm('프리셋 삭제', {
+                                    message: `"${p.name}" 프리셋과 그 안의 씬을 모두 삭제합니다.`,
+                                    confirmLabel: '삭제',
+                                    danger: true
+                                  })
+                                )
+                                  void deletePreset(p.id)
+                              }}
+                              title="삭제"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-64">
+                        {targetLabel && (
+                          <>
+                            <div
+                              className="truncate px-3 py-1 font-mono text-[10.5px] text-faint"
+                              title={targetLabel}
+                            >
+                              {targetLabel}
+                            </div>
+                            <ContextMenuSeparator />
+                          </>
+                        )}
+                        <ContextMenuItem onSelect={() => openSyncSettings(p)}>
+                          <Cloud size={13} />
+                          {targetLabel ? '클플 폴더 변경…' : '클플 폴더 연결…'}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          disabled={!syncConfig?.enabled || !syncConfig.bucket}
+                          onSelect={() => void window.nais.invoke('r2sync:run', { presetId: p.id })}
+                        >
+                          <RefreshCw size={13} /> 지금 동기화
+                        </ContextMenuItem>
+                        {targetLabel && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              onSelect={() => void setSyncEnabled(p.id, !syncConfig.enabled)}
+                            >
+                              {syncConfig.enabled ? <CloudOff size={13} /> : <Cloud size={13} />}
+                              자동 동기화 {syncConfig.enabled ? '끄기' : '켜기'}
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  </SortableRow>
+                )
+              })}
+            </SortableList>
           </div>
-        )}
-        <div className="my-1 h-px bg-line" />
-        <button
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-accent hover:bg-surface-2"
-          onClick={async () => {
-            const name = await askText('새 프리셋 이름', '새 프리셋')
-            if (name) void createPreset(name)
+          <div className="my-1 h-px bg-line" />
+          {/* 활성 프리셋의 새 씬 기본 해상도 (N3) */}
+          {active && (
+            <div className="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted">
+              <span className="shrink-0">새 씬 기본 해상도</span>
+              <div className="flex-1" />
+              <ResolutionPicker
+                className="w-40"
+                width={active.defaultWidth ?? 832}
+                height={active.defaultHeight ?? 1216}
+                onPick={(w, h) => void setPresetDefaultResolution(active.id, w, h)}
+              />
+            </div>
+          )}
+          {active && (
+            <button
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted hover:bg-surface-2 hover:text-ink"
+              onClick={() => {
+                if (active) openSyncSettings(active)
+              }}
+            >
+              <Cloud size={14} /> 클플 즐겨찾기 동기화…
+            </button>
+          )}
+          <div className="my-1 h-px bg-line" />
+          <button
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-accent hover:bg-surface-2"
+            onClick={async () => {
+              const name = await askText('새 프리셋 이름', '새 프리셋')
+              if (name) void createPreset(name)
+            }}
+          >
+            <Plus size={14} /> 새 프리셋
+          </button>
+        </PopoverContent>
+      </Popover>
+      {syncTarget && (
+        <R2SyncDialog
+          presetId={syncTarget.id}
+          presetName={syncTarget.name}
+          open
+          onOpenChange={(nextOpen) => {
+            if (nextOpen) return
+            setSyncTarget(null)
+            void refreshSyncConfigs()
           }}
-        >
-          <Plus size={14} /> 새 프리셋
-        </button>
-      </PopoverContent>
-    </Popover>
+        />
+      )}
+    </>
   )
 }
 
@@ -245,7 +404,7 @@ function IconBtn({
         <button
           onClick={onClick}
           className={cn(
-            'grid size-8 place-items-center rounded-md transition-colors',
+            'grid size-8 shrink-0 place-items-center rounded-md transition-colors',
             active ? 'bg-accent text-white' : 'text-muted hover:bg-surface-2 hover:text-fg'
           )}
         >
@@ -260,12 +419,30 @@ function IconBtn({
 // 씬 그리드 스크롤 위치 — 다른 페이지/씬 상세를 다녀와도 위치 복원 (언마운트돼도 유지)
 let savedGridScroll = 0
 
+/** 여러 씬에 연속 번호를 붙일 시작값을 묻는다. 선택/전체 번호 매기기에서 공용. */
+async function askStartNumber(count: number): Promise<number | null> {
+  const raw = await askText(
+    `${count}개 씬 — 몇 번부터 시작할까요?`,
+    '1',
+    '예: 1 → 01, 02… / 100 → 100, 101…'
+  )
+  if (raw == null) return null
+  const start = Number(raw.trim())
+  if (!Number.isInteger(start) || start < 0) {
+    toast('0 이상의 숫자를 입력하세요', 'info')
+    return null
+  }
+  return start
+}
+
 function SceneGrid(): React.JSX.Element {
   const scenes = useScenesStore((s) => s.scenes)
   const activePresetId = useScenesStore((s) => s.activePresetId)
   const create = useScenesStore((s) => s.create)
   const editMode = useScenesStore((s) => s.editMode)
   const setEditMode = useScenesStore((s) => s.setEditMode)
+  const selection = useScenesStore((s) => s.selection)
+  const clearSelection = useScenesStore((s) => s.clearSelection)
   const columns = useScenesStore((s) => s.columns)
   const setColumns = useScenesStore((s) => s.setColumns)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
@@ -277,6 +454,7 @@ function SceneGrid(): React.JSX.Element {
   const presets = useScenesStore((s) => s.presets)
   const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
   const activePreset = presets.find((p) => p.id === activePresetId) ?? null
+  const selectionActive = editMode || selection.size > 0
 
   // 커스텀 확장 (NAIS2 Custom): 큐 반복 / 씬별 캐릭터 추가
   const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
@@ -287,9 +465,28 @@ function SceneGrid(): React.JSX.Element {
   const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
   const [additionSceneIds, setAdditionSceneIds] = useState<number[] | null>(null)
+  const [hideBulkBarForPainting, setHideBulkBarForPainting] = useState(false)
 
   // 스크롤 위치 복원 — 마운트 직후 + 씬 목록이 늦게 로드된 경우 한 번 더
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [gridWidth, setGridWidth] = useState(0)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const update = (): void => setGridWidth(el.clientWidth)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  const effectiveColumns =
+    gridWidth > 0 && gridWidth < 520
+      ? 1
+      : gridWidth > 0 && gridWidth < 780
+        ? Math.min(columns, 2)
+        : gridWidth > 0 && gridWidth < 1100
+          ? Math.min(columns, 3)
+          : columns
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = savedGridScroll
   }, [])
@@ -297,6 +494,71 @@ function SceneGrid(): React.JSX.Element {
     const el = scrollRef.current
     if (el && savedGridScroll > 0 && el.scrollTop === 0) el.scrollTop = savedGridScroll
   }, [scenes.length])
+
+  // Shift+왼쪽 드래그: 커서가 지나간 카드까지 목록 순서대로 연속 선택한다.
+  // 전역 pointermove를 쓰므로 빠르게 드래그해 중간 카드를 건너뛰어도 selectRangeTo가 사이를 채운다.
+  const paintCleanupRef = useRef<(() => void) | null>(null)
+  const beginShiftSelection = useCallback((sceneId: number, pointerId: number): void => {
+    paintCleanupRef.current?.()
+    const initialState = useScenesStore.getState()
+    // 처음 선택을 시작할 때만 작업 바 등장을 pointerup까지 미뤄 카드 위치를 고정한다.
+    // 이미 작업 바가 보였다면 숨기지 않아 그리드가 위로 튀지 않게 한다.
+    setHideBulkBarForPainting(!initialState.editMode && initialState.selection.size === 0)
+    initialState.selectRangeTo(sceneId)
+    const visited = new Set<number>([sceneId])
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    let lastX = 0
+    let lastY = 0
+    let raf = 0
+
+    const selectAt = (x: number, y: number): void => {
+      const card = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-scene-id]')
+      const id = Number(card?.dataset.sceneId)
+      if (!Number.isInteger(id) || visited.has(id)) return
+      visited.add(id)
+      useScenesStore.getState().selectRangeTo(id)
+    }
+
+    const autoScroll = (): void => {
+      const scroller = scrollRef.current
+      if (scroller && lastY > 0) {
+        const rect = scroller.getBoundingClientRect()
+        let delta = 0
+        if (lastY < rect.top + 44) delta = -20
+        else if (lastY > rect.bottom - 44) delta = 20
+        if (delta !== 0) {
+          scroller.scrollTop += delta
+          selectAt(lastX, lastY)
+        }
+      }
+      raf = window.requestAnimationFrame(autoScroll)
+    }
+
+    const onMove = (e: PointerEvent): void => {
+      if (e.pointerId !== pointerId || (e.buttons & 1) === 0) return
+      lastX = e.clientX
+      lastY = e.clientY
+      selectAt(lastX, lastY)
+    }
+    const cleanup = (): void => {
+      window.cancelAnimationFrame(raf)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
+      window.removeEventListener('blur', cleanup)
+      document.body.style.userSelect = previousUserSelect
+      setHideBulkBarForPainting(false)
+      if (paintCleanupRef.current === cleanup) paintCleanupRef.current = null
+    }
+    paintCleanupRef.current = cleanup
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', cleanup)
+    window.addEventListener('pointercancel', cleanup)
+    window.addEventListener('blur', cleanup)
+    raf = window.requestAnimationFrame(autoScroll)
+  }, [])
+  useEffect(() => () => paintCleanupRef.current?.(), [])
 
   // 드래그 재정렬 (5px 이동해야 시작 — 클릭과 구분).
   // DragOverlay 사용: 드래그 중엔 가벼운 클론이 커서를 따라가고 원본은 숨겨 프레임 저하 방지
@@ -333,6 +595,29 @@ function SceneGrid(): React.JSX.Element {
     } else {
       toast('가져올 씬이 없습니다', 'info')
     }
+  }
+  async function assignAllSceneNumbers(): Promise<void> {
+    if (scenes.length === 0) return
+    const start = await askStartNumber(scenes.length)
+    if (start == null) return
+    await window.nais.invoke('scenes:assignExportNumbers', {
+      ids: scenes.map((scene) => scene.id),
+      start
+    })
+    await useScenesStore.getState().load()
+    toast(
+      `전체 ${scenes.length}개 씬에 화면 순서대로 번호 부여 (${String(start).padStart(2, '0')}부터)`,
+      'success'
+    )
+  }
+  async function clearAllSceneNumbers(): Promise<void> {
+    if (scenes.length === 0) return
+    await window.nais.invoke('scenes:assignExportNumbers', {
+      ids: scenes.map((scene) => scene.id),
+      start: null
+    })
+    await useScenesStore.getState().load()
+    toast('현재 모듈의 씬 번호를 모두 제거했습니다', 'info')
   }
   async function exportZip(mode: 'favorites' | 'sceneTop'): Promise<void> {
     await window.nais.invoke('scenes:exportZip', { mode })
@@ -381,11 +666,38 @@ function SceneGrid(): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
       {/* 툴바 — 한 행: 프리셋 드롭다운 + 아이콘(툴팁) */}
-      <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-2 py-1.5">
         <PresetDropdown />
         <div className="mx-1 h-5 w-px bg-line" />
         <IconBtn icon={<FileDown size={16} />} tip="JSON 내보내기" onClick={exportJson} />
         <IconBtn icon={<FileUp size={16} />} tip="JSON 불러오기" onClick={importJson} />
+        <Popover>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <button
+                  disabled={scenes.length === 0}
+                  className="grid size-8 place-items-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-30"
+                >
+                  <Hash size={16} />
+                </button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>씬 번호 — 내보내기·클플 파일명</TooltipContent>
+          </Tooltip>
+          <PopoverContent align="start" className="w-64 p-1">
+            <MenuItem
+              icon={<Hash size={13} />}
+              label="전체 씬 — 현재 순서대로 번호 매기기"
+              onClick={() => void assignAllSceneNumbers()}
+            />
+            <MenuItem
+              icon={<X size={13} />}
+              label="전체 씬 번호 제거"
+              onClick={() => void clearAllSceneNumbers()}
+            />
+          </PopoverContent>
+        </Popover>
         <Popover>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -441,9 +753,16 @@ function SceneGrid(): React.JSX.Element {
         </Popover>
         <IconBtn
           icon={<Pencil size={16} />}
-          tip="편집 모드"
-          active={editMode}
-          onClick={() => setEditMode(!editMode)}
+          tip={selectionActive ? '선택 끝내기' : '편집/다중 선택 모드'}
+          active={selectionActive}
+          onClick={() => {
+            if (selectionActive) {
+              setEditMode(false)
+              clearSelection()
+            } else {
+              setEditMode(true)
+            }
+          }}
         />
         {/* 휴지통 — 삭제한 씬 복원 (커스텀) */}
         <IconBtn
@@ -499,7 +818,7 @@ function SceneGrid(): React.JSX.Element {
           <TooltipContent>씬별 캐릭터 추가</TooltipContent>
         </Tooltip>
 
-        <div className="flex-1" />
+        <div className="min-w-4 flex-1" />
 
         {/* 새 씬 기본 해상도 (커스텀 — 프리셋 드롭다운에만 있던 걸 툴바로 노출).
             여기서 바꾸면 이후 "+ 씬 추가"로 만드는 씬이 이 해상도로 생성된다 */}
@@ -563,7 +882,7 @@ function SceneGrid(): React.JSX.Element {
       </div>
 
       <AnimatePresence initial={false}>
-        {editMode && (
+        {selectionActive && !hideBulkBarForPainting && (
           <motion.div
             key="bulkbar"
             className="overflow-hidden"
@@ -598,7 +917,7 @@ function SceneGrid(): React.JSX.Element {
           >
             <div
               className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }}
             >
               {scenes.map((scene) => (
                 <SceneCard
@@ -609,6 +928,7 @@ function SceneGrid(): React.JSX.Element {
                   onOpenAddition={setAdditionSceneIds}
                   onExportFavorites={onExportSceneFavorites}
                   onClearImages={onClearSceneImages}
+                  onBeginShiftSelection={beginShiftSelection}
                 />
               ))}
               <button
@@ -770,15 +1090,13 @@ function BulkBar({
 
   // 내보내기 번호 매기기 (커스텀) — 시작 번호 입력 후 목록 순서대로 순번
   const assignNumbers = async (): Promise<void> => {
-    const raw = await askText('시작 번호', '1', '예: 1 → 01, 02… / 100 → 100, 101…')
-    if (raw == null) return
-    const start = Number(raw.trim())
-    if (!Number.isInteger(start) || start < 0) {
-      toast('숫자를 입력하세요', 'info')
-      return
-    }
+    const start = await askStartNumber(n)
+    if (start == null) return
     await bulkAssignNumbers(start)
-    toast(`${n}개 씬에 번호 부여 (${String(start).padStart(2, '0')}부터)`, 'success')
+    toast(
+      `선택한 ${n}개 씬에 화면 순서대로 번호 부여 (${String(start).padStart(2, '0')}부터)`,
+      'success'
+    )
   }
 
   // 폴더로 내보내기 — 충돌 있으면 미리보기 다이얼로그로 물어봄 (커스텀, 상단 툴바와 공유)
@@ -1132,7 +1450,8 @@ const SceneCard = memo(function SceneCard({
   generating,
   onOpenAddition,
   onExportFavorites,
-  onClearImages
+  onClearImages,
+  onBeginShiftSelection
 }: {
   scene: Scene
   live: string | null
@@ -1140,6 +1459,7 @@ const SceneCard = memo(function SceneCard({
   onOpenAddition: (sceneIds: number[]) => void
   onExportFavorites: (id: number) => void
   onClearImages: (id: number, name: string) => void
+  onBeginShiftSelection: (sceneId: number, pointerId: number) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
@@ -1151,7 +1471,12 @@ const SceneCard = memo(function SceneCard({
   const duplicate = useScenesStore((s) => s.duplicate)
   const remove = useScenesStore((s) => s.remove)
   const adjustReserve = useScenesStore((s) => s.adjustReserve)
-  const sortable = useSortable({ id: `scene-${scene.id}` })
+  const presets = useScenesStore((s) => s.presets)
+  const activePresetId = useScenesStore((s) => s.activePresetId)
+  const selectionActive = editMode || selection.size > 0
+  // Shift/Ctrl 제스처는 아래 pointerdown에서 따로 가로채고, 일반 드래그는 편집 중에도 재정렬에 쓴다.
+  // 여러 씬이 선택된 상태만 잠가 "선택 전체 이동"으로 오해하지 않게 한다.
+  const sortable = useSortable({ id: `scene-${scene.id}`, disabled: selection.size > 1 })
 
   // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
@@ -1190,12 +1515,51 @@ const SceneCard = memo(function SceneCard({
     const { ok } = await window.nais.invoke('scenes:openFolder', { sceneId: scene.id })
     if (!ok) toast('아직 생성된 이미지 폴더가 없습니다', 'info')
   }
-  // 다중 선택 중 그 카드를 우클릭하면 복제/삭제가 선택 전체에 적용 (탐색기 방식, 커스텀)
-  const multi = editMode && selection.has(scene.id) && selection.size > 1
+  // 선택된 카드를 우클릭하면 편집 모드 여부와 무관하게 선택 전체에 적용 (탐색기 방식).
+  const multi = selection.has(scene.id) && selection.size > 1
   const multiN = selection.size
+  const otherPresets = presets.filter((p) => p.id !== activePresetId)
+  const suppressShiftClickRef = useRef(false)
+
+  const editSingleSceneNumber = async (): Promise<void> => {
+    const raw = await askText(
+      `"${scene.name}" 번호 수정`,
+      scene.exportNo == null ? '' : String(scene.exportNo),
+      '0 이상의 숫자 · 비우면 번호 제거'
+    )
+    if (raw == null) return
+    const trimmed = raw.trim()
+    const number = trimmed === '' ? null : Number(trimmed)
+    if (number !== null && (!Number.isInteger(number) || number < 0)) {
+      toast('0 이상의 숫자를 입력하세요', 'info')
+      return
+    }
+    await window.nais.invoke('scenes:assignExportNumbers', {
+      ids: [scene.id],
+      start: number
+    })
+    await useScenesStore.getState().load()
+    toast(number == null ? '씬 번호 제거됨' : `씬 번호를 ${number}번으로 변경했습니다`, 'success')
+  }
+
+  const editContextSceneNumbers = async (): Promise<void> => {
+    const state = useScenesStore.getState()
+    if (state.selection.has(scene.id) && state.selection.size > 1) {
+      const start = await askStartNumber(state.selection.size)
+      if (start == null) return
+      await state.bulkAssignNumbers(start)
+      toast(
+        `선택한 ${state.selection.size}개 씬에 화면 순서대로 번호 부여 (${String(start).padStart(2, '0')}부터)`,
+        'success'
+      )
+      return
+    }
+    await editSingleSceneNumber()
+  }
 
   const duplicateScenes = (): void => {
-    if (multi) void useScenesStore.getState().bulkDuplicate()
+    const state = useScenesStore.getState()
+    if (state.selection.has(scene.id)) void state.bulkDuplicate()
     else void duplicate(scene.id)
   }
 
@@ -1207,8 +1571,26 @@ const SceneCard = memo(function SceneCard({
         danger: true
       })
     ) {
-      if (multi) void useScenesStore.getState().bulkDelete()
+      const state = useScenesStore.getState()
+      if (state.selection.has(scene.id)) void state.bulkDelete()
       else void remove(scene.id)
+    }
+  }
+
+  const transferScenes = async (presetId: number, mode: 'move' | 'copy'): Promise<void> => {
+    const state = useScenesStore.getState()
+    // 3점 메뉴 등으로 선택 없이 호출된 경우에도 이 카드 한 장을 대상으로 맞춘다.
+    if (!state.selection.has(scene.id)) {
+      state.clearSelection()
+      state.toggleSelected(scene.id)
+    }
+    const count = useScenesStore.getState().selection.size
+    if (mode === 'move') {
+      await useScenesStore.getState().bulkMove(presetId)
+      toast(`씬 ${count}개 이동됨`, 'success')
+    } else {
+      const copied = await useScenesStore.getState().bulkCopy(presetId)
+      if (copied > 0) toast(`씬 ${copied}개 복사됨`, 'success')
     }
   }
 
@@ -1219,19 +1601,54 @@ const SceneCard = memo(function SceneCard({
           ref={sortable.setNodeRef}
           {...sortable.attributes}
           {...sortable.listeners}
+          data-scene-id={scene.id}
+          title={
+            selection.size > 1
+              ? '다중 선택을 끝낸 뒤 드래그하면 순서를 바꿀 수 있습니다'
+              : '클릭해서 열기 · 드래그해서 순서 변경'
+          }
           className={cn(
             'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
-            editMode && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
+            selectionActive && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
             sortable.isDragging && 'shadow-xl'
           )}
           style={{ aspectRatio: CARD_ASPECT[cardOrientation], ...dndStyle(sortable) }}
-          onClick={(e) =>
-            editMode
-              ? e.shiftKey
-                ? selectRangeTo(scene.id) // Shift+클릭: 기준점부터 범위 선택 (커스텀)
-                : toggleSelected(scene.id)
-              : select(scene.id)
-          }
+          onPointerDown={(e) => {
+            if (e.button === 0 && e.shiftKey) {
+              suppressShiftClickRef.current = true
+              e.preventDefault()
+              e.stopPropagation()
+              onBeginShiftSelection(scene.id, e.pointerId)
+              return
+            }
+            // Ctrl/Cmd는 개별 선택 제스처다. click에서 토글하되 dnd-kit에는 넘기지 않는다.
+            if (e.button === 0 && (e.ctrlKey || e.metaKey)) return
+            // 위의 spread를 덮어썼으므로 일반 상태에서는 dnd-kit 리스너를 직접 전달한다.
+            sortable.listeners?.onPointerDown?.(e)
+          }}
+          onContextMenu={(e) => {
+            if (checked) return // 선택된 카드 우클릭은 현재 다중 선택을 그대로 유지
+            if (e.shiftKey) {
+              selectRangeTo(scene.id)
+            } else {
+              if (!e.ctrlKey && !e.metaKey) useScenesStore.getState().clearSelection()
+              useScenesStore.getState().toggleSelected(scene.id)
+            }
+          }}
+          onClick={(e) => {
+            if (e.shiftKey && suppressShiftClickRef.current) {
+              suppressShiftClickRef.current = false
+              return
+            }
+            suppressShiftClickRef.current = false
+            if (e.shiftKey) {
+              selectRangeTo(scene.id)
+            } else if (e.ctrlKey || e.metaKey || selectionActive) {
+              toggleSelected(scene.id)
+            } else {
+              select(scene.id)
+            }
+          }}
         >
           {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
           {src ? (
@@ -1297,7 +1714,7 @@ const SceneCard = memo(function SceneCard({
           )}
 
           {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
-          {editMode ? (
+          {selectionActive ? (
             <span
               className={cn(
                 'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
@@ -1364,9 +1781,17 @@ const SceneCard = memo(function SceneCard({
                 {(scene.imageCount > 0 || scene.exportNo != null) && (
                   <div className="mt-1 flex items-center gap-1">
                     {scene.exportNo != null && (
-                      <span className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow">
+                      <button
+                        className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
+                        title="클릭해서 씬 번호 수정"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void editSingleSceneNumber()
+                        }}
+                      >
                         {String(scene.exportNo).padStart(2, '0')}
-                      </span>
+                      </button>
                     )}
                     {scene.imageCount > 0 && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
@@ -1409,9 +1834,51 @@ const SceneCard = memo(function SceneCard({
         <ContextMenuItem onSelect={() => void renameScene()}>
           <Pencil size={13} /> 이름 변경
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void editContextSceneNumbers()}>
+          <Hash size={13} />
+          {multi ? `선택 순서대로 번호 매기기 (${multiN}개)` : '씬 번호 수정·제거'}
+        </ContextMenuItem>
         <ContextMenuItem onSelect={duplicateScenes}>
           <Copy size={13} /> 복제{multi ? ` (${multiN}개)` : ''}
         </ContextMenuItem>
+        {otherPresets.length > 0 && (
+          <>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <ArrowRight size={13} /> 이동·잘라내기{multi ? ` (${multiN}개)` : ''}
+              </ContextMenuSubTrigger>
+              <ContextMenuPortal>
+                <ContextMenuSubContent sideOffset={2} alignOffset={-5}>
+                  {otherPresets.map((p) => (
+                    <ContextMenuItem
+                      key={`move-${p.id}`}
+                      onSelect={() => void transferScenes(p.id, 'move')}
+                    >
+                      {p.name}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuPortal>
+            </ContextMenuSub>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Copy size={13} /> 다른 모듈로 복사{multi ? ` (${multiN}개)` : ''}
+              </ContextMenuSubTrigger>
+              <ContextMenuPortal>
+                <ContextMenuSubContent sideOffset={2} alignOffset={-5}>
+                  {otherPresets.map((p) => (
+                    <ContextMenuItem
+                      key={`copy-${p.id}`}
+                      onSelect={() => void transferScenes(p.id, 'copy')}
+                    >
+                      {p.name}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuPortal>
+            </ContextMenuSub>
+          </>
+        )}
         <ContextMenuItem onSelect={() => void openFolder()}>
           <FolderOpen size={13} className="text-amber-400" /> 폴더 열기
         </ContextMenuItem>

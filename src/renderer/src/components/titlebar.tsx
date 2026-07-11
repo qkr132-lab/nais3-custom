@@ -1,4 +1,14 @@
-import { Coins, Download, Loader2, Minus, PanelLeft, PanelRight, Settings, Square, X } from 'lucide-react'
+import {
+  Coins,
+  Download,
+  Loader2,
+  Minus,
+  PanelLeft,
+  PanelRight,
+  Settings,
+  Square,
+  X
+} from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
@@ -50,10 +60,16 @@ function UpdateButton(): React.JSX.Element | null {
 }
 
 /** Anlas 잔액 + 예상 소모(-N). 토큰 미설정(잔액 없음)이면 표시하지 않음 */
-function AnlasChips({ balance, cost }: { balance: number | null; cost: number }): React.JSX.Element | null {
+function AnlasChips({
+  balance,
+  cost
+}: {
+  balance: number | null
+  cost: number
+}): React.JSX.Element | null {
   if (balance === null) return null
   return (
-    <div className="no-drag mx-1 flex items-center gap-1.5">
+    <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden">
       <span
         className="flex items-center gap-1.5 rounded-lg bg-[#c9a34f]/15 px-2.5 py-1 font-mono text-[14px] font-semibold text-[#9a7c2e] dark:text-[#e0c169]"
         title="Anlas 잔액 (생성할 때마다 갱신)"
@@ -119,7 +135,7 @@ export function Titlebar(): React.JSX.Element {
 
   return (
     <header
-      className="drag relative flex h-14 shrink-0 select-none items-center gap-1 bg-paper px-2"
+      className="drag relative flex h-14 shrink-0 select-none items-center gap-1 bg-paper px-2 max-[760px]:h-12 max-[760px]:px-1"
       style={{ paddingLeft: isMac ? 90 : undefined }}
     >
       {/* 네비게이션 — 타이틀바 중앙 (컨테이너는 pointer-events-none, PageNav만 클릭 가능) */}
