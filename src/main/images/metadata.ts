@@ -118,6 +118,7 @@ interface Params {
 
 interface LocalParams {
   promptParts?: ImageMetadata['promptParts']
+  fragmentPrompts?: ImageMetadata['fragmentPrompts']
 }
 
 function parseLocalParams(text: Record<string, string>): LocalParams | undefined {
@@ -172,6 +173,7 @@ function normalize(
   return {
     prompt: extra.prompt,
     promptParts: extra.local?.promptParts,
+    fragmentPrompts: extra.local?.fragmentPrompts,
     negativePrompt: extra.uc,
     seed: params.seed,
     steps: params.steps,

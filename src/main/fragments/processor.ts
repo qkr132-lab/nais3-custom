@@ -16,6 +16,13 @@ export interface FragmentSource {
   getLines: (path: string) => string[] | null
 }
 
+export interface FragmentTrace {
+  token: string
+  path: string
+  selected: string
+  content: string
+}
+
 const MAX_DEPTH = 10
 const sequentialCounters = new Map<string, number>()
 
@@ -32,7 +39,8 @@ function processFileWildcards(
   source: FragmentSource,
   rng: () => number,
   depth: number,
-  peek: boolean
+  peek: boolean,
+  trace?: FragmentTrace[]
 ): string {
   if (depth > MAX_DEPTH) return prompt
   const filePattern = /<([^<>]+)>/g
@@ -68,8 +76,14 @@ function processFileWildcards(
       line = lines[Math.floor(rng() * lines.length)]
     }
 
+    // 바깥 조각을 먼저 기록해 표시 순서를 입력 순서와 맞춘다. 선택값은 재귀 치환 후 채운다.
+    const traceIndex = trace?.length
+    if (trace) trace.push({ token: match, path, selected: '', content: lines.join('\n') })
+
     // 선택된 줄 안의 중첩 조각 재귀 치환
-    return processFileWildcards(line, source, rng, depth + 1, peek)
+    const selected = processFileWildcards(line, source, rng, depth + 1, peek, trace)
+    if (traceIndex != null && trace) trace[traceIndex].selected = selected
+    return selected
   })
 }
 
@@ -120,10 +134,10 @@ export function processWildcards(
   prompt: string,
   source: FragmentSource,
   rng: () => number = Math.random,
-  opts: { peek?: boolean } = {}
+  opts: { peek?: boolean; trace?: FragmentTrace[] } = {}
 ): string {
   if (!prompt) return prompt
-  let result = processFileWildcards(prompt, source, rng, 0, opts.peek ?? false)
+  let result = processFileWildcards(prompt, source, rng, 0, opts.peek ?? false, opts.trace)
   result = processParenthesisWildcards(result, rng)
   result = processSimpleWildcards(result, rng)
   return result

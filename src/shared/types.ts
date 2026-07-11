@@ -95,6 +95,20 @@ export interface PromptParts {
   detail: string
 }
 
+/** 생성 당시 실제 참조한 파일 조각의 스냅샷 — 메타데이터 확인용 */
+export interface FragmentPromptMetadata {
+  /** 입력에 적힌 토큰 그대로. 예: <a1>, <*의상/casual> */
+  token: string
+  /** 정규화된 조각 경로 */
+  path: string
+  /** 프롬프트/네거티브/캐릭터 등 사용 위치 */
+  location: string
+  /** 이번 생성에서 선택되고 중첩 파일 조각까지 치환된 한 줄 */
+  selected: string
+  /** 생성 당시 조각이 가진 전체 유효 후보 줄 */
+  content: string
+}
+
 export type QueueItemState = 'pending' | 'generating' | 'done' | 'failed' | 'cancelled'
 
 export interface QueueItem {
@@ -217,6 +231,7 @@ export const EMOTIONS = [
 export interface ImageMetadata {
   prompt: string
   promptParts?: PromptParts & { negative?: string; inpainting?: string }
+  fragmentPrompts?: FragmentPromptMetadata[]
   negativePrompt: string
   seed?: number
   steps?: number

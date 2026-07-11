@@ -674,17 +674,17 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
           .get(filePath) as { payload_json: string } | undefined
         const fromDb = row?.payload_json ? metadataFromPayloadJson(row.payload_json) : null
         // 1) PNG tEXt 우선. 단, 예전 저장본/포맷 변환본처럼 nais3-params 청크가 빠진 경우
-        // DB payload_json의 NAIS3 로컬 메타데이터(promptParts)를 합쳐서 3분할을 복원한다.
+        // DB payload_json의 NAIS3 로컬 메타데이터를 합쳐 3분할·조각 스냅샷을 복원한다.
         const buf = readFileSync(filePath)
         const fromPng = await metadataFromPng(buf)
-        if (fromPng) {
+        if (fromPng)
           return {
-            meta:
-              !fromPng.promptParts && fromDb?.promptParts
-                ? { ...fromPng, promptParts: fromDb.promptParts }
-                : fromPng
+            meta: {
+              ...fromPng,
+              promptParts: fromPng.promptParts ?? fromDb?.promptParts,
+              fragmentPrompts: fromPng.fragmentPrompts ?? fromDb?.fragmentPrompts
+            }
           }
-        }
         // 2) 폴백: DB payload_json (우리 스트리밍 이미지는 tEXt가 없을 수 있음)
         if (fromDb) return { meta: fromDb }
         return { error: '메타데이터를 찾지 못했습니다' }

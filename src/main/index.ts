@@ -8,8 +8,10 @@ import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
+import type { FragmentTrace } from './fragments/processor'
 import { removeComments } from '../shared/nai-presets'
 import { refreshScenePrompts } from '../shared/scene-request'
+import type { FragmentPromptMetadata } from '../shared/types'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
@@ -158,15 +160,21 @@ app.whenReady().then(async () => {
     const latestScene = rawRequest.sceneId ? getScene(rawRequest.sceneId) : null
     const queuedRequest = latestScene ? refreshScenePrompts(rawRequest, latestScene) : rawRequest
     const fragSource = fragmentSource()
-    const sub = (text: string): string => processWildcards(removeComments(text), fragSource)
+    const fragmentPrompts: FragmentPromptMetadata[] = []
+    const sub = (text: string, location: string): string => {
+      const trace: FragmentTrace[] = []
+      const value = processWildcards(removeComments(text), fragSource, Math.random, { trace })
+      fragmentPrompts.push(...trace.map((item) => ({ ...item, location })))
+      return value
+    }
     let request = {
       ...queuedRequest,
-      prompt: sub(queuedRequest.prompt),
-      negativePrompt: sub(queuedRequest.negativePrompt),
-      characterPrompts: queuedRequest.characterPrompts.map((c) => ({
+      prompt: sub(queuedRequest.prompt, '프롬프트'),
+      negativePrompt: sub(queuedRequest.negativePrompt, '네거티브'),
+      characterPrompts: queuedRequest.characterPrompts.map((c, index) => ({
         ...c,
-        prompt: sub(c.prompt),
-        negativePrompt: sub(c.negativePrompt)
+        prompt: sub(c.prompt, `캐릭터 ${index + 1} 프롬프트`),
+        negativePrompt: sub(c.negativePrompt, `캐릭터 ${index + 1} 네거티브`)
       }))
     }
 
@@ -250,14 +258,18 @@ app.whenReady().then(async () => {
       format: imageFormat,
       sceneName: scene?.name,
       scenePresetName: scene ? (getPresetName(scene.presetId) ?? undefined) : undefined,
-      localMetadata: request.promptParts
-        ? {
-            promptParts: {
-              ...request.promptParts,
-              negative: request.negativePrompt
+      localMetadata:
+        request.promptParts || fragmentPrompts.length > 0
+          ? {
+              promptParts: request.promptParts
+                ? {
+                    ...request.promptParts,
+                    negative: request.negativePrompt
+                  }
+                : undefined,
+              fragmentPrompts: fragmentPrompts.length > 0 ? fragmentPrompts : undefined
             }
-          }
-        : undefined
+          : undefined
     })
 
     // 씬 생성이면 해당 씬 갱신 알림 (목록 썸네일/개수, 상세 이미지 갱신용)

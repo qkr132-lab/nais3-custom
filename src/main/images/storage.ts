@@ -82,7 +82,7 @@ export async function saveGeneratedImage(input: {
   /** 씬이 속한 프리셋 이름 (프리셋 간 동명 씬 충돌 방지) */
   scenePresetName?: string
   /** 전송 payload에는 없는 NAIS3 전용 왕복 메타데이터 */
-  localMetadata?: Pick<ImageMetadata, 'promptParts'>
+  localMetadata?: Pick<ImageMetadata, 'promptParts' | 'fragmentPrompts'>
 }): Promise<SavedImage> {
   const now = new Date()
   // 자동 저장 OFF면 저장 폴더 대신 앱 내부 라이브러리에 보관 (히스토리엔 남지만
@@ -150,7 +150,7 @@ export async function saveGeneratedImage(input: {
 
 function payloadWithLocalMetadata(
   sentPayload: string,
-  localMetadata?: Pick<ImageMetadata, 'promptParts'>
+  localMetadata?: Pick<ImageMetadata, 'promptParts' | 'fragmentPrompts'>
 ): string {
   if (!localMetadata) return sentPayload
   try {
@@ -193,7 +193,10 @@ function textChunk(keyword: string, value: string): Buffer {
   return out
 }
 
-function injectNais3Params(png: Buffer, meta: Pick<ImageMetadata, 'promptParts'>): Buffer {
+function injectNais3Params(
+  png: Buffer,
+  meta: Pick<ImageMetadata, 'promptParts' | 'fragmentPrompts'>
+): Buffer {
   if (png.length < 33 || !png.subarray(0, 8).equals(PNG_SIG)) return png
   const value = Buffer.from(JSON.stringify({ version: 1, ...meta }), 'utf8').toString('base64')
   const chunk = textChunk(NAIS3_KEYWORD, value)
