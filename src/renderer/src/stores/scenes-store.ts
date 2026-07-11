@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
-import { appendPrompt } from '@shared/scene-request'
+import { appendPrompt, mergeSceneIntoPromptParts } from '@shared/scene-request'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
@@ -192,7 +192,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     ...base,
     prompt: appendPrompt(base.prompt, scene.prompt),
     promptParts: base.promptParts
-      ? { ...base.promptParts, detail: appendPrompt(base.promptParts.detail, scene.prompt) }
+      ? mergeSceneIntoPromptParts(base.promptParts, scene.prompt)
       : undefined,
     negativePrompt: appendPrompt(base.negativePrompt, scene.negativePrompt),
     width: src ? src.width : scene.width,
@@ -208,7 +208,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     // 큐 실행 시 최신 씬 태그를 다시 붙일 수 있도록 기본 부분을 별도로 보존한다.
     sceneBasePrompt: base.prompt,
     sceneBaseNegativePrompt: base.negativePrompt,
-    sceneBaseDetailPrompt: base.promptParts?.detail,
+    sceneBaseAdditionalPrompt: base.promptParts?.additional,
     source: src
       ? {
           imageBase64: src.imageBase64,

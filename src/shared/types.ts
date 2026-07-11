@@ -81,8 +81,8 @@ export interface GenerationRequest {
   /** 예약 후 씬 태그가 바뀌어도 실행 직전에 재병합하기 위한 예약 당시 기본 프롬프트 */
   sceneBasePrompt?: string
   sceneBaseNegativePrompt?: string
-  /** 분할 프롬프트 사용 시 예약 당시 detail 원문 */
-  sceneBaseDetailPrompt?: string
+  /** 분할 프롬프트 사용 시 예약 당시 가변(additional) 원문 */
+  sceneBaseAdditionalPrompt?: string
   /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */

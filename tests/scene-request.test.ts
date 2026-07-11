@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { appendPrompt, refreshScenePrompts } from '../src/shared/scene-request'
+import {
+  appendPrompt,
+  mergeSceneIntoPromptParts,
+  refreshScenePrompts
+} from '../src/shared/scene-request'
 import type { GenerationRequest } from '../src/shared/types'
 
 function request(patch: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -29,13 +33,26 @@ describe('대기 씬 요청 최신화', () => {
     expect(appendPrompt('base,', ', scene')).toBe('base, scene')
   })
 
+  it('씬 프롬프트는 3분할의 가변 영역에만 넣는다', () => {
+    expect(
+      mergeSceneIntoPromptParts(
+        { base: 'fixed', additional: 'variable', detail: 'quality detail' },
+        'scene tag'
+      )
+    ).toEqual({
+      base: 'fixed',
+      additional: 'variable, scene tag',
+      detail: 'quality detail'
+    })
+  })
+
   it('예약 당시 기본값은 유지하고 최신 씬 태그만 다시 합친다', () => {
     const original = request({
       sceneId: 7,
       sceneBasePrompt: 'base',
       sceneBaseNegativePrompt: 'base negative',
-      sceneBaseDetailPrompt: 'base detail',
-      promptParts: { base: 'base', additional: 'extra', detail: 'base detail, old scene' }
+      sceneBaseAdditionalPrompt: 'variable',
+      promptParts: { base: 'base', additional: 'variable, old scene', detail: 'base detail' }
     })
     const refreshed = refreshScenePrompts(original, {
       prompt: '6::new tag::',
@@ -44,7 +61,8 @@ describe('대기 씬 요청 최신화', () => {
 
     expect(refreshed.prompt).toBe('base, 6::new tag::')
     expect(refreshed.negativePrompt).toBe('base negative, new negative')
-    expect(refreshed.promptParts?.detail).toBe('base detail, 6::new tag::')
+    expect(refreshed.promptParts?.additional).toBe('variable, 6::new tag::')
+    expect(refreshed.promptParts?.detail).toBe('base detail')
     expect(refreshed.seed).toBe(123)
     expect(refreshed.width).toBe(832)
   })

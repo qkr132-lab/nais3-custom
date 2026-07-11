@@ -1,4 +1,4 @@
-import type { GenerationRequest } from './types'
+import type { GenerationRequest, PromptParts } from './types'
 
 /** 기본 프롬프트 뒤에 씬 프롬프트를 붙이되 경계의 중복 콤마만 정리한다. */
 export function appendPrompt(base: string, add: string): string {
@@ -7,6 +7,14 @@ export function appendPrompt(base: string, add: string): string {
   if (!b) return a
   if (!a) return b
   return `${b}, ${a}`
+}
+
+/** 씬 프롬프트는 3분할의 가변(additional) 영역에만 합친다. */
+export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: string): PromptParts {
+  return {
+    ...parts,
+    additional: appendPrompt(parts.additional, scenePrompt)
+  }
 }
 
 /**
@@ -24,11 +32,11 @@ export function refreshScenePrompts(
     prompt: appendPrompt(request.sceneBasePrompt, latestScene.prompt),
     negativePrompt: appendPrompt(request.sceneBaseNegativePrompt ?? '', latestScene.negativePrompt),
     promptParts:
-      request.promptParts && request.sceneBaseDetailPrompt != null
-        ? {
-            ...request.promptParts,
-            detail: appendPrompt(request.sceneBaseDetailPrompt, latestScene.prompt)
-          }
+      request.promptParts && request.sceneBaseAdditionalPrompt != null
+        ? mergeSceneIntoPromptParts(
+            { ...request.promptParts, additional: request.sceneBaseAdditionalPrompt },
+            latestScene.prompt
+          )
         : request.promptParts
   }
 }
