@@ -395,13 +395,16 @@ function AutoBackupSection(): React.JSX.Element {
     <div className="mt-1 border-t border-line pt-3">
       <p className="text-[13px] text-ink">자동 백업</p>
       <p className="mt-0.5 text-[11.5px] text-faint">
-        앱을 켤 때마다 하루 1회 전체 DB를 자동 백업합니다. 아래 용량 상한을 넘으면 오래된
-        백업부터 자동 삭제돼요 (최신 3개는 항상 보존). 복원은 백업 폴더의 .db를 nais3.db 위치에
-        덮어쓰면 됩니다.
+        앱을 켤 때마다 하루 1회 전체 DB를 자동 백업합니다. 아래 용량 상한을 넘으면 오래된 백업부터
+        자동 삭제돼요 (최신 3개는 항상 보존). 복원은 백업 폴더의 .db를 nais3.db 위치에 덮어쓰면
+        됩니다.
       </p>
       <div className="mt-2 flex items-center gap-2">
         <span className="text-[12px] text-muted">
-          현재 <span className="font-medium text-ink">{info.count}개 · {usedLabel}</span>
+          현재{' '}
+          <span className="font-medium text-ink">
+            {info.count}개 · {usedLabel}
+          </span>
         </span>
         <div className="flex-1" />
         <span className="text-[12px] text-muted">최대 용량</span>
@@ -467,7 +470,10 @@ function BackupButtons(): React.JSX.Element {
           })
           const r = await window.nais.invoke('backup:export', { includeSecrets })
           if (r.saved)
-            toast(includeSecrets ? '내보내기 완료 (계정 정보 포함 — 파일 주의!)' : '내보내기 완료', 'success')
+            toast(
+              includeSecrets ? '내보내기 완료 (계정 정보 포함 — 파일 주의!)' : '내보내기 완료',
+              'success'
+            )
         }}
       >
         <Upload size={14} /> 내보내기
@@ -711,6 +717,7 @@ function AboutSection(): React.JSX.Element {
   const [version, setVersion] = useState('')
   const updateStatus = useUpdateStore((s) => s.status)
   const updateVersion = useUpdateStore((s) => s.version)
+  const updateMessage = useUpdateStore((s) => s.message)
   const updatePercent = useUpdateStore((s) => s.percent)
   const startUpdate = useUpdateStore((s) => s.start)
 
@@ -745,7 +752,9 @@ function AboutSection(): React.JSX.Element {
             <Loader2 size={12} className="animate-spin" /> 업데이트 확인 중…
           </span>
         ) : updateStatus === 'error' ? (
-          <span className="text-[12px] text-danger">업데이트 확인 실패</span>
+          <span className="max-w-[420px] break-words text-[12px] text-danger" title={updateMessage}>
+            업데이트 확인 실패{updateMessage ? `: ${updateMessage}` : ''}
+          </span>
         ) : (
           <span className="text-[12px] text-faint">최신 버전입니다</span>
         )}

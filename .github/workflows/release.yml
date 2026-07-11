@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Verify tag matches package version
+        run: node .github/scripts/verify-release-tag.cjs
       - run: npm ci
       - run: npm run ${{ matrix.script }} -- --publish never
       # 필요한 산출물만 수집 (latest-mac.yml·zip blockmap 등 잡파일 제외)
