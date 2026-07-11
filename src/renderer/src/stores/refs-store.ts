@@ -17,6 +17,8 @@ interface RefsState<T extends { id: number; folderId: number | null }> {
   load: () => Promise<void>
   add: (folderId: number | null) => Promise<void>
   update: (id: number, patch: Record<string, unknown>) => void
+  /** 여러 아이템에 같은 patch를 한 번에 적용 (일괄 설정) — 건드린 필드만 넘긴다 */
+  bulkUpdate: (ids: number[], patch: Record<string, unknown>) => void
   remove: (id: number) => void
   createFolder: (name: string) => Promise<void>
   renameFolder: (id: number, name: string) => void
@@ -60,6 +62,13 @@ function makeRefsStore<T extends { id: number; folderId: number | null }>(ns: st
     update: (id, patch) => {
       set({ items: get().items.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
       void window.nais.invoke(ch.update, { id, patch })
+    },
+    bulkUpdate: (ids, patch) => {
+      if (ids.length === 0 || Object.keys(patch).length === 0) return
+      const idset = new Set(ids)
+      set({ items: get().items.map((c) => (idset.has(c.id) ? { ...c, ...patch } : c)) })
+      // 기존 단건 update 핸들러를 그대로 재사용 — IPC 계약을 늘리지 않는다
+      for (const id of ids) void window.nais.invoke(ch.update, { id, patch })
     },
     remove: (id) => {
       set({ items: get().items.filter((c) => c.id !== id) })
@@ -125,12 +134,13 @@ export function refsStoreFor(kind: 'vibe' | 'charref'): AnyRefsStore {
   return (kind === 'vibe' ? useVibesStore : useCharRefsStore) as unknown as AnyRefsStore
 }
 
+// NAI 웹과 동일 항목 — 캐릭터 연결창(REF_TYPE_LABELS)과 라벨을 맞춘다
 export const CHARREF_TYPES: { value: CharRefType; label: string }[] = [
-  { value: 'character', label: 'Character' },
-  { value: 'style', label: 'Style' },
-  { value: 'character&style', label: 'Character & Style' },
-  { value: 'costume', label: 'Costume' },
-  { value: 'delta', label: 'Delta' }
+  { value: 'character', label: '캐릭터' },
+  { value: 'style', label: '스타일' },
+  { value: 'character&style', label: '캐릭터+스타일' },
+  { value: 'costume', label: '의상' },
+  { value: 'delta', label: '델타' }
 ]
 
 export function enabledRefCount(): { vibes: number; crefs: number } {
