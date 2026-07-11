@@ -16,7 +16,7 @@ import type { CharRefItem, CharRefType, VibeItem } from '@shared/types'
 import { cn } from '../lib/utils'
 import { buildDisplayRows } from '../lib/folder-list'
 import { CHARREF_TYPES, refsStoreFor } from '../stores/refs-store'
-import { askText } from '../stores/dialog-store'
+import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { FolderListView } from './folder-list-view'
 import { Button } from './ui/button'
@@ -111,6 +111,18 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
   const selectAll = (): void => setSelection(new Set(visibleItemIds))
   const clearSelection = (): void => setSelection(new Set())
 
+  const removeSelected = async (): Promise<void> => {
+    const ids = [...selection]
+    if (ids.length === 0) return
+    if (ids.length > 1) {
+      const ok = await askConfirm(`선택한 ${ids.length}개를 삭제할까요?`)
+      if (!ok) return
+    }
+    for (const id of ids) remove(id)
+    setSelection(new Set())
+    toast(`${ids.length}개 삭제됨`, 'success')
+  }
+
   // 여러 장 추가하면 방금 넣은 것들을 자동 선택 → 아래 바에서 바로 일괄 설정
   const addAndSelect = async (folderId: number | null): Promise<void> => {
     const before = new Set(store.getState().items.map((i) => i.id))
@@ -168,7 +180,7 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
           selected && 'bg-accent-soft'
         )}
       >
-        {/* 다중 선택 체크박스 (Shift+클릭 = 범위) */}
+        {/* 다중 선택 체크박스 (Shift+클릭 = 범위) — 히트 영역 넉넉하게 */}
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -176,14 +188,18 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
             toggleSelect(item.id, e.shiftKey)
           }}
           title="선택 (Shift+클릭 = 범위 선택)"
-          className={cn(
-            'grid size-4 shrink-0 place-items-center rounded border transition-colors',
-            selected
-              ? 'border-accent bg-accent text-white'
-              : 'border-line text-transparent hover:border-muted'
-          )}
+          className="grid size-8 shrink-0 place-items-center"
         >
-          <Check size={11} strokeWidth={3} />
+          <span
+            className={cn(
+              'grid size-5 place-items-center rounded-md border transition-colors',
+              selected
+                ? 'border-accent bg-accent text-white'
+                : 'border-muted/70 bg-surface-2 text-transparent hover:border-accent'
+            )}
+          >
+            <Check size={14} strokeWidth={3} />
+          </span>
         </button>
         {/* 전역 적용 스위치 */}
         <Switch
@@ -191,18 +207,39 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
           onCheckedChange={(v) => update(item.id, { enabled: v })}
           onPointerDown={(e) => e.stopPropagation()}
         />
+        {/* 썸네일 클릭으로도 선택 토글 (큰 히트 영역) — 호버 미리보기는 유지 */}
         {item.thumbnail ? (
           <img
             src={`data:image/webp;base64,${item.thumbnail}`}
-            className="size-7 shrink-0 rounded object-cover"
+            className={cn(
+              'size-7 shrink-0 cursor-pointer rounded object-cover',
+              selected && 'ring-2 ring-accent'
+            )}
             alt=""
+            title="클릭해서 선택"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleSelect(item.id, e.shiftKey)
+            }}
             onMouseEnter={(e) => showPreview(e, item.thumbnail)}
             onMouseLeave={() => setPreview(null)}
           />
         ) : (
-          <div className="grid size-7 shrink-0 place-items-center rounded bg-surface-2 text-faint">
+          <button
+            className={cn(
+              'grid size-7 shrink-0 place-items-center rounded bg-surface-2 text-faint',
+              selected && 'ring-2 ring-accent'
+            )}
+            title="클릭해서 선택"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleSelect(item.id, e.shiftKey)
+            }}
+          >
             <ImagePlus size={14} strokeWidth={1.5} />
-          </div>
+          </button>
         )}
         {/* 이름 클릭 = 펼치기. chevron으로 "여기 눌러 편집"임을 드러낸다 */}
         <button
@@ -292,6 +329,9 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
     )
   }
 
+  const someSelected = selection.size > 0
+  const allSelected = visibleItemIds.length > 0 && visibleItemIds.every((id) => selection.has(id))
+
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -319,6 +359,42 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
         </Button>
       </div>
 
+      {/* 항상 보이는 선택 줄 — 첫 선택/전체취소를 한 번에 */}
+      {items.length > 0 && (
+        <div className="flex items-center gap-1 text-[11.5px]">
+          <button
+            onClick={allSelected ? clearSelection : selectAll}
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+            title={allSelected ? '전체 선택 해제' : '전부 선택'}
+          >
+            <span
+              className={cn(
+                'grid size-4 place-items-center rounded border',
+                allSelected
+                  ? 'border-accent bg-accent text-white'
+                  : someSelected
+                    ? 'border-accent bg-accent/30 text-accent'
+                    : 'border-muted/70 text-transparent'
+              )}
+            >
+              <Check size={11} strokeWidth={3} />
+            </span>
+            {allSelected ? '전체 해제' : '전체 선택'}
+          </button>
+          {someSelected && (
+            <>
+              <span className="font-medium text-accent">{selection.size}개 선택됨</span>
+              <button
+                onClick={clearSelection}
+                className="ml-auto rounded-md px-2 py-1 text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                선택 해제
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden no-scrollbar">
         <FolderListView
           rows={rows}
@@ -340,22 +416,40 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
           }
           renderHeader={renderHeader}
           renderExpanded={renderExpanded}
-          itemContextMenu={(row) => (
-            <>
-              <ContextMenuItem
-                onSelect={async () => {
-                  const name = await askText('이름 변경', byId.get(row.id)?.name ?? '')
-                  if (name != null) update(row.id, { name })
-                }}
-              >
-                <Pencil size={13} /> 이름 변경
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem danger onSelect={() => remove(row.id)}>
-                <Trash2 size={13} /> 삭제
-              </ContextMenuItem>
-            </>
-          )}
+          itemContextMenu={(row) => {
+            // 선택된 항목 위에서 우클릭 + 2개 이상이면 선택 전체를 대상으로
+            const multi = selection.has(row.id) && selection.size > 1
+            if (multi) {
+              return (
+                <>
+                  <ContextMenuItem disabled>{selection.size}개 선택됨</ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem danger onSelect={() => void removeSelected()}>
+                    <Trash2 size={13} /> 선택한 {selection.size}개 삭제
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={clearSelection}>
+                    <X size={13} /> 선택 해제
+                  </ContextMenuItem>
+                </>
+              )
+            }
+            return (
+              <>
+                <ContextMenuItem
+                  onSelect={async () => {
+                    const name = await askText('이름 변경', byId.get(row.id)?.name ?? '')
+                    if (name != null) update(row.id, { name })
+                  }}
+                >
+                  <Pencil size={13} /> 이름 변경
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem danger onSelect={() => remove(row.id)}>
+                  <Trash2 size={13} /> 삭제
+                </ContextMenuItem>
+              </>
+            )
+          }}
           emptyText={items.length === 0 ? '이미지를 추가해보세요' : '검색 결과 없음'}
         />
       </div>
@@ -365,13 +459,7 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
         <div className="shrink-0 rounded-lg border border-accent/40 bg-surface-2 p-2">
           <div className="mb-1.5 flex items-center gap-2 text-[12px]">
             <ListChecks size={14} className="text-accent" />
-            <span className="font-medium">{selection.size}개 선택</span>
-            <button className="text-[11px] text-accent hover:underline" onClick={selectAll}>
-              전체
-            </button>
-            <button className="text-[11px] text-muted hover:underline" onClick={clearSelection}>
-              해제
-            </button>
+            <span className="font-medium">선택 {selection.size}개에 일괄 적용</span>
             <div className="flex-1" />
             <button className="text-muted hover:text-ink" title="선택 해제" onClick={clearSelection}>
               <X size={14} />
