@@ -12,7 +12,7 @@ import { removeComments } from '../shared/nai-presets'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
-import { migrateFromSharedFolder } from './migrate-data'
+import { migrateFromSharedFolder, needsMigration } from './migrate-data'
 import { setupUpdater } from './updater'
 import { logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance, generateImageStream, generateImageZip } from './nai/client'
@@ -25,10 +25,10 @@ app.setName('NAIS3 Custom')
 
 // 데이터 폴더: 자체 폴더(%APPDATA%\NAIS3 Custom) — v1.5.0부터 공식 NAIS3와 완전 분리.
 // (v1.1.6~1.4.3의 공유 방식은 커스텀 DB 마이그레이션이 공식 NAIS3를 못 켜게 만드는
-//  사고를 일으켜 폐기. 첫 실행 시 migrateFromSharedFolder가 기존 데이터를 복사해오고
-//  공식 DB를 복구한다.) userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
+//  사고를 일으켜 폐기.) userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
+// ⚠️ 이관(migrateFromSharedFolder)은 whenReady에서 스플래시 창을 띄운 뒤 실행 —
+//    창 없이 여기서 동기로 돌리면 큰 폴더에서 "반응 없음"으로 보여 강제 종료 사고가 난다 (v1.5.7 수정)
 app.setPath('userData', join(app.getPath('appData'), 'NAIS3 Custom'))
-migrateFromSharedFolder()
 
 // 중복 실행 방지 (특히 Windows) — 두 번째 실행은 기존 창을 앞으로
 if (!app.requestSingleInstanceLock()) {
@@ -87,8 +87,37 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.nais3.custom')
+
+  // 첫 실행 이관 — 스플래시를 먼저 띄워 "반응 없음"으로 보이지 않게 (v1.5.7 수정).
+  // 복사는 비동기 + 웹 캐시 제외라 보통 수 초 안에 끝난다
+  if (needsMigration()) {
+    const splash = new BrowserWindow({
+      width: 380,
+      height: 130,
+      frame: false,
+      resizable: false,
+      alwaysOnTop: true,
+      backgroundColor: '#0f0f10'
+    })
+    void splash.loadURL(
+      'data:text/html;charset=utf-8,' +
+        encodeURIComponent(
+          `<body style="margin:0;display:grid;place-items:center;height:100vh;background:#0f0f10;color:#e8eaf0;font-family:'Malgun Gothic',sans-serif">
+             <div style="text-align:center">
+               <div style="font-size:15px;font-weight:700">데이터 폴더 이관 중…</div>
+               <div style="margin-top:6px;font-size:12px;color:#9aa1b2">첫 실행 한 번만 — 기존 데이터를 복사하고 있어요</div>
+             </div>
+           </body>`
+        )
+    )
+    try {
+      await migrateFromSharedFolder()
+    } finally {
+      splash.destroy()
+    }
+  }
 
   protocol.handle('nais-image', (request) => {
     const url = new URL(request.url)

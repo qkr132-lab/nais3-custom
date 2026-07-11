@@ -1,7 +1,6 @@
 import { app } from 'electron'
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -9,7 +8,8 @@ import {
   rmSync,
   writeFileSync
 } from 'fs'
-import { join } from 'path'
+import { cp } from 'fs/promises'
+import { basename, join } from 'path'
 import Database from 'better-sqlite3'
 
 /**
@@ -30,7 +30,37 @@ import Database from 'better-sqlite3'
 const MARKER = '.migrated-from-shared-v1'
 const DB_FILES = ['nais3.db', 'nais3.db-wal', 'nais3.db-shm']
 
-export function migrateFromSharedFolder(): void {
+/** Electron 세션 폴더 안의 무거운 캐시들 — 복사 제외 (수 GB일 수 있어 첫 실행이 멈춘 사고 원인).
+ *  로그인 유지에 필요한 Cookies/Local Storage 등 작은 것만 넘어간다 */
+const HEAVY_CACHE_DIRS = new Set([
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+  'Service Worker',
+  'blob_storage',
+  'Dictionaries',
+  'component_crx_cache',
+  'Crashpad'
+])
+
+/** 이관이 아직 안 됐는지 (스플래시 표시 판단용) */
+export function needsMigration(): boolean {
+  const customDir = app.getPath('userData')
+  return (
+    !existsSync(join(customDir, MARKER)) &&
+    existsSync(join(app.getPath('appData'), 'NAIS3', 'nais3.db'))
+  )
+}
+
+/**
+ * 비동기 이관 — 반드시 창(스플래시)을 띄운 뒤 호출할 것.
+ * v1.5.0~1.5.6은 이걸 창 없이 동기로 돌려서, 공유 폴더가 크면(웹 캐시 수 GB)
+ * 앱이 몇 분간 "반응 없음"으로 보였고 강제 종료 → 마커 미기록 → 무한 반복되는
+ * 사고가 실제로 났다. 이제: 캐시 제외 + 비동기 + 단계별 보호.
+ */
+export async function migrateFromSharedFolder(): Promise<void> {
   const customDir = app.getPath('userData') // %APPDATA%\NAIS3 Custom
   const sharedDir = join(app.getPath('appData'), 'NAIS3')
   mkdirSync(customDir, { recursive: true })
@@ -50,35 +80,55 @@ export function migrateFromSharedFolder(): void {
         }
       }
 
-      // ① 공유 폴더 → 자체 폴더 복사 (원본은 그대로).
-      //    DB 3종(WAL 포함 — SQLite가 알아서 복구) + 파일 저장소 + 웹 로그인 세션
+      // ① DB 3종 복사 (WAL 포함 — SQLite가 알아서 복구). 이것만은 실패 시 재시도해야 하므로
+      //    outer try가 잡아 마커를 안 쓴다
       for (const f of DB_FILES) {
         const src = join(sharedDir, f)
         if (existsSync(src)) copyFileSync(src, join(customDir, f))
       }
-      // 파일 저장소·웹 세션 복사 — 개별 실패(락 등)가 DB 복구 경로를 막지 않도록 각각 보호
-      for (const d of ['library', 'refs', 'Partitions']) {
+
+      // ②-a 파일 저장소 복사 — 개별 실패(락 등)가 다음 단계를 막지 않게 각각 보호
+      for (const d of ['library', 'refs']) {
         try {
           const src = join(sharedDir, d)
-          if (existsSync(src)) cpSync(src, join(customDir, d), { recursive: true, force: true })
+          if (existsSync(src)) await cp(src, join(customDir, d), { recursive: true, force: true })
         } catch (e) {
           console.error(`[migrate-data] ${d} 복사 실패(건너뜀):`, e)
         }
       }
+      // ②-b 웹 세션 — 무거운 캐시 폴더 제외(사고 원인), 쿠키/로컬스토리지 등만
+      try {
+        const src = join(sharedDir, 'Partitions')
+        if (existsSync(src)) {
+          await cp(src, join(customDir, 'Partitions'), {
+            recursive: true,
+            force: true,
+            filter: (p) => !HEAVY_CACHE_DIRS.has(basename(p))
+          })
+        }
+      } catch (e) {
+        console.error('[migrate-data] Partitions 복사 실패(건너뜀):', e)
+      }
 
-      // ② 복사해온 DB의 절대 경로 재작성 — 라이브러리/바이브/캐릭레퍼 파일 경로가
-      //    공유 폴더를 가리키고 있으므로 자체 폴더로 바꿔 완전히 독립시킨다
-      rewriteAbsolutePaths(join(customDir, 'nais3.db'), sharedDir, customDir)
+      // ③ 복사해온 DB의 절대 경로 재작성 — 실패해도 치명적이지 않음 (공유 폴더가 남아있으면 동작)
+      try {
+        rewriteAbsolutePaths(join(customDir, 'nais3.db'), sharedDir, customDir)
+        // 첫 실행 안내 플래그 — 렌더러가 "폴더가 옮겨졌다"는 1회성 안내창을 띄우게
+        setDbFlag(join(customDir, 'nais3.db'), 'folder_moved_notice', '1')
+      } catch (e) {
+        console.error('[migrate-data] 경로 재작성 실패(건너뜀):', e)
+      }
 
-      // ②-b 첫 실행 안내 플래그 — 렌더러가 "폴더가 옮겨졌다"는 1회성 안내창을 띄우게 (커스텀)
-      setDbFlag(join(customDir, 'nais3.db'), 'folder_moved_notice', '1')
-
-      // ③ 공식 NAIS3 복구
-      repairOfficialDb(sharedDir)
+      // ④ 공식 NAIS3 복구 — 남의 앱 살리기(best-effort). 실패해도 마커는 쓴다
+      try {
+        repairOfficialDb(sharedDir)
+      } catch (e) {
+        console.error('[migrate-data] 공식 DB 복구 실패(건너뜀):', e)
+      }
     }
     writeFileSync(marker, new Date().toISOString())
   } catch (e) {
-    // 이관 실패 시 마커를 쓰지 않으므로 다음 실행에서 재시도. 앱 자체는 계속 뜬다
+    // DB 복사 실패 — 마커를 쓰지 않으므로 다음 실행에서 재시도. 앱 자체는 계속 뜬다
     console.error('[migrate-data] 이관 실패:', e)
   }
 }
