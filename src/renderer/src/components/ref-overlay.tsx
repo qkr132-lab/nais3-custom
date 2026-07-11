@@ -54,11 +54,19 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
   const [selection, setSelection] = useState<Set<number>>(() => new Set())
   const anchorRef = useRef<number | null>(null)
   // 일괄 바에서 조절하는 값 + 어떤 필드를 적용할지 (건드린 것만 적용)
+  const [batchEnabled, setBatchEnabled] = useState(true)
   const [batchType, setBatchType] = useState<CharRefType>('character')
   const [batchStrength, setBatchStrength] = useState(0.8)
   const [batchFidelity, setBatchFidelity] = useState(0.8)
   const [batchInfo, setBatchInfo] = useState(1)
-  const [apply, setApply] = useState({ type: true, strength: true, fidelity: true, info: true })
+  // enabled는 실수로 켜고 끄지 않게 기본 off(opt-in), 나머지는 기본 on
+  const [apply, setApply] = useState({
+    enabled: false,
+    type: true,
+    strength: true,
+    fidelity: true,
+    info: true
+  })
 
   const searching = search.trim().length > 0
   const rows = useMemo(() => {
@@ -141,6 +149,7 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
     const ids = [...selection]
     if (ids.length === 0) return
     const patch: Record<string, unknown> = {}
+    if (apply.enabled) patch.enabled = batchEnabled // 켜기/끄기는 두 종류 공통
     if (kind === 'charref') {
       if (apply.type) patch.refType = batchType
       if (apply.strength) patch.strength = batchStrength
@@ -466,6 +475,18 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
             </button>
           </div>
           <div className="flex flex-col gap-1.5">
+            <BatchRow
+              on={apply.enabled}
+              toggle={() => setApply((a) => ({ ...a, enabled: !a.enabled }))}
+              label="사용"
+            >
+              <div className="flex items-center gap-2">
+                <Switch checked={batchEnabled} onCheckedChange={setBatchEnabled} />
+                <span className="text-[11.5px] text-muted">
+                  {batchEnabled ? '전부 켜기 (생성에 사용)' : '전부 끄기'}
+                </span>
+              </div>
+            </BatchRow>
             {kind === 'charref' && (
               <BatchRow
                 on={apply.type}
