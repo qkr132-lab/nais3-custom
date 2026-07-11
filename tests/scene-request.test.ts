@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendPrompt,
   mergeSceneIntoPromptParts,
+  prioritizeSceneCharacterIds,
   refreshScenePrompts
 } from '../src/shared/scene-request'
 import type { GenerationRequest } from '../src/shared/types'
@@ -44,6 +45,14 @@ describe('대기 씬 요청 최신화', () => {
       additional: 'variable, scene tag',
       detail: 'quality detail'
     })
+  })
+
+  it('씬별 캐릭터 선택 순서를 기본 캐릭터보다 우선한다', () => {
+    expect(prioritizeSceneCharacterIds([30, 10], [10, 20, 40])).toEqual([30, 10, 20, 40])
+  })
+
+  it('씬별 선택이 없으면 기본 캐릭터 순서를 유지한다', () => {
+    expect(prioritizeSceneCharacterIds([], [30, 10, 20])).toEqual([30, 10, 20])
   })
 
   it('예약 당시 기본값은 유지하고 최신 씬 태그만 다시 합친다', () => {

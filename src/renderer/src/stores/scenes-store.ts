@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
-import { appendPrompt, mergeSceneIntoPromptParts } from '@shared/scene-request'
+import {
+  appendPrompt,
+  mergeSceneIntoPromptParts,
+  prioritizeSceneCharacterIds
+} from '@shared/scene-request'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
@@ -142,16 +146,18 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     : undefined
   const add = hasAddition(rawAddition) ? rawAddition : null
 
-  // 캐릭터: 반복 항목이 있으면 항목 선택, 아니면 메인 enabled. 씬별 추가는 합집합.
-  // NAI 동시 캐릭터 한도(6)를 넘지 않게 라이브러리 순서로 자른다.
-  const charIds = new Set([
-    ...(entry ? entry.characterIds : enabledCharacters().map((c) => c.id)),
-    ...(add?.characterIds ?? [])
-  ])
+  // 캐릭터: 씬별 선택 순서 우선 → 반복 항목/메인 enabled 순서. 중복은 한 번만 포함한다.
+  // NAI 동시 캐릭터 한도(6)를 넘으면 이 우선순서대로 자른다.
+  const baseCharIds = entry ? entry.characterIds : enabledCharacters().map((c) => c.id)
+  const orderedCharIds = prioritizeSceneCharacterIds(add?.characterIds ?? [], baseCharIds)
+  const charIds = new Set(orderedCharIds)
   // 위치(좌표): 씬별 추가 > 큐 항목 > 카드 기본 순으로 오버라이드 (커스텀)
-  const characterPrompts = useCharactersStore
-    .getState()
-    .items.filter((c) => charIds.has(c.id) && c.prompt.trim())
+  const charactersById = new Map(useCharactersStore.getState().items.map((c) => [c.id, c]))
+  const characterPrompts = orderedCharIds
+    .flatMap((id) => {
+      const character = charactersById.get(id)
+      return character?.prompt.trim() ? [character] : []
+    })
     .slice(0, 6)
     .map((c) => ({
       prompt: c.prompt,

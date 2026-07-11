@@ -146,6 +146,7 @@ function CharacterPicker({
 
   const renderChar = (c: CharacterCard, i: number): React.JSX.Element => {
     const checked = selected.includes(c.id)
+    const selectionOrder = selected.indexOf(c.id) + 1
     const full = !checked && selected.length >= MAX_CHARS
     return (
       <button
@@ -164,7 +165,7 @@ function CharacterPicker({
             checked ? 'border-accent bg-accent text-white' : 'border-line bg-surface'
           )}
         >
-          {checked && '✓'}
+          {checked && selectionOrder}
         </span>
         {c.thumbnail ? (
           <img

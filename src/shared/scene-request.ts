@@ -17,6 +17,11 @@ export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: strin
   }
 }
 
+/** 씬에서 고른 순서를 우선하고, 나머지 기본 캐릭터를 뒤에 중복 없이 붙인다. */
+export function prioritizeSceneCharacterIds(sceneIds: number[], baseIds: number[]): number[] {
+  return [...new Set([...sceneIds, ...baseIds])]
+}
+
 /**
  * 예약 당시의 기본 설정은 유지하고, 실행 직전 씬 프롬프트만 최신값으로 다시 합친다.
  * 이미 서버로 넘어간 generating 항목에는 호출되지 않고 pending 항목에만 자연스럽게 적용된다.
