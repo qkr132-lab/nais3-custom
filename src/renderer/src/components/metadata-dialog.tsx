@@ -331,15 +331,25 @@ function Field({
   )
 }
 
-/** 프롬프트 표시 — 내용만큼 늘어나고(겹침 없음), 드래그 선택 가능. 아주 길면 자체 스크롤 */
+/** 프롬프트 표시 — 내용만큼 늘어나고(겹침 없음), 드래그 선택 가능. 아주 길면 자체 스크롤.
+ *  클릭하면 통째로 클립보드 복사 (드래그로 일부 선택 중이면 복사 안 함 — 선택 우선). 커스텀 */
 function PromptText({ value, className }: { value: string; className?: string }): React.JSX.Element {
   return (
     <div
       className={cn(
-        'max-h-[45vh] select-text overflow-y-auto whitespace-pre-wrap break-words font-mono leading-relaxed text-ink',
+        'max-h-[45vh] select-text overflow-y-auto whitespace-pre-wrap break-all font-mono leading-relaxed text-ink',
+        value && 'cursor-pointer rounded-sm transition-colors hover:bg-accent/5',
         !value && 'font-sans text-faint',
         className
       )}
+      title={value ? '클릭하면 전체 복사' : undefined}
+      onClick={() => {
+        if (!value) return
+        // 드래그로 일부만 선택한 경우엔 그 선택을 존중 (통째 복사로 덮지 않음)
+        if ((window.getSelection()?.toString().length ?? 0) > 0) return
+        void navigator.clipboard.writeText(value)
+        toast('복사됨', 'success')
+      }}
     >
       {value || '(없음)'}
     </div>
@@ -403,7 +413,10 @@ function Stat({
         </span>
         <span className="min-w-0">
           <span className="block text-[10.5px] text-faint">{label}</span>
-          <span className="block truncate font-mono text-[12.5px] text-ink">{value}</span>
+          {/* 긴 값은 잘리되(레이아웃 안 깨짐) 호버 툴팁으로 전체 확인 */}
+          <span className="block truncate font-mono text-[12.5px] text-ink" title={String(value)}>
+            {value}
+          </span>
         </span>
       </button>
       {/* 값 복사 — 호버 시 표시 (시드 등 개별 복사) */}

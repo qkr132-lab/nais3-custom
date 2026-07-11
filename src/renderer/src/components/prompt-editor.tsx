@@ -161,6 +161,12 @@ export function PromptEditor({
       }
     }
     const rawToken = before.slice(sepIdx + 1)
+    // 방금 띄어쓰기를 친 상태(토큰이 공백으로 끝남)면 추천을 닫는다 — 다음 단어를
+    // 시작하면 AND 검색("핑크 동공")으로 다시 뜬다 (스테일 추천 잔류 방지, 커스텀)
+    if (/\s$/.test(rawToken)) {
+      setSuggestions([])
+      return
+    }
     const token = rawToken.trimStart()
     const start = sepIdx + 1 + (rawToken.length - token.length)
     // 한글은 한 글자도 의미가 있어("눈", "귀") 1자부터 검색
@@ -237,6 +243,8 @@ export function PromptEditor({
           refreshSuggestions(e.target.value, e.target.selectionStart)
         }}
         onScroll={syncScroll}
+        // 클릭으로 커서를 옮기면 새 위치 기준으로 추천을 다시 계산 (스테일 팝업 잔류 방지)
+        onClick={(e) => refreshSuggestions(value, e.currentTarget.selectionStart)}
         onKeyDown={(e) => {
           if (suggestions.length === 0) return
           if (e.key === 'ArrowDown') {
@@ -249,6 +257,9 @@ export function PromptEditor({
             e.preventDefault()
             complete(suggestions[selected])
           } else if (e.key === 'Escape') {
+            setSuggestions([])
+          } else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+            // 커서만 이동 — 지금 추천은 이전 위치 기준이므로 닫는다 (다시 치면 재등장)
             setSuggestions([])
           }
         }}

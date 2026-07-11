@@ -815,7 +815,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     if (status.running && !queueWasRunning) doneAtRunStart = doneNow
     if (!status.running && queueWasRunning) {
       const completed = doneNow - doneAtRunStart
-      if (completed > 0 && getSetting('notify_on_complete') !== '0' && Notification.isSupported()) {
+      // 2장 이상일 때만 — 1장짜리 즉석 생성엔 알림이 과함 (사용자 결정)
+      if (completed >= 2 && getSetting('notify_on_complete') !== '0' && Notification.isSupported()) {
         new Notification({
           title: 'NAIS3 Custom — 생성 완료',
           body: `이미지 ${completed}장 생성이 끝났어요`,
