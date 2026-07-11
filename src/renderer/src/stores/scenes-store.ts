@@ -38,6 +38,8 @@ interface ScenesState {
   loadPresets: () => Promise<void>
   setActivePreset: (id: number) => Promise<void>
   createPreset: (name: string) => Promise<void>
+  /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
+  duplicatePreset: (id: number) => Promise<void>
   renamePreset: (id: number, name: string) => Promise<void>
   deletePreset: (id: number) => Promise<void>
   /** 프리셋 순서 이동 (dir: -1 위 / +1 아래) */
@@ -76,6 +78,8 @@ interface ScenesState {
 
   // 편집 모드 일괄
   bulkMove: (presetId: number) => Promise<void>
+  /** 다른 프리셋으로 복사 — 원본 유지 (커스텀). 반환: 복사된 씬 수 */
+  bulkCopy: (presetId: number) => Promise<number>
   bulkDelete: () => Promise<void>
   /** 선택 씬만 예약 증감 (배치 수 단위) — 커스텀 */
   bulkAdjustReserve: (delta: number) => Promise<void>
@@ -266,6 +270,14 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     const { id } = await window.nais.invoke('scenePresets:create', { name })
     await get().loadPresets()
     await get().setActivePreset(id)
+  },
+  // 모듈(프리셋) 복제 — 안의 씬 전부 포함, 복제본으로 전환 (커스텀)
+  duplicatePreset: async (id) => {
+    const { id: newId } = await window.nais.invoke('scenes:duplicatePreset', { id })
+    if (newId > 0) {
+      await get().loadPresets()
+      await get().setActivePreset(newId)
+    }
   },
   renamePreset: async (id, name) => {
     set({ presets: get().presets.map((p) => (p.id === id ? { ...p, name } : p)) })
@@ -484,6 +496,15 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await window.nais.invoke('scenes:bulkMove', { ids, presetId })
     set({ selection: new Set() })
     await get().load()
+  },
+  // 다른 프리셋으로 "복사" — 원본 유지 (커스텀, 이동=잘라내기와 짝)
+  bulkCopy: async (presetId) => {
+    const ids = get()
+      .scenes.filter((s) => get().selection.has(s.id))
+      .map((s) => s.id) // 목록 순서대로
+    if (ids.length === 0) return 0
+    const { copied } = await window.nais.invoke('scenes:bulkCopy', { ids, presetId })
+    return copied
   },
   bulkDelete: async () => {
     const ids = [...get().selection]

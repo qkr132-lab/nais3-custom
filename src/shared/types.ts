@@ -465,8 +465,9 @@ export interface IpcInvokeMap {
   'update:start': { req: void; res: void }
   /** 지금 업데이트 확인 (커스텀 — 정보 화면 열 때 실시간 재확인). 결과는 update:status 이벤트로 */
   'update:check': { req: void; res: void }
-  /** 전체 데이터 JSON 내보내기 (저장 다이얼로그) */
-  'backup:export': { req: void; res: { saved: boolean } }
+  /** 전체 데이터 JSON 내보내기 (저장 다이얼로그).
+   *  includeSecrets=true면 NAI 토큰·클플 인증을 평문으로 포함 (내보내기 전 반드시 물어볼 것, 커스텀) */
+  'backup:export': { req: { includeSecrets?: boolean }; res: { saved: boolean } }
   /** DB 백업 폴더 열기 (커스텀 — 자동 스냅샷 보관소) */
   'backup:openFolder': { req: void; res: void }
   /** 지금 즉시 DB 백업 스냅샷 생성 (커스텀) */
@@ -515,6 +516,10 @@ export interface IpcInvokeMap {
   /** 씬 내보내기 번호 일괄 부여 (커스텀) — ids 순서대로 start부터 순번. start=null이면 번호 제거 */
   'scenes:assignExportNumbers': { req: { ids: number[]; start: number | null }; res: void }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
+  /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
+  'scenes:duplicatePreset': { req: { id: number }; res: { id: number } }
+  /** 씬들을 다른 프리셋으로 복사 — 원본 유지 (커스텀, bulkMove=잘라내기와 짝) */
+  'scenes:bulkCopy': { req: { ids: number[]; presetId: number }; res: { copied: number } }
   'scenes:delete': { req: { id: number }; res: void }
   'scenes:reorder': { req: { ids: number[] }; res: void }
   /** 예약: 전체 취소(count=0 등 절대값 설정) */

@@ -101,6 +101,7 @@ function PresetDropdown(): React.JSX.Element {
   const renamePreset = useScenesStore((s) => s.renamePreset)
   const deletePreset = useScenesStore((s) => s.deletePreset)
   const reorderPresets = useScenesStore((s) => s.reorderPresets)
+  const duplicatePreset = useScenesStore((s) => s.duplicatePreset)
   const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
   const [open, setOpen] = useState(false)
 
@@ -163,6 +164,17 @@ function PresetDropdown(): React.JSX.Element {
                   title="이름 변경"
                 >
                   <Pencil size={12} />
+                </button>
+                {/* 모듈 복제 — 씬 전부 포함 (커스텀) */}
+                <button
+                  className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
+                  onClick={() => {
+                    setOpen(false)
+                    void duplicatePreset(p.id)
+                  }}
+                  title="모듈 복제 (씬 전부 포함)"
+                >
+                  <Copy size={12} />
                 </button>
                 {presets.length > 1 && (
                   <button
@@ -740,6 +752,7 @@ function BulkBar({
   const selectAll = useScenesStore((s) => s.selectAll)
   const clearSelection = useScenesStore((s) => s.clearSelection)
   const bulkMove = useScenesStore((s) => s.bulkMove)
+  const bulkCopy = useScenesStore((s) => s.bulkCopy)
   const bulkDelete = useScenesStore((s) => s.bulkDelete)
   const bulkAdjustReserve = useScenesStore((s) => s.bulkAdjustReserve)
   const bulkClearReserve = useScenesStore((s) => s.bulkClearReserve)
@@ -834,21 +847,43 @@ function BulkBar({
       </Button>
       <div className="mx-1 h-4 w-px bg-line" />
 
-      {/* 프리셋 이동 */}
+      {/* 다른 모듈로 — 이동(잘라내기) / 복사 분리 (커스텀) */}
       <Popover>
         <PopoverTrigger asChild>
           <Button size="sm" variant="ghost" disabled={disabled}>
-            프리셋 이동
+            다른 모듈로
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-44 p-1">
-          {presets
-            .filter((p) => p.id !== activePresetId)
-            .map((p) => (
-              <MenuItem key={p.id} label={p.name} onClick={() => void bulkMove(p.id)} />
-            ))}
-          {presets.filter((p) => p.id !== activePresetId).length === 0 && (
+        <PopoverContent align="start" className="w-56 p-1">
+          {presets.filter((p) => p.id !== activePresetId).length === 0 ? (
             <p className="px-2 py-1.5 text-[12px] text-faint">다른 프리셋 없음</p>
+          ) : (
+            <>
+              <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1 text-[11px] font-semibold text-muted">
+                <ArrowRight size={12} /> 이동 (원본에서 사라짐)
+              </p>
+              {presets
+                .filter((p) => p.id !== activePresetId)
+                .map((p) => (
+                  <MenuItem key={`m-${p.id}`} label={p.name} onClick={() => void bulkMove(p.id)} />
+                ))}
+              <div className="my-1 h-px bg-line" />
+              <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1 text-[11px] font-semibold text-muted">
+                <Copy size={12} /> 복사 (원본 유지)
+              </p>
+              {presets
+                .filter((p) => p.id !== activePresetId)
+                .map((p) => (
+                  <MenuItem
+                    key={`c-${p.id}`}
+                    label={p.name}
+                    onClick={async () => {
+                      const copied = await bulkCopy(p.id)
+                      toast(`"${p.name}"에 씬 ${copied}개 복사됨`, 'success')
+                    }}
+                  />
+                ))}
+            </>
           )}
         </PopoverContent>
       </Popover>
@@ -1155,15 +1190,26 @@ const SceneCard = memo(function SceneCard({
     const { ok } = await window.nais.invoke('scenes:openFolder', { sceneId: scene.id })
     if (!ok) toast('아직 생성된 이미지 폴더가 없습니다', 'info')
   }
+  // 다중 선택 중 그 카드를 우클릭하면 복제/삭제가 선택 전체에 적용 (탐색기 방식, 커스텀)
+  const multi = editMode && selection.has(scene.id) && selection.size > 1
+  const multiN = selection.size
+
+  const duplicateScenes = (): void => {
+    if (multi) void useScenesStore.getState().bulkDuplicate()
+    else void duplicate(scene.id)
+  }
+
   const removeScene = async (): Promise<void> => {
     if (
       await askConfirm('씬 삭제', {
-        message: `"${scene.name}" 씬을 삭제합니다.`,
+        message: multi ? `선택한 ${multiN}개 씬을 삭제합니다.` : `"${scene.name}" 씬을 삭제합니다.`,
         confirmLabel: '삭제',
         danger: true
       })
-    )
-      void remove(scene.id)
+    ) {
+      if (multi) void useScenesStore.getState().bulkDelete()
+      else void remove(scene.id)
+    }
   }
 
   return (
@@ -1362,8 +1408,8 @@ const SceneCard = memo(function SceneCard({
         <ContextMenuItem onSelect={() => void renameScene()}>
           <Pencil size={13} /> 이름 변경
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void duplicate(scene.id)}>
-          <Copy size={13} /> 복제
+        <ContextMenuItem onSelect={duplicateScenes}>
+          <Copy size={13} /> 복제{multi ? ` (${multiN}개)` : ''}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void openFolder()}>
           <FolderOpen size={13} className="text-amber-400" /> 폴더 열기
@@ -1394,7 +1440,7 @@ const SceneCard = memo(function SceneCard({
         )}
         <ContextMenuSeparator />
         <ContextMenuItem danger onSelect={() => void removeScene()}>
-          <Trash2 size={13} /> 씬 삭제
+          <Trash2 size={13} /> 씬 삭제{multi ? ` (${multiN}개)` : ''}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

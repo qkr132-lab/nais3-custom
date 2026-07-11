@@ -260,6 +260,88 @@ export function duplicateScene(id: number): number {
   )
 }
 
+/** 모듈(프리셋) 복제 (커스텀) — 프리셋 + 안의 씬 전부(프롬프트/해상도/V+/번호, 예약 0) 사본 생성 */
+export function duplicatePreset(id: number): number {
+  const db = getDb()
+  const p = db.prepare('SELECT * FROM scene_presets WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined
+  if (!p) return 0
+  const maxOrder = (
+    db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM scene_presets').get() as { m: number }
+  ).m
+  let newId = 0
+  db.transaction(() => {
+    newId = Number(
+      db
+        .prepare(
+          'INSERT INTO scene_presets (name, sort_order, default_width, default_height) VALUES (?, ?, ?, ?)'
+        )
+        .run(`${p.name} 복제`, maxOrder + 1, p.default_width ?? null, p.default_height ?? null)
+        .lastInsertRowid
+    )
+    const scenes = db
+      .prepare(
+        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, export_no
+         FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
+      )
+      .all(id) as Record<string, unknown>[]
+    const ins = db.prepare(
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    )
+    for (const s of scenes) {
+      ins.run(
+        newId,
+        s.name,
+        s.prompt,
+        s.negative_prompt,
+        s.width,
+        s.height,
+        s.sort_order,
+        s.variety_plus ?? 0,
+        s.export_no ?? null
+      )
+    }
+  })()
+  return newId
+}
+
+/** 씬들을 다른 프리셋으로 "복사" (커스텀) — 원본 유지. bulkMove(잘라내기)와 짝 */
+export function bulkCopyScenes(ids: number[], presetId: number): number {
+  if (ids.length === 0) return 0
+  const db = getDb()
+  let copied = 0
+  db.transaction(() => {
+    let order = (
+      db
+        .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM gen_scenes WHERE preset_id = ?')
+        .get(presetId) as { m: number }
+    ).m
+    const ins = db.prepare(
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    )
+    for (const id of ids) {
+      const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as Row | undefined
+      if (!s) continue
+      ins.run(
+        presetId,
+        s.name,
+        s.prompt,
+        s.negative_prompt,
+        s.width,
+        s.height,
+        ++order,
+        s.variety_plus ?? 0,
+        s.export_no ?? null
+      )
+      copied++
+    }
+  })()
+  return copied
+}
+
 const FIELDS: Record<string, string> = {
   name: 'name',
   prompt: 'prompt',

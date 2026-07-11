@@ -455,8 +455,19 @@ function BackupButtons(): React.JSX.Element {
         variant="default"
         className="gap-1.5"
         onClick={async () => {
-          const r = await window.nais.invoke('backup:export', undefined)
-          if (r.saved) toast('내보내기 완료', 'success')
+          // 계정 정보 포함 여부 — 중대 결정이라 "확인 창 끄기"여도 반드시 묻는다 (커스텀)
+          const includeSecrets = await askConfirm('계정 정보도 포함할까요?', {
+            message:
+              'NAI 토큰과 클라우드플레어 인증을 백업 파일에 평문으로 넣습니다.\n' +
+              '다른 PC로 옮길 때만 "포함"을 누르고, 파일은 절대 남과 공유하지 마세요.\n' +
+              '"아니요"를 누르면 씬·라이브러리·설정만 내보냅니다.',
+            confirmLabel: '포함해서 내보내기',
+            danger: true,
+            important: true
+          })
+          const r = await window.nais.invoke('backup:export', { includeSecrets })
+          if (r.saved)
+            toast(includeSecrets ? '내보내기 완료 (계정 정보 포함 — 파일 주의!)' : '내보내기 완료', 'success')
         }}
       >
         <Upload size={14} /> 내보내기

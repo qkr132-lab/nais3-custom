@@ -83,6 +83,8 @@ import {
   getPresetName,
   updateScene,
   duplicateScene,
+  duplicatePreset,
+  bulkCopyScenes,
   deleteScene,
   reorderScenes,
   assignExportNumbers,
@@ -252,7 +254,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     checkForUpdatesNow()
   })
 
-  handle('backup:export', async () => {
+  handle('backup:export', async ({ includeSecrets }) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const stamp = new Date().toISOString().slice(0, 10)
     const result = await dialog.showSaveDialog(win, {
@@ -261,7 +263,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return { saved: false }
-    writeFileSync(result.filePath, JSON.stringify(exportAll()))
+    writeFileSync(result.filePath, JSON.stringify(exportAll(includeSecrets === true)))
     return { saved: true }
   })
 
@@ -334,6 +336,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     updateScene(id, patch)
   })
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
+  handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
+  handle('scenes:bulkCopy', ({ ids, presetId }) => ({ copied: bulkCopyScenes(ids, presetId) }))
   handle('scenes:delete', ({ id }) => {
     deleteScene(id)
   })
