@@ -169,7 +169,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
         <div className="flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5">
           <button
             className="grid size-6 place-items-center rounded-full text-muted hover:bg-paper disabled:opacity-30"
-            disabled={scene.reserveCount === 0}
+            // 생성 중엔 예약이 0이어도 큐 대기분을 취소할 수 있어야 하므로 합산 기준 (커스텀)
+            disabled={pendingCount === 0}
             onClick={() => void adjustReserve(scene.id, -1)}
           >
             <Minus size={14} />

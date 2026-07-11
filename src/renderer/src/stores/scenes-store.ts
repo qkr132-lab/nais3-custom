@@ -421,6 +421,20 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       toast(`"${scene.name}" ${step}장 — 다음 차례로 추가됨`, 'success')
       return
     }
+    // 생성 중 − : 예약은 이미 큐로 넘어가 0이므로, 이 씬의 "대기" 항목을 뒤에서부터 취소 (커스텀).
+    // 취소되면 queue:changed가 와서 상세/카드 숫자가 바로 줄어든다
+    if (delta < 0 && generating && scene.reserveCount === 0) {
+      const pendingIds = (q?.items ?? [])
+        .filter((i) => i.state === 'pending' && i.request.sceneId === id)
+        .map((i) => i.id)
+      if (pendingIds.length > 0) {
+        const cancel = pendingIds.slice(-Math.min(pendingIds.length, Math.abs(step)))
+        await window.nais.invoke('queue:cancel', { ids: cancel })
+        toast(`"${scene.name}" ${cancel.length}장 취소됨`, 'info')
+        return
+      }
+      return // 취소할 대기 항목 없음 (지금 생성 중인 1장은 여기서 안 끊음)
+    }
     const reserveCount = Math.max(0, scene.reserveCount + step)
     set({ scenes: get().scenes.map((s) => (s.id === id ? { ...s, reserveCount } : s)) })
     await window.nais.invoke('scenes:update', { id, patch: { reserveCount } })

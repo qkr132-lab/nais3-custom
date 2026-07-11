@@ -1385,7 +1385,8 @@ const SceneCard = memo(function SceneCard({
               >
                 <button
                   className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
-                  disabled={scene.reserveCount === 0}
+                  // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
+                  disabled={scene.reserveCount + queueRemaining === 0}
                   onClick={() => void adjustReserve(scene.id, -1)}
                 >
                   <Minus size={13} />
