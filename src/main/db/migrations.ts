@@ -316,3 +316,38 @@ export const migrations: ((db: Database.Database) => void)[] = [
     `)
   }
 ]
+
+/**
+ * user_version과 무관하게 커스텀 컬럼/인덱스가 실제로 존재하는지 확인하고 없으면 추가한다 (멱등).
+ *
+ * 왜 필요한가: 이 DB는 공식 NAIS3(sunanakgo/NAIS3)와 같은 nais3.db·같은 user_version 카운터를
+ * 공유한 적이 있다. 공식 앱이 자기 마이그레이션으로 user_version을 먼저 16까지 올려버리면,
+ * 커스텀 앱은 current(16) == target(16)이라 판단해 커스텀 마이그레이션(gen_scenes.export_no,
+ * images.deleted_at 등)을 건너뛴다 → 컬럼이 없어 소프트삭제·퍼지·내보내기 SQL이 실패한다.
+ * 매 시작 시 이 함수로 실제 스키마를 맞춰 그런 DB를 조용히 복구한다. 정상 DB에선 전부 no-op.
+ */
+export function reconcileSchema(db: Database.Database): void {
+  const hasColumn = (table: string, col: string): boolean =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+      (c) => c.name === col
+    )
+  const ensureColumn = (table: string, col: string, decl: string): void => {
+    try {
+      if (!hasColumn(table, col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${decl}`)
+    } catch {
+      // 한 컬럼 추가 실패가 앱 기동을 막지 않게 개별 격리 (나머지는 계속 시도)
+    }
+  }
+  // 커스텀 마이그레이션(v12~v16)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
+  ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
+  ensureColumn('character_prompts', 'char_ref_id', 'char_ref_id INTEGER')
+  ensureColumn('gen_scenes', 'deleted_at', 'deleted_at TEXT')
+  ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')
+  ensureColumn('images', 'deleted_at', 'deleted_at TEXT')
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
+    db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')
+  } catch {
+    // 인덱스는 없어도 기능엔 지장 없음 (조회만 느려질 뿐)
+  }
+}
