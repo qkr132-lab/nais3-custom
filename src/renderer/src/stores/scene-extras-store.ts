@@ -1,4 +1,7 @@
 import { create } from 'zustand'
+import type { CharPositions, SequenceEntry } from '@shared/types'
+
+export type { CharPositions, SequenceEntry }
 
 /**
  * 씬 모드 커스텀 확장 (NAIS2 Custom 이식):
@@ -8,21 +11,7 @@ import { create } from 'zustand'
  * 영속: settings KV(JSON) — 백업/복원에 함께 포함된다.
  */
 
-/** 캐릭터 배치 좌표 (커스텀). charId → {x,y}. 이 큐/씬에서만 카드 기본 위치를 덮어씀 */
-export type CharPositions = Record<number, { x: number; y: number }>
-
-export interface SequenceEntry {
-  id: string
-  name: string
-  characterIds: number[]
-  charRefIds: number[]
-  vibeIds: number[]
-  enabled: boolean
-  /** 위치 적용 on/off (커스텀). undefined = 메인 설정(전역 useCoords) 따름 */
-  useCoords?: boolean
-  /** 캐릭터별 위치 오버라이드 (커스텀) */
-  positions?: CharPositions
-}
+// CharPositions · SequenceEntry 정의는 shared/types.ts로 이동(요청에 실어 재구성용). 위에서 재export.
 
 export interface SceneAddition {
   characterIds: number[]

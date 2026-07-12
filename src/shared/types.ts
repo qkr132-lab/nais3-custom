@@ -52,6 +52,22 @@ export interface CharRefItem {
   folderId: number | null
 }
 
+/** 캐릭터 배치 좌표 (커스텀). charId → {x,y}. 이 큐/씬에서만 카드 기본 위치를 덮어씀 */
+export type CharPositions = Record<number, { x: number; y: number }>
+
+/** 큐 반복 항목 (커스텀) — 캐릭터/레퍼런스 조합을 바꿔가며 반복 생성. 대기 항목
+ *  재구성(생성 중 편집 반영)을 위해 요청에 스냅샷으로 실린다. */
+export interface SequenceEntry {
+  id: string
+  name: string
+  characterIds: number[]
+  charRefIds: number[]
+  vibeIds: number[]
+  enabled: boolean
+  useCoords?: boolean
+  positions?: CharPositions
+}
+
 export interface GenerationRequest {
   prompt: string
   /** Optional NAIS2-style split prompt parts. prompt is still the merged send text. */
@@ -87,6 +103,8 @@ export interface GenerationRequest {
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
   charRefIds?: number[]
+  /** 이 요청을 만든 큐 반복 항목 스냅샷 (커스텀) — 대기 항목 재구성 시 동일 조합으로 복원. null=일반 */
+  sceneSequenceEntry?: SequenceEntry | null
 }
 
 export interface PromptParts {
@@ -362,6 +380,11 @@ export interface IpcInvokeMap {
   /** 우선 등록 (커스텀) — 생성 중인 항목 바로 다음에 끼워넣어 다음 차례로 */
   'queue:enqueueNext': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
   'queue:cancel': { req: { ids: string[] }; res: void }
+  /** 대기(pending) 항목의 요청을 최신값으로 교체 (커스텀 — 생성 중 편집 반영) */
+  'queue:updatePending': {
+    req: { updates: { id: string; request: GenerationRequest }[] }
+    res: void
+  }
   'queue:status': { req: void; res: QueueStatus }
   'images:list': {
     req: { limit: number; offset: number }

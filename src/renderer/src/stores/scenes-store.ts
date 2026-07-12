@@ -122,6 +122,8 @@ interface ScenesState {
   restoreReserves: (bySceneId: Map<number, number>) => Promise<void>
   /** 씬 상세 "생성" — 예약이 0이면 이 씬 1개 예약 후, 메인 '씬 생성'과 동일한 예약 생성 (커스텀) */
   reserveAndGenerateScene: (sceneId: number) => Promise<void>
+  /** 생성 중 편집을 대기(pending) 큐 항목에 반영 — 현재 프리셋 씬을 최신 상태로 재구성 (커스텀) */
+  resyncPendingScenes: () => Promise<void>
 }
 
 /** 씬 프롬프트를 기본 프롬프트 뒤에 이어붙임 (콤마 정리) */
@@ -215,6 +217,8 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     sceneBasePrompt: base.prompt,
     sceneBaseNegativePrompt: base.negativePrompt,
     sceneBaseAdditionalPrompt: base.promptParts?.additional,
+    // 대기 항목 재구성(생성 중 편집 반영) 시 같은 큐 반복 조합으로 복원하기 위한 스냅샷
+    sceneSequenceEntry: entry ?? null,
     source: src
       ? {
           imageBase64: src.imageBase64,
@@ -696,6 +700,30 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     if (!scene) return
     if (scene.reserveCount === 0) await get().adjustReserve(sceneId, 1)
     await get().generateReserved()
+  },
+
+  resyncPendingScenes: async () => {
+    // 생성 중 편집 반영 — 아직 안 뽑힌(pending) 씬 항목을 현재 상태로 다시 만들어 큐에 교체.
+    // 이미 서버로 넘어간 generating 항목은 건드리지 않는다. 다른 프리셋 항목도 스킵.
+    const q = useGenerationStore.getState().queue
+    if (!q) return
+    const pending = q.items.filter((i) => i.state === 'pending' && i.request.sceneId != null)
+    if (pending.length === 0) return
+    await ensureExtrasData()
+    const byId = new Map(get().scenes.map((s) => [s.id, s]))
+    const updates: { id: string; request: GenerationRequest }[] = []
+    for (const item of pending) {
+      const scene = byId.get(item.request.sceneId!)
+      if (!scene) continue // 현재 프리셋에 없는 씬(다른 프리셋 대기 항목)은 그대로 둔다
+      // 시드·i2i 소스는 원래 항목 것을 유지하고, 프롬프트/캐릭터/레퍼런스만 최신으로 재구성
+      const rebuilt: GenerationRequest = {
+        ...buildSceneRequest(scene, item.request.sceneSequenceEntry ?? null),
+        seed: item.request.seed,
+        source: item.request.source
+      }
+      updates.push({ id: item.id, request: rebuilt })
+    }
+    if (updates.length > 0) await window.nais.invoke('queue:updatePending', { updates })
   }
 }))
 

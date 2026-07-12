@@ -88,6 +88,20 @@ export class GenerationQueue extends EventEmitter {
     return ids
   }
 
+  /** 대기(pending) 항목의 요청만 최신값으로 교체 (커스텀 — 생성 중 편집 반영).
+   *  generating/done/cancelled 은 이미 확정됐으므로 건드리지 않는다. */
+  updatePending(updates: { id: string; request: GenerationRequest }[]): void {
+    let changed = false
+    for (const { id, request } of updates) {
+      const item = this.items.get(id)
+      if (item && item.state === 'pending') {
+        item.request = request
+        changed = true
+      }
+    }
+    if (changed) this.emitChanged()
+  }
+
   cancel(ids: string[]): void {
     for (const id of ids) {
       const item = this.items.get(id)
