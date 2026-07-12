@@ -5,6 +5,8 @@
  * click(제자리 클릭)은 그대로 동작 — 실수 드래그를 크게 줄인다.
  */
 
+import { useLayoutStore } from '../stores/layout-store'
+
 const THRESHOLD = 16 // px — 이 거리 이상 움직여야 드래그 시작
 
 let state: { path: string; x: number; y: number } | null = null
@@ -29,7 +31,9 @@ export function imageDragOutProps(filePath: string): {
       if (dx * dx + dy * dy >= THRESHOLD * THRESHOLD) {
         const path = state.path
         state = null // 중복 시작 방지
-        void window.nais.invoke('images:startDrag', { filePath: path })
+        // 웹 모드(내장 브라우저)일 땐 창 통과를 끄고 드래그 → webview 업로드 칸에 바로 드롭
+        const toWeb = useLayoutStore.getState().centerMode === 'web'
+        void window.nais.invoke('images:startDrag', { filePath: path, toWeb })
       }
     },
     onPointerUp: () => {

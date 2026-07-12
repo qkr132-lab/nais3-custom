@@ -426,8 +426,9 @@ export interface IpcInvokeMap {
   }
   /** 파일 탐색기에서 해당 파일 위치 열기 (파일 선택 상태로) */
   'images:showInFolder': { req: { filePath: string }; res: void }
-  /** OS 네이티브 드래그 시작 — 이미지를 앱 밖(탐색기 등)으로 끌어 저장 (NAIS2 기능) */
-  'images:startDrag': { req: { filePath: string }; res: void }
+  /** OS 네이티브 드래그 시작 — 이미지를 앱 밖(탐색기 등)으로 끌어 저장 (NAIS2 기능).
+   *  toWeb=true면 창 통과를 끄고 드래그 → 내장 브라우저(webview) 업로드 칸에 바로 드롭 */
+  'images:startDrag': { req: { filePath: string; toWeb?: boolean }; res: void }
   /** 다른 이름으로 저장 — 파일 저장 다이얼로그로 복사 */
   'images:saveAs': { req: { filePath: string }; res: { saved: boolean } }
   /** 이미지를 클립보드로 복사 */

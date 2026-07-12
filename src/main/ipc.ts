@@ -566,7 +566,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   // Windows에서 startDrag는 드래그가 끝날 때까지 블로킹되므로 호출 뒤 복원하면 된다.
   // 파일명: "씬이름_3.png" 대신 "씬이름.png"으로 — 연번 없는 임시 복사본을 드래그.
   // (대상 폴더에 같은 이름이 있으면 OS가 충돌 처리를 맡는다)
-  handle('images:startDrag', async ({ filePath }) => {
+  handle('images:startDrag', async ({ filePath, toWeb }) => {
     if (!isUnderImagesRoot(filePath)) return
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     if (!win) return
@@ -596,7 +596,14 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       }
     }
 
-    // 반투명 + 마우스 통과: 창이 위에 있어도 "뚫고" 뒤의 탐색기 등에 바로 놓을 수 있다.
+    // 웹 모드: 창 통과를 끄고 그대로 드래그 → 내장 브라우저(webview) 업로드 칸에 바로 드롭.
+    // (통과를 켜면 드래그가 앱을 뚫고 지나가 webview가 못 받는다)
+    if (toWeb) {
+      win.webContents.startDrag({ file: dragPath, icon })
+      return
+    }
+
+    // 그 외: 반투명 + 마우스 통과 — 창이 위에 있어도 "뚫고" 뒤의 탐색기/바깥 브라우저에 놓는다.
     // (통과 중엔 앱 자체에는 드롭 불가 — 메타데이터 보기는 우클릭 메뉴로 가능)
     win.setOpacity(0.3)
     win.setIgnoreMouseEvents(true)
