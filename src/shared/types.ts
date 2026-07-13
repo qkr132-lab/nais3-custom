@@ -281,7 +281,8 @@ export interface ScenePreset {
   sceneCount?: number
 }
 
-/** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외) */
+/** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외).
+ *  promptParts: 3분할(고정/가변/디테일)도 프리셋마다 저장/복원 (커스텀) — params_json에 함께 실림 */
 export type PresetParams = Partial<
   Pick<
     GenerationRequest,
@@ -296,6 +297,7 @@ export type PresetParams = Partial<
     | 'variety'
     | 'qualityToggle'
     | 'ucPreset'
+    | 'promptParts'
   >
 >
 

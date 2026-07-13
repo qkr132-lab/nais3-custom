@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
-import { pickPresetParams, usePromptPresetsStore } from '../stores/prompt-presets-store'
-import { useGenerationStore } from '../stores/generation-store'
+import {
+  pickPresetParams,
+  presetPromptParts,
+  usePromptPresetsStore
+} from '../stores/prompt-presets-store'
+import { mergePromptParts, useGenerationStore } from '../stores/generation-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { SortableList, SortableRow } from './sortable-list'
@@ -59,8 +63,16 @@ export function PromptPresetBar(): React.JSX.Element {
     const p = presets.find((x) => x.id === id)
     if (!p) return
     setOpen(false) // 먼저 닫기 (B9)
-    // 파라미터도 함께 복원 (구버전 프리셋은 params 없음 — 프롬프트만)
-    patch({ prompt: p.prompt, negativePrompt: p.negativePrompt, ...(p.params ?? {}) })
+    // 파라미터 + 3분할(고정/가변/디테일)도 함께 복원 (커스텀).
+    // 분할 사용 중엔 합쳐진 prompt가 분할 내용과 어긋나지 않게 분할에서 다시 합친다.
+    const promptParts = presetPromptParts(p)
+    const split = useGenerationStore.getState().promptSplitEnabled
+    patch({
+      ...(p.params ?? {}),
+      negativePrompt: p.negativePrompt,
+      promptParts,
+      prompt: split ? mergePromptParts(promptParts) : p.prompt
+    })
     setActive(id)
   }
 
@@ -123,14 +135,13 @@ export function PromptPresetBar(): React.JSX.Element {
           onClick={async () => {
             const name = await askText('새 프리셋 이름', '새 프리셋')
             if (!name?.trim()) return
-            const id = await create(
-              name.trim(),
-              '',
-              '',
-              pickPresetParams(useGenerationStore.getState().request)
-            )
-            // 빈 칸으로 시작 — 이후 편집이 이 프리셋에 자동 저장
-            patch({ prompt: '', negativePrompt: '' })
+            const emptyParts = { base: '', additional: '', detail: '' }
+            const id = await create(name.trim(), '', '', {
+              ...pickPresetParams(useGenerationStore.getState().request),
+              promptParts: emptyParts
+            })
+            // 빈 칸으로 시작 (3분할도 비움) — 이후 편집이 이 프리셋에 자동 저장
+            patch({ prompt: '', negativePrompt: '', promptParts: emptyParts })
             setActive(id)
             setOpen(false)
           }}
