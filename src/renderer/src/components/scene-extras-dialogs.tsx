@@ -8,6 +8,7 @@ import {
   Link2,
   Plus,
   RotateCcw,
+  Split,
   Trash2,
   User,
   Users,
@@ -25,6 +26,8 @@ import {
   type SequenceEntry
 } from '../stores/scene-extras-store'
 import { askConfirm } from '../stores/dialog-store'
+import { toast } from '../stores/toast-store'
+import { useScenesStore } from '../stores/scenes-store'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { Button } from './ui/button'
@@ -676,6 +679,29 @@ function EntryEditor({
           onChange={(e) => onPatch({ name: e.target.value })}
         />
         <div className="flex-1" />
+        {/* 캐릭터 2명 이상이면 "1명씩" 선택지 — 누르면 캐릭터마다 항목 1개로 쪼개져 한 명씩 돌아간다.
+            안 누르면 지금처럼 한 항목에서 여러 명이 같이 그려진다 (커스텀) */}
+        {entry.characterIds.length >= 2 && (
+          <button
+            className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-accent transition-colors hover:bg-surface"
+            title="이 항목의 캐릭터를 1명씩 항목으로 나눠 한 명씩 차례로 그리게 합니다"
+            onClick={() => {
+              const chars = useCharactersStore.getState().items
+              const replacements = entry.characterIds.map((cid, i) => ({
+                ...entry,
+                id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+                name: chars.find((c) => c.id === cid)?.name?.trim() || `${entry.name} ${i + 1}`,
+                characterIds: [cid],
+                positions:
+                  entry.positions?.[cid] != null ? { [cid]: entry.positions[cid] } : undefined
+              }))
+              useSceneExtrasStore.getState().replaceEntry(entry.id, replacements)
+              toast(`${replacements.length}개 항목으로 분리 — 한 명씩 차례로 그립니다`, 'success')
+            }}
+          >
+            <Split size={13} /> 1명씩 분리
+          </button>
+        )}
         <button
           className={cn(
             'grid size-7 place-items-center rounded-md transition-colors',
@@ -754,6 +780,31 @@ export function AdditionDialog({
             {current.vibeIds.length}
           </span>
           <div className="flex-1" />
+          {/* 씬 여러 개 + 캐릭터 여러 명이면 "1명씩" 선택지 — 씬 순서대로 캐릭터를 한 명씩 배분.
+              안 누르면 지금처럼 모든 씬에 전원이 함께 들어간다 (커스텀) */}
+          {sceneIds != null && sceneIds.length >= 2 && current.characterIds.length >= 2 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-accent"
+              title="씬 순서대로 캐릭터를 1명씩 나눠 배정합니다 (씬1←캐릭1, 씬2←캐릭2…)"
+              onClick={() => {
+                // 씬 목록 순서대로 배분 (선택 순서가 아니라 보이는 순서)
+                const order = useScenesStore.getState().scenes.map((s) => s.id)
+                const targets = [...sceneIds].sort((a, b) => order.indexOf(a) - order.indexOf(b))
+                const chars = current.characterIds
+                targets.forEach((sid, i) => {
+                  updateAddition(presetId, sid, {
+                    ...current,
+                    characterIds: [chars[i % chars.length]]
+                  })
+                })
+                toast(`씬 ${targets.length}개에 1명씩 배분됨`, 'success')
+              }}
+            >
+              <Split size={13} /> 씬마다 1명씩
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"

@@ -38,6 +38,8 @@ interface SceneExtrasState {
   addEntry: () => void
   updateEntry: (id: string, patch: Partial<SequenceEntry>) => void
   removeEntry: (id: string) => void
+  /** 항목 하나를 그 자리에서 여러 항목으로 교체 (커스텀 — "1명씩 분리"용) */
+  replaceEntry: (id: string, replacements: SequenceEntry[]) => void
   clearEntries: () => void
   setAdditionsEnabled: (v: boolean) => void
   updateAddition: (presetId: number, sceneId: number, addition: SceneAddition) => void
@@ -119,6 +121,13 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
   },
   removeEntry: (id) => {
     set({ entries: get().entries.filter((e) => e.id !== id) })
+    persist()
+  },
+  replaceEntry: (id, replacements) => {
+    const entries = get().entries
+    const at = entries.findIndex((e) => e.id === id)
+    if (at < 0 || replacements.length === 0) return
+    set({ entries: [...entries.slice(0, at), ...replacements, ...entries.slice(at + 1)] })
     persist()
   },
   clearEntries: () => {
