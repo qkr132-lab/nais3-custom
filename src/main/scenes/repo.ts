@@ -312,11 +312,13 @@ export function duplicatePreset(id: number): number {
   return newId
 }
 
-/** 씬들을 다른 프리셋으로 "복사" (커스텀) — 원본 유지. bulkMove(잘라내기)와 짝 */
-export function bulkCopyScenes(ids: number[], presetId: number): number {
-  if (ids.length === 0) return 0
+/** 씬들을 다른 프리셋으로 "복사" (커스텀) — 원본 유지. bulkMove(잘라내기)와 짝.
+ *  대상 모듈 맨 뒤에 ids 순서대로 이어붙이고, 새로 만든 씬 id들을 그 순서로 반환한다
+ *  (우클릭 "붙여넣기"가 위치를 다시 잡을 때 사용). */
+export function bulkCopyScenes(ids: number[], presetId: number): number[] {
+  if (ids.length === 0) return []
   const db = getDb()
-  let copied = 0
+  const newIds: number[] = []
   db.transaction(() => {
     let order = (
       db
@@ -330,7 +332,7 @@ export function bulkCopyScenes(ids: number[], presetId: number): number {
     for (const id of ids) {
       const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as Row | undefined
       if (!s) continue
-      ins.run(
+      const r = ins.run(
         presetId,
         s.name,
         s.prompt,
@@ -341,10 +343,10 @@ export function bulkCopyScenes(ids: number[], presetId: number): number {
         s.variety_plus ?? 0,
         s.export_no ?? null
       )
-      copied++
+      newIds.push(Number(r.lastInsertRowid))
     }
   })()
-  return copied
+  return newIds
 }
 
 const FIELDS: Record<string, string> = {
@@ -416,9 +418,18 @@ function placeholders(n: number): string {
 
 export function bulkMove(ids: number[], presetId: number): void {
   if (ids.length === 0) return
-  getDb()
-    .prepare(`UPDATE gen_scenes SET preset_id = ? WHERE id IN (${placeholders(ids.length)})`)
-    .run(presetId, ...ids)
+  const db = getDb()
+  db.transaction(() => {
+    // preset_id만 바꾸면 원래 sort_order가 대상 모듈 씬들과 겹쳐 "섞여" 보인다.
+    // 대상 모듈 맨 뒤에, 넘어온 ids 순서 그대로 이어붙인다 (복사와 동일 규칙).
+    let order = (
+      db
+        .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM gen_scenes WHERE preset_id = ?')
+        .get(presetId) as { m: number }
+    ).m
+    const upd = db.prepare('UPDATE gen_scenes SET preset_id = ?, sort_order = ? WHERE id = ?')
+    for (const id of ids) upd.run(presetId, ++order, id)
+  })()
 }
 
 /** 일괄 삭제 = 소프트삭제(휴지통으로). 복원 가능 (커스텀) */

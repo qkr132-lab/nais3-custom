@@ -1,8 +1,11 @@
 import {
+  ArrowDownToLine,
   ArrowRight,
+  ArrowUpToLine,
   CalendarPlus,
   CalendarX,
   ChevronDown,
+  ClipboardPaste,
   Cloud,
   CloudOff,
   Copy,
@@ -23,6 +26,7 @@ import {
   RectangleVertical,
   RefreshCw,
   RotateCcw,
+  Scissors,
   SlidersHorizontal,
   Sparkles,
   Star,
@@ -449,6 +453,7 @@ function SceneGrid(): React.JSX.Element {
   const setCardOrientation = useScenesStore((s) => s.setCardOrientation)
   const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const clearReserveAll = useScenesStore((s) => s.clearReserveAll)
+  const gridClipboard = useScenesStore((s) => s.sceneClipboard)
   const reorder = useScenesStore((s) => s.reorder)
   // 새 씬 기본 해상도 (커스텀 — 툴바 노출용)
   const presets = useScenesStore((s) => s.presets)
@@ -849,6 +854,14 @@ function SceneGrid(): React.JSX.Element {
           tip="전체 예약 취소"
           onClick={() => void clearReserveAll()}
         />
+        {/* 씬 클립보드 붙여넣기 — 빈 모듈이나 우클릭할 씬이 없을 때도 맨 뒤에 붙일 수 있게 (커스텀) */}
+        {gridClipboard && gridClipboard.ids.length > 0 && (
+          <IconBtn
+            icon={<ClipboardPaste size={16} />}
+            tip={`씬 ${gridClipboard.ids.length}개 맨 뒤에 붙여넣기 (${gridClipboard.mode === 'cut' ? '잘라냄' : '복사됨'})`}
+            onClick={() => void useScenesStore.getState().pasteSceneClipboard(null)}
+          />
+        )}
         <div className="mx-1 h-5 w-px bg-line" />
         {/* 카드 비율: 세로/가로 (해상도와 무관하게 고정) */}
         <IconBtn
@@ -1473,6 +1486,7 @@ const SceneCard = memo(function SceneCard({
   const adjustReserve = useScenesStore((s) => s.adjustReserve)
   const presets = useScenesStore((s) => s.presets)
   const activePresetId = useScenesStore((s) => s.activePresetId)
+  const sceneClipboard = useScenesStore((s) => s.sceneClipboard)
   const selectionActive = editMode || selection.size > 0
   // Shift/Ctrl 제스처는 아래 pointerdown에서 따로 가로채고, 일반 드래그는 편집 중에도 재정렬에 쓴다.
   // 여러 씬이 선택된 상태만 잠가 "선택 전체 이동"으로 오해하지 않게 한다.
@@ -1561,6 +1575,18 @@ const SceneCard = memo(function SceneCard({
     const state = useScenesStore.getState()
     if (state.selection.has(scene.id)) void state.bulkDuplicate()
     else void duplicate(scene.id)
+  }
+
+  // 우클릭 복사/잘라내기/붙여넣기 (커스텀) — 다중 선택이면 선택 전체, 아니면 이 카드 한 장
+  const contextTargetIds = (): number[] => {
+    const st = useScenesStore.getState()
+    return st.selection.has(scene.id) ? [...st.selection] : [scene.id]
+  }
+  const clipboardScenes = (mode: 'copy' | 'cut'): void => {
+    useScenesStore.getState().setSceneClipboard(contextTargetIds(), mode)
+  }
+  const moveToEdge = (edge: 'front' | 'back'): void => {
+    void useScenesStore.getState().moveScenesToEdge(contextTargetIds(), edge)
   }
 
   const removeScene = async (): Promise<void> => {
@@ -1841,6 +1867,30 @@ const SceneCard = memo(function SceneCard({
         <ContextMenuItem onSelect={duplicateScenes}>
           <Copy size={13} /> 복제{multi ? ` (${multiN}개)` : ''}
         </ContextMenuItem>
+        <ContextMenuSeparator />
+        {/* 복사/잘라내기 → 원하는 씬에 우클릭해 "이 씬 뒤에 붙여넣기" — 위치 맞추기용 (커스텀) */}
+        <ContextMenuItem onSelect={() => clipboardScenes('copy')}>
+          <Copy size={13} className="text-teal-400" /> 복사{multi ? ` (${multiN}개)` : ''}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => clipboardScenes('cut')}>
+          <Scissors size={13} className="text-orange-400" /> 잘라내기
+          {multi ? ` (${multiN}개)` : ''}
+        </ContextMenuItem>
+        {sceneClipboard && sceneClipboard.ids.length > 0 && (
+          <ContextMenuItem
+            onSelect={() => void useScenesStore.getState().pasteSceneClipboard(scene.id)}
+          >
+            <ClipboardPaste size={13} className="text-emerald-400" /> 이 씬 뒤에 붙여넣기 (
+            {sceneClipboard.ids.length}개)
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem onSelect={() => moveToEdge('front')}>
+          <ArrowUpToLine size={13} /> 맨 앞으로{multi ? ` (${multiN}개)` : ''}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => moveToEdge('back')}>
+          <ArrowDownToLine size={13} /> 맨 뒤로{multi ? ` (${multiN}개)` : ''}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         {otherPresets.length > 0 && (
           <>
             <ContextMenuSub>

@@ -359,7 +359,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
   handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
-  handle('scenes:bulkCopy', ({ ids, presetId }) => ({ copied: bulkCopyScenes(ids, presetId) }))
+  handle('scenes:bulkCopy', ({ ids, presetId }) => {
+    const newIds = bulkCopyScenes(ids, presetId)
+    return { copied: newIds.length, ids: newIds }
+  })
   handle('scenes:delete', ({ id }) => {
     deleteScene(id)
     scheduleSyncForScenes([id])

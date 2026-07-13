@@ -88,6 +88,13 @@ interface ScenesState {
   bulkMove: (presetId: number) => Promise<void>
   /** 다른 프리셋으로 복사 — 원본 유지 (커스텀). 반환: 복사된 씬 수 */
   bulkCopy: (presetId: number) => Promise<number>
+  /** 씬 클립보드 (커스텀) — 우클릭 복사/잘라내기 → 원하는 씬 뒤에 붙여넣기 */
+  sceneClipboard: { ids: number[]; mode: 'copy' | 'cut'; presetId: number } | null
+  setSceneClipboard: (ids: number[], mode: 'copy' | 'cut') => void
+  /** 클립보드 내용을 targetId 씬 바로 뒤에 붙여넣기 (null = 맨 뒤). 다른 모듈에서도 동작 */
+  pasteSceneClipboard: (targetId: number | null) => Promise<void>
+  /** 선택(또는 지정) 씬들을 목록 맨 앞/맨 뒤로 이동 (커스텀) */
+  moveScenesToEdge: (ids: number[], edge: 'front' | 'back') => Promise<void>
   bulkDelete: () => Promise<void>
   /** 선택 씬만 예약 증감 (배치 수 단위) — 커스텀 */
   bulkAdjustReserve: (delta: number) => Promise<void>
@@ -541,7 +548,11 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
 
   bulkMove: async (presetId) => {
-    const ids = [...get().selection]
+    // 클릭 순서(Set)가 아니라 목록 순서대로 넘겨야 대상 모듈 뒤에 원래 순서로 붙는다
+    const ids = get()
+      .scenes.filter((s) => get().selection.has(s.id))
+      .map((s) => s.id)
+    if (ids.length === 0) return
     await window.nais.invoke('scenes:bulkMove', { ids, presetId })
     set({ selection: new Set(), lastSelectedId: null })
     await Promise.all([get().load(), get().refreshPresetCounts()])
@@ -555,6 +566,65 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     const { copied } = await window.nais.invoke('scenes:bulkCopy', { ids, presetId })
     await get().refreshPresetCounts()
     return copied
+  },
+
+  sceneClipboard: null,
+  setSceneClipboard: (ids, mode) => {
+    // 목록 순서대로 담아야 붙여넣을 때 원래 순서가 유지된다
+    const ordered = get()
+      .scenes.filter((s) => ids.includes(s.id))
+      .map((s) => s.id)
+    if (ordered.length === 0) return
+    set({ sceneClipboard: { ids: ordered, mode, presetId: get().activePresetId } })
+    toast(
+      mode === 'copy'
+        ? `씬 ${ordered.length}개 복사됨 — 원하는 씬에 우클릭 → 붙여넣기`
+        : `씬 ${ordered.length}개 잘라냄 — 원하는 씬에 우클릭 → 붙여넣기`,
+      'success'
+    )
+  },
+  pasteSceneClipboard: async (targetId) => {
+    const clip = get().sceneClipboard
+    if (!clip || clip.ids.length === 0) return
+    const presetId = get().activePresetId
+    let pastedIds: number[] = []
+
+    if (clip.mode === 'copy') {
+      const { ids } = await window.nais.invoke('scenes:bulkCopy', { ids: clip.ids, presetId })
+      pastedIds = ids
+    } else if (clip.presetId === presetId) {
+      // 같은 모듈 내 잘라내기 → DB 이동 없이 순서만 재배치
+      pastedIds = clip.ids.filter((id) => get().scenes.some((s) => s.id === id))
+    } else {
+      await window.nais.invoke('scenes:bulkMove', { ids: clip.ids, presetId })
+      pastedIds = clip.ids
+    }
+    if (clip.mode === 'cut') set({ sceneClipboard: null }) // 잘라내기는 1회성
+
+    await Promise.all([get().load(), get().refreshPresetCounts()])
+    // 위치 재배치: 붙여넣은 씬들을 빼낸 나머지에서 target 뒤에 끼워넣는다
+    const pasted = new Set(pastedIds)
+    const rest = get()
+      .scenes.map((s) => s.id)
+      .filter((id) => !pasted.has(id))
+    const ordered = pastedIds.filter((id) => get().scenes.some((s) => s.id === id))
+    if (ordered.length === 0) return
+    const at = targetId != null ? rest.indexOf(targetId) + 1 : rest.length
+    const next = [...rest.slice(0, at), ...ordered, ...rest.slice(at)]
+    await get().reorder(next)
+    toast(`씬 ${ordered.length}개 붙여넣음`, 'success')
+  },
+  moveScenesToEdge: async (ids, edge) => {
+    const moving = get()
+      .scenes.filter((s) => ids.includes(s.id))
+      .map((s) => s.id)
+    if (moving.length === 0) return
+    const set_ = new Set(moving)
+    const rest = get()
+      .scenes.map((s) => s.id)
+      .filter((id) => !set_.has(id))
+    const next = edge === 'front' ? [...moving, ...rest] : [...rest, ...moving]
+    await get().reorder(next)
   },
   bulkDelete: async () => {
     const ids = [...get().selection]

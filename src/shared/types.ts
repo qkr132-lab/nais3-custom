@@ -563,7 +563,11 @@ export interface IpcInvokeMap {
   /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
   'scenes:duplicatePreset': { req: { id: number }; res: { id: number } }
   /** 씬들을 다른 프리셋으로 복사 — 원본 유지 (커스텀, bulkMove=잘라내기와 짝) */
-  'scenes:bulkCopy': { req: { ids: number[]; presetId: number }; res: { copied: number } }
+  /** 다른 프리셋으로 복사 — 새로 만든 씬 id들을 (넘긴 순서대로) 함께 반환 */
+  'scenes:bulkCopy': {
+    req: { ids: number[]; presetId: number }
+    res: { copied: number; ids: number[] }
+  }
   'scenes:delete': { req: { id: number }; res: void }
   'scenes:reorder': { req: { ids: number[] }; res: void }
   /** 예약: 전체 취소(count=0 등 절대값 설정) */
