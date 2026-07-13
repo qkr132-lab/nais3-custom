@@ -258,6 +258,28 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
     })
     expect(built).toEqual(customizeCapturedFixture(fx))
   })
+
+  it('인페인트는 add_original_image=true — 꺼지면 반복 인페인트마다 마스크 밖까지 재인코딩돼 노이즈가 누적된다 (NAIS2에서 실제 발생한 회귀)', () => {
+    const p = buildGenerateImagePayload(baseRequest, {
+      i2i: {
+        strength: 0.7,
+        noise: 0,
+        extraNoiseSeed: 1,
+        colorCorrect: false,
+        imageBase64: 'aW1n',
+        maskBase64: 'bWFzaw=='
+      }
+    })
+    expect(p.action).toBe('infill')
+    const params = p.parameters as unknown as {
+      add_original_image: boolean
+      mask: string
+      request_type: string
+    }
+    expect(params.add_original_image).toBe(true)
+    expect(params.mask).toBe('bWFzaw==')
+    expect(params.request_type).toBe('NativeInfillingRequest')
+  })
 })
 
 function escapeRegExp(s: string): string {
