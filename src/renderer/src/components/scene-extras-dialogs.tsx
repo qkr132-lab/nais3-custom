@@ -25,7 +25,6 @@ import {
   type SequenceEntry
 } from '../stores/scene-extras-store'
 import { askConfirm } from '../stores/dialog-store'
-import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { Button } from './ui/button'
@@ -38,8 +37,6 @@ import { Switch } from './ui/switch'
  * - SequenceDialog: 큐 반복 항목(캐릭터/캐릭레퍼/바이브 조합) 편집
  * - AdditionDialog: 특정 씬에만 추가 적용할 캐릭터/레퍼런스 선택
  */
-
-const MAX_CHARS = 6 // NAI 동시 캐릭터 한도
 
 /** 다이얼로그가 참조하는 라이브러리 로드 보장 */
 function useLibraries(open: boolean): void {
@@ -148,16 +145,13 @@ function CharacterPicker({
   const renderChar = (c: CharacterCard, i: number): React.JSX.Element => {
     const checked = selected.includes(c.id)
     const selectionOrder = selected.indexOf(c.id) + 1
-    const full = !checked && selected.length >= MAX_CHARS
     return (
       <button
         key={c.id}
-        disabled={full}
         onClick={() => onChange(toggleId(selected, c.id))}
         className={cn(
           'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors',
-          checked ? 'bg-accent/10' : 'hover:bg-surface-2',
-          full && 'opacity-40'
+          checked ? 'bg-accent/10' : 'hover:bg-surface-2'
         )}
       >
         <span
@@ -195,27 +189,19 @@ function CharacterPicker({
 
   const showFolders = folders.length > 0
 
-  // 폴더 단위 전체 선택/해제 (커스텀) — NAI 동시 캐릭터 한도(6)까지만 채운다
+  // 폴더 단위 전체 선택/해제 (커스텀).
+  // 하나라도 선택돼 있으면 다시 누를 때 "전체 해제" — 재클릭이 항상 취소가 되게 한다.
   const groupCheck = (chars: CharacterCard[]): 'none' | 'some' | 'all' => {
     const n = chars.filter((c) => selected.includes(c.id)).length
     return n === 0 ? 'none' : n === chars.length ? 'all' : 'some'
   }
   const toggleGroup = (chars: CharacterCard[]): void => {
     const ids = chars.map((c) => c.id)
-    if (ids.every((id) => selected.includes(id))) {
-      onChange(selected.filter((id) => !ids.includes(id)))
-      return
-    }
-    const next = [...selected]
-    for (const id of ids) {
-      if (next.includes(id)) continue
-      if (next.length >= MAX_CHARS) {
-        toast(`캐릭터는 최대 ${MAX_CHARS}개까지 — 한도만큼만 선택했어요`, 'error')
-        break
-      }
-      next.push(id)
-    }
-    onChange(next)
+    onChange(
+      ids.some((id) => selected.includes(id))
+        ? selected.filter((id) => !ids.includes(id))
+        : [...selected, ...ids]
+    )
   }
 
   return (
@@ -375,7 +361,7 @@ function RefPicker({
     )
   }
 
-  // 폴더 단위 전체 선택/해제 (커스텀)
+  // 폴더 단위 전체 선택/해제 (커스텀) — 하나라도 선택돼 있으면 재클릭 시 전체 해제 (항상 취소 가능)
   const groupCheck = (list: (VibeItem | CharRefItem)[]): 'none' | 'some' | 'all' => {
     const n = list.filter((it) => selected.includes(it.id)).length
     return n === 0 ? 'none' : n === list.length ? 'all' : 'some'
@@ -383,9 +369,9 @@ function RefPicker({
   const toggleGroup = (list: (VibeItem | CharRefItem)[]): void => {
     const ids = list.map((it) => it.id)
     onChange(
-      ids.every((id) => selected.includes(id))
+      ids.some((id) => selected.includes(id))
         ? selected.filter((id) => !ids.includes(id))
-        : [...new Set([...selected, ...ids])]
+        : [...selected, ...ids]
     )
   }
 
