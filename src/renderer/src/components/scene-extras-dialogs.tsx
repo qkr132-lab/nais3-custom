@@ -25,6 +25,7 @@ import {
   type SequenceEntry
 } from '../stores/scene-extras-store'
 import { askConfirm } from '../stores/dialog-store'
+import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { Button } from './ui/button'
@@ -194,6 +195,29 @@ function CharacterPicker({
 
   const showFolders = folders.length > 0
 
+  // 폴더 단위 전체 선택/해제 (커스텀) — NAI 동시 캐릭터 한도(6)까지만 채운다
+  const groupCheck = (chars: CharacterCard[]): 'none' | 'some' | 'all' => {
+    const n = chars.filter((c) => selected.includes(c.id)).length
+    return n === 0 ? 'none' : n === chars.length ? 'all' : 'some'
+  }
+  const toggleGroup = (chars: CharacterCard[]): void => {
+    const ids = chars.map((c) => c.id)
+    if (ids.every((id) => selected.includes(id))) {
+      onChange(selected.filter((id) => !ids.includes(id)))
+      return
+    }
+    const next = [...selected]
+    for (const id of ids) {
+      if (next.includes(id)) continue
+      if (next.length >= MAX_CHARS) {
+        toast(`캐릭터는 최대 ${MAX_CHARS}개까지 — 한도만큼만 선택했어요`, 'error')
+        break
+      }
+      next.push(id)
+    }
+    onChange(next)
+  }
+
   return (
     <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper p-1">
       {items.length === 0 && (
@@ -201,7 +225,7 @@ function CharacterPicker({
       )}
       {groups.map((g) => (
         <div key={g.key} className="space-y-0.5">
-          {/* 폴더 헤더 — 클릭하면 접기/펴기 (폴더가 있을 때만) */}
+          {/* 폴더 헤더 — 클릭하면 접기/펴기, 체크로 폴더 통째 선택 (폴더가 있을 때만) */}
           {showFolders && (
             <FolderHeader
               name={g.name ?? '미분류'}
@@ -209,6 +233,8 @@ function CharacterPicker({
               count={g.chars.length}
               collapsed={isCollapsed(g.key)}
               onToggle={() => toggle(g.key)}
+              checkState={groupCheck(g.chars)}
+              onCheck={() => toggleGroup(g.chars)}
             />
           )}
           {(!showFolders || !isCollapsed(g.key)) &&
@@ -219,19 +245,24 @@ function CharacterPicker({
   )
 }
 
-/** 접기/펴기 폴더 헤더 (커스텀 — 선택 다이얼로그 공용) */
+/** 접기/펴기 폴더 헤더 (커스텀 — 선택 다이얼로그 공용).
+ *  checkState/onCheck를 주면 폴더 안 전체를 한 번에 선택/해제하는 체크박스가 붙는다. */
 function FolderHeader({
   name,
   color,
   count,
   collapsed,
-  onToggle
+  onToggle,
+  checkState,
+  onCheck
 }: {
   name: string
   color: string | null
   count: number
   collapsed: boolean
   onToggle: () => void
+  checkState?: 'none' | 'some' | 'all'
+  onCheck?: () => void
 }): React.JSX.Element {
   return (
     <button
@@ -242,6 +273,27 @@ function FolderHeader({
         <ChevronRight size={13} className="shrink-0" />
       ) : (
         <ChevronDown size={13} className="shrink-0" />
+      )}
+      {onCheck && (
+        <span
+          role="checkbox"
+          aria-checked={checkState === 'all'}
+          title="폴더 전체 선택/해제"
+          onClick={(e) => {
+            e.stopPropagation()
+            onCheck()
+          }}
+          className={cn(
+            'grid size-4 shrink-0 place-items-center rounded border text-[10px] leading-none transition-colors',
+            checkState === 'all'
+              ? 'border-accent bg-accent text-white'
+              : checkState === 'some'
+                ? 'border-accent bg-accent/25 text-accent'
+                : 'border-line bg-surface hover:border-accent'
+          )}
+        >
+          {checkState !== 'none' && '✓'}
+        </span>
       )}
       <span
         className="size-2 shrink-0 rounded-full"
@@ -323,6 +375,20 @@ function RefPicker({
     )
   }
 
+  // 폴더 단위 전체 선택/해제 (커스텀)
+  const groupCheck = (list: (VibeItem | CharRefItem)[]): 'none' | 'some' | 'all' => {
+    const n = list.filter((it) => selected.includes(it.id)).length
+    return n === 0 ? 'none' : n === list.length ? 'all' : 'some'
+  }
+  const toggleGroup = (list: (VibeItem | CharRefItem)[]): void => {
+    const ids = list.map((it) => it.id)
+    onChange(
+      ids.every((id) => selected.includes(id))
+        ? selected.filter((id) => !ids.includes(id))
+        : [...new Set([...selected, ...ids])]
+    )
+  }
+
   return (
     <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-line bg-paper p-1.5">
       {items.length === 0 ? (
@@ -337,6 +403,8 @@ function RefPicker({
                 count={g.list.length}
                 collapsed={isCollapsed(g.key)}
                 onToggle={() => toggle(g.key)}
+                checkState={groupCheck(g.list)}
+                onCheck={() => toggleGroup(g.list)}
               />
             )}
             {(!showFolders || !isCollapsed(g.key)) && (
