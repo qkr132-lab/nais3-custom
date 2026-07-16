@@ -258,6 +258,9 @@ app.whenReady().then(async () => {
       format: imageFormat,
       sceneName: scene?.name,
       scenePresetName: scene ? (getPresetName(scene.presetId) ?? undefined) : undefined,
+      // 큐 반복으로 만든 이미지는 항목 이름(1명씩 분리 시 = 캐릭터 이름)을 기록 —
+      // 내보내기에서 캐릭터별 폴더로 나누는 기준 (커스텀)
+      queueLabel: request.sceneSequenceEntry?.name?.trim() || undefined,
       localMetadata:
         request.promptParts || fragmentPrompts.length > 0
           ? {

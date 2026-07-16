@@ -314,6 +314,12 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE images ADD COLUMN deleted_at TEXT;
       CREATE INDEX idx_images_deleted ON images(deleted_at);
     `)
+  },
+
+  // v17 (커스텀): 큐 반복 항목 라벨 — 어떤 큐 항목(캐릭터)으로 생성했는지 기록,
+  // 내보내기에서 캐릭터별 폴더로 나누는 데 사용. 일반 생성은 NULL
+  (db) => {
+    db.exec(`ALTER TABLE images ADD COLUMN queue_label TEXT;`)
   }
 ]
 
@@ -338,12 +344,13 @@ export function reconcileSchema(db: Database.Database): void {
       // 한 컬럼 추가 실패가 앱 기동을 막지 않게 개별 격리 (나머지는 계속 시도)
     }
   }
-  // 커스텀 마이그레이션(v12~v16)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
+  // 커스텀 마이그레이션(v12~v17)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
   ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
   ensureColumn('character_prompts', 'char_ref_id', 'char_ref_id INTEGER')
   ensureColumn('gen_scenes', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')
   ensureColumn('images', 'deleted_at', 'deleted_at TEXT')
+  ensureColumn('images', 'queue_label', 'queue_label TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

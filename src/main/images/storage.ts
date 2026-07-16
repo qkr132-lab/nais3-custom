@@ -81,6 +81,8 @@ export async function saveGeneratedImage(input: {
   sceneName?: string
   /** 씬이 속한 프리셋 이름 (프리셋 간 동명 씬 충돌 방지) */
   scenePresetName?: string
+  /** 큐 반복 항목 이름 (커스텀) — 내보내기에서 캐릭터별 폴더 분리 기준. 일반 생성은 없음 */
+  queueLabel?: string
   /** 전송 payload에는 없는 NAIS3 전용 왕복 메타데이터 */
   localMetadata?: Pick<ImageMetadata, 'promptParts' | 'fragmentPrompts'>
 }): Promise<SavedImage> {
@@ -134,7 +136,7 @@ export async function saveGeneratedImage(input: {
 
   const result = getDb()
     .prepare(
-      'INSERT INTO images (file_path, thumbnail, kind, seed, payload_json, scene_id) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO images (file_path, thumbnail, kind, seed, payload_json, scene_id, queue_label) VALUES (?, ?, ?, ?, ?, ?, ?)'
     )
     .run(
       filePath,
@@ -142,7 +144,8 @@ export async function saveGeneratedImage(input: {
       input.kind,
       input.seed,
       payloadWithLocalMetadata(input.sentPayload, input.localMetadata),
-      input.sceneId ?? null
+      input.sceneId ?? null,
+      input.queueLabel?.trim() || null
     )
 
   return { id: Number(result.lastInsertRowid), filePath }

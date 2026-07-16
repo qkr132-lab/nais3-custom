@@ -16,7 +16,7 @@ import { getDb } from '../db'
 import { getSetting } from '../db/settings'
 import { libraryRoot } from '../images/storage'
 import { trashFile } from '../trash'
-import { assignExportName } from './export-name'
+import { assignExportName, safeName } from './export-name'
 
 interface Row {
   id: number
@@ -709,10 +709,13 @@ async function zipFiles(rows: ExportRow[], defaultName: string): Promise<number>
     } catch {
       continue // 파일 없으면 건너뜀
     }
-    // 파일명 = 번호(지정 시) 또는 씬 이름 (커스텀). 같은 씬 여러 장이면 " (2)"부터
-    const name = assignExportName(r.scene_name, r.file_path, used, '.', r.export_no)
-    zip.file(name, buf, { date: new Date(baseTime + added * TIME_STEP_MS) })
-    if (r.export_no != null) manifest.push({ file: name, scene: r.scene_name ?? '' })
+    // 파일명 = 번호(지정 시) 또는 씬 이름 (커스텀). 같은 씬 여러 장이면 " (2)"부터.
+    // 큐 반복 이미지는 항목 이름(캐릭터명) 폴더로 분리 (폴더 내보내기와 동일 규칙)
+    const label = r.queue_label?.trim() ? safeName(r.queue_label) : ''
+    const name = assignExportName(r.scene_name, r.file_path, used, label || '.', r.export_no)
+    const entryPath = label ? `${label}/${name}` : name
+    zip.file(entryPath, buf, { date: new Date(baseTime + added * TIME_STEP_MS) })
+    if (r.export_no != null) manifest.push({ file: entryPath, scene: r.scene_name ?? '' })
     added++
   }
   if (manifest.length > 0) zip.file('_이미지목록.md', buildManifest(manifest))
@@ -772,13 +775,15 @@ type ExportRow = {
   thumbnail: Buffer | null
   scene_name: string | null
   export_no: number | null
+  /** 큐 반복 항목 이름 (커스텀) — 있으면 내보내기에서 이 이름의 하위 폴더로 분리 */
+  queue_label: string | null
 }
 
 /** scope에 맞는 이미지 행을 **씬 순서대로** 반환 (커스텀) — 첫 씬부터 마지막 씬까지.
  *  같은 씬 안에서는 생성 순(오래된 것부터). 씬 없는 이미지는 맨 뒤. 폴더/ZIP 내보내기 공용 */
 function collectExportRows(scope: ExportScope): ExportRow[] {
   const db = getDb()
-  const select = `SELECT i.file_path, i.thumbnail, s.name AS scene_name, s.export_no FROM images i
+  const select = `SELECT i.file_path, i.thumbnail, i.queue_label, s.name AS scene_name, s.export_no FROM images i
        LEFT JOIN gen_scenes s ON s.id = i.scene_id`
   // 소프트삭제된 이미지는 내보내기에서 제외
   const alive = 'i.deleted_at IS NULL'
@@ -826,17 +831,21 @@ export async function exportToFolder(
     dir = r.filePaths[0]
   }
 
-  // 파일명 = 번호(지정 시) 또는 씬 이름. 같은 씬 여러 장이면 " (2)"부터. 한 폴더에 모아 저장.
+  // 파일명 = 번호(지정 시) 또는 씬 이름. 같은 씬 여러 장이면 " (2)"부터.
+  // 큐 반복으로 만든 이미지는 항목 이름(캐릭터명) 하위 폴더로 분리 저장 (커스텀) —
+  // "캐릭터이름/씬이름.png" 구조. 라벨 없는 이미지는 기존처럼 루트에.
   const usedNames = new Set<string>()
   const plan = rows
     .filter((r) => existsSync(r.file_path))
     .map((r) => {
-      const name = assignExportName(r.scene_name, r.file_path, usedNames, '.', r.export_no)
+      const label = r.queue_label?.trim() ? safeName(r.queue_label) : ''
+      const name = assignExportName(r.scene_name, r.file_path, usedNames, label || '.', r.export_no)
       return {
         src: r.file_path,
         thumb: r.thumbnail,
-        targetDir: dir!,
-        rel: name,
+        targetDir: label ? join(dir!, label) : dir!,
+        rel: label ? `${label}/${name}` : name,
+        label,
         sceneName: r.scene_name ?? '',
         exportNo: r.export_no
       }
@@ -908,7 +917,11 @@ export async function exportToFolder(
         // 시간 설정 실패해도 복사는 유효
       }
       written.add(target)
-      if (p.exportNo != null) manifest.push({ file: basename(target), scene: p.sceneName })
+      if (p.exportNo != null)
+        manifest.push({
+          file: p.label ? `${p.label}/${basename(target)}` : basename(target),
+          scene: p.sceneName
+        })
       copied++
     } catch {
       skipped++
