@@ -300,5 +300,72 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE gen_scenes ADD COLUMN deleted_at TEXT;
       CREATE INDEX idx_gen_scenes_deleted ON gen_scenes(deleted_at);
     `)
+  },
+
+  // v15 (커스텀): 씬 내보내기 번호 — 내보낼 때 파일명이 "01" 등 번호로 (클라우드 업로드용 ASCII)
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN export_no INTEGER;`)
+  },
+
+  // v16 (커스텀): 이미지 소프트삭제 — 삭제해도 유예시간 동안은 파일 보존(복원 가능),
+  // 지나면 백그라운드가 OS 휴지통으로. deleted_at IS NULL = 살아있음
+  (db) => {
+    db.exec(`
+      ALTER TABLE images ADD COLUMN deleted_at TEXT;
+      CREATE INDEX idx_images_deleted ON images(deleted_at);
+    `)
+  },
+
+  // v17 (커스텀): 큐 반복 항목 라벨 — 어떤 큐 항목(캐릭터)으로 생성했는지 기록,
+  // 내보내기에서 캐릭터별 폴더로 나누는 데 사용. 일반 생성은 NULL
+  (db) => {
+    db.exec(`ALTER TABLE images ADD COLUMN queue_label TEXT;`)
+  },
+
+  // v18 (커스텀): 씬 행위 태그 — 역할(하는쪽/당하는쪽)이 지정된 캐릭터 프롬프트 뒤에
+  // 생성 시 자동으로 합쳐진다. 카드는 외형만 두고 행위는 씬이 갖게 하는 구조
+  (db) => {
+    db.exec(`
+      ALTER TABLE gen_scenes ADD COLUMN source_tags TEXT NOT NULL DEFAULT '';
+      ALTER TABLE gen_scenes ADD COLUMN target_tags TEXT NOT NULL DEFAULT '';
+    `)
   }
 ]
+
+/**
+ * user_version과 무관하게 커스텀 컬럼/인덱스가 실제로 존재하는지 확인하고 없으면 추가한다 (멱등).
+ *
+ * 왜 필요한가: 이 DB는 공식 NAIS3(sunanakgo/NAIS3)와 같은 nais3.db·같은 user_version 카운터를
+ * 공유한 적이 있다. 공식 앱이 자기 마이그레이션으로 user_version을 먼저 16까지 올려버리면,
+ * 커스텀 앱은 current(16) == target(16)이라 판단해 커스텀 마이그레이션(gen_scenes.export_no,
+ * images.deleted_at 등)을 건너뛴다 → 컬럼이 없어 소프트삭제·퍼지·내보내기 SQL이 실패한다.
+ * 매 시작 시 이 함수로 실제 스키마를 맞춰 그런 DB를 조용히 복구한다. 정상 DB에선 전부 no-op.
+ */
+export function reconcileSchema(db: Database.Database): void {
+  const hasColumn = (table: string, col: string): boolean =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+      (c) => c.name === col
+    )
+  const ensureColumn = (table: string, col: string, decl: string): void => {
+    try {
+      if (!hasColumn(table, col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${decl}`)
+    } catch {
+      // 한 컬럼 추가 실패가 앱 기동을 막지 않게 개별 격리 (나머지는 계속 시도)
+    }
+  }
+  // 커스텀 마이그레이션(v12~v17)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
+  ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
+  ensureColumn('character_prompts', 'char_ref_id', 'char_ref_id INTEGER')
+  ensureColumn('gen_scenes', 'deleted_at', 'deleted_at TEXT')
+  ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')
+  ensureColumn('images', 'deleted_at', 'deleted_at TEXT')
+  ensureColumn('images', 'queue_label', 'queue_label TEXT')
+  ensureColumn('gen_scenes', 'source_tags', "source_tags TEXT NOT NULL DEFAULT ''")
+  ensureColumn('gen_scenes', 'target_tags', "target_tags TEXT NOT NULL DEFAULT ''")
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
+    db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')
+  } catch {
+    // 인덱스는 없어도 기능엔 지장 없음 (조회만 느려질 뿐)
+  }
+}

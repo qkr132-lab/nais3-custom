@@ -22,6 +22,7 @@ import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
+import { PositionPicker } from './position-picker'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -31,35 +32,6 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
-
-/** NAI 웹의 5×5 수동 배치 그리드 (실캡처: 0.1~0.9) */
-const GRID = [0.1, 0.3, 0.5, 0.7, 0.9]
-
-function PositionPicker({
-  center,
-  onPick
-}: {
-  center: { x: number; y: number }
-  onPick: (center: { x: number; y: number }) => void
-}): React.JSX.Element {
-  return (
-    <div className="grid grid-cols-5 gap-0.5">
-      {GRID.map((y) =>
-        GRID.map((x) => (
-          <button
-            key={`${x}-${y}`}
-            className={cn(
-              'size-6 rounded-[4px] border border-line transition-colors',
-              center.x === x && center.y === y ? 'bg-accent' : 'bg-paper'
-            )}
-            title={`(${x}, ${y})`}
-            onClick={() => onPick({ x, y })}
-          />
-        ))
-      )}
-    </div>
-  )
-}
 
 export function CharacterOverlay(): React.JSX.Element {
   const setOverlayOpen = useCharactersStore((s) => s.setOverlayOpen)

@@ -25,7 +25,7 @@ interface DialogState {
   askText: (title: string, defaultValue?: string, placeholder?: string) => Promise<string | null>
   askConfirm: (
     title: string,
-    opts?: { message?: string; confirmLabel?: string; danger?: boolean }
+    opts?: { message?: string; confirmLabel?: string; danger?: boolean; important?: boolean }
   ) => Promise<boolean>
   _resolve: (value: string | null) => void
   _resolveConfirm: (ok: boolean) => void
@@ -49,7 +49,8 @@ export const useDialogStore = create<DialogState>((set, get) => ({
       set({ textPrompt: { title, value: defaultValue, placeholder, resolve } })
     }),
   askConfirm: (title, opts) => {
-    if (confirmsDisabled) return Promise.resolve(true)
+    // important: 계정 정보 포함 여부 같은 중대한 질문 — "확인 창 끄기"를 무시하고 반드시 묻는다 (커스텀)
+    if (confirmsDisabled && !opts?.important) return Promise.resolve(true)
     return new Promise((resolve) => {
       set({
         confirm: {
@@ -81,10 +82,11 @@ export function askText(
   return useDialogStore.getState().askText(title, defaultValue, placeholder)
 }
 
-/** 어디서든 호출 가능한 확인(예/아니오) 헬퍼 — 네이티브 confirm 대체 */
+/** 어디서든 호출 가능한 확인(예/아니오) 헬퍼 — 네이티브 confirm 대체.
+ *  important=true면 "확인 창 끄기" 설정을 무시하고 반드시 묻는다 (계정 정보 등 중대 결정) */
 export function askConfirm(
   title: string,
-  opts?: { message?: string; confirmLabel?: string; danger?: boolean }
+  opts?: { message?: string; confirmLabel?: string; danger?: boolean; important?: boolean }
 ): Promise<boolean> {
   return useDialogStore.getState().askConfirm(title, opts)
 }

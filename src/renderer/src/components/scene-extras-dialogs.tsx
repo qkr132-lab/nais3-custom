@@ -1,38 +1,47 @@
 import {
   ChevronDown,
   ChevronRight,
+  Crosshair,
   Eye,
   EyeOff,
   ImageOff,
   Link2,
   Plus,
+  RotateCcw,
+  Split,
   Trash2,
   User,
   Users,
   Waves
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CharRefItem, CharacterCard, ListFolder, VibeItem } from '@shared/types'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import {
   hasAddition,
   useSceneExtrasStore,
+  type CharPositions,
+  type CharRoles,
   type SceneAddition,
   type SequenceEntry
 } from '../stores/scene-extras-store'
+import type { CharRole } from '@shared/types'
 import { askConfirm } from '../stores/dialog-store'
+import { toast } from '../stores/toast-store'
+import { useScenesStore } from '../stores/scenes-store'
 import { cn } from '../lib/utils'
+import { PositionPicker } from './position-picker'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
+import { Switch } from './ui/switch'
 
 /**
  * 씬 모드 커스텀 확장 다이얼로그 (NAIS2 Custom 이식):
  * - SequenceDialog: 큐 반복 항목(캐릭터/캐릭레퍼/바이브 조합) 편집
  * - AdditionDialog: 특정 씬에만 추가 적용할 캐릭터/레퍼런스 선택
  */
-
-const MAX_CHARS = 6 // NAI 동시 캐릭터 한도
 
 /** 다이얼로그가 참조하는 라이브러리 로드 보장 */
 function useLibraries(open: boolean): void {
@@ -49,6 +58,31 @@ function useLibraries(open: boolean): void {
 
 function toggleId(ids: number[], id: number): number[] {
   return ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id]
+}
+
+/**
+ * 선택창 폴더 접기 상태 (커스텀) — 기본은 "접힘". 펼친 폴더만 localStorage에 저장해
+ * 앱을 껐다 켜도 마지막 접기/펼치기 상태가 유지된다.
+ */
+function usePickerCollapse(storageKey: string): {
+  isCollapsed: (key: string) => boolean
+  toggle: (key: string) => void
+} {
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(storageKey) ?? '[]') as string[])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggle = (key: string): void =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      localStorage.setItem(storageKey, JSON.stringify([...next]))
+      return next
+    })
+  return { isCollapsed: (key) => !expanded.has(key), toggle }
 }
 
 function charLabel(c: CharacterCard, index: number): string {
@@ -93,7 +127,12 @@ function CharacterPicker({
   const folders = useCharactersStore((s) => s.folders)
 
   // 폴더 순서대로 그룹핑 + 미분류는 맨 끝. 빈 폴더는 표시 안 함
-  const groups: { key: string; name: string | null; color: string | null; chars: CharacterCard[] }[] = [
+  const groups: {
+    key: string
+    name: string | null
+    color: string | null
+    chars: CharacterCard[]
+  }[] = [
     ...folders.map((f) => ({
       key: `f-${f.id}`,
       name: f.name,
@@ -110,16 +149,14 @@ function CharacterPicker({
 
   const renderChar = (c: CharacterCard, i: number): React.JSX.Element => {
     const checked = selected.includes(c.id)
-    const full = !checked && selected.length >= MAX_CHARS
+    const selectionOrder = selected.indexOf(c.id) + 1
     return (
       <button
         key={c.id}
-        disabled={full}
         onClick={() => onChange(toggleId(selected, c.id))}
         className={cn(
           'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors',
-          checked ? 'bg-accent/10' : 'hover:bg-surface-2',
-          full && 'opacity-40'
+          checked ? 'bg-accent/10' : 'hover:bg-surface-2'
         )}
       >
         <span
@@ -128,7 +165,7 @@ function CharacterPicker({
             checked ? 'border-accent bg-accent text-white' : 'border-line bg-surface'
           )}
         >
-          {checked && '✓'}
+          {checked && selectionOrder}
         </span>
         {c.thumbnail ? (
           <img
@@ -152,15 +189,25 @@ function CharacterPicker({
     )
   }
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggleFolder = (key: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+  // 기본 접힘 + 상태 영속 (커스텀)
+  const { isCollapsed, toggle } = usePickerCollapse('picker_open_chars')
 
   const showFolders = folders.length > 0
+
+  // 폴더 단위 전체 선택/해제 (커스텀).
+  // 하나라도 선택돼 있으면 다시 누를 때 "전체 해제" — 재클릭이 항상 취소가 되게 한다.
+  const groupCheck = (chars: CharacterCard[]): 'none' | 'some' | 'all' => {
+    const n = chars.filter((c) => selected.includes(c.id)).length
+    return n === 0 ? 'none' : n === chars.length ? 'all' : 'some'
+  }
+  const toggleGroup = (chars: CharacterCard[]): void => {
+    const ids = chars.map((c) => c.id)
+    onChange(
+      ids.some((id) => selected.includes(id))
+        ? selected.filter((id) => !ids.includes(id))
+        : [...selected, ...ids]
+    )
+  }
 
   return (
     <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper p-1">
@@ -169,44 +216,80 @@ function CharacterPicker({
       )}
       {groups.map((g) => (
         <div key={g.key} className="space-y-0.5">
-          {/* 폴더 헤더 — 클릭하면 접기/펴기 (폴더가 있을 때만) */}
+          {/* 폴더 헤더 — 클릭하면 접기/펴기, 체크로 폴더 통째 선택 (폴더가 있을 때만) */}
           {showFolders && (
             <FolderHeader
               name={g.name ?? '미분류'}
               color={g.color}
               count={g.chars.length}
-              collapsed={collapsed.has(g.key)}
-              onToggle={() => toggleFolder(g.key)}
+              collapsed={isCollapsed(g.key)}
+              onToggle={() => toggle(g.key)}
+              checkState={groupCheck(g.chars)}
+              onCheck={() => toggleGroup(g.chars)}
             />
           )}
-          {!collapsed.has(g.key) && g.chars.map((c) => renderChar(c, items.indexOf(c)))}
+          {(!showFolders || !isCollapsed(g.key)) &&
+            g.chars.map((c) => renderChar(c, items.indexOf(c)))}
         </div>
       ))}
     </div>
   )
 }
 
-/** 접기/펴기 폴더 헤더 (커스텀 — 선택 다이얼로그 공용) */
+/** 접기/펴기 폴더 헤더 (커스텀 — 선택 다이얼로그 공용).
+ *  checkState/onCheck를 주면 폴더 안 전체를 한 번에 선택/해제하는 체크박스가 붙는다. */
 function FolderHeader({
   name,
   color,
   count,
   collapsed,
-  onToggle
+  onToggle,
+  checkState,
+  onCheck
 }: {
   name: string
   color: string | null
   count: number
   collapsed: boolean
   onToggle: () => void
+  checkState?: 'none' | 'some' | 'all'
+  onCheck?: () => void
 }): React.JSX.Element {
   return (
     <button
       onClick={onToggle}
       className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11.5px] font-semibold text-muted transition-colors hover:bg-surface-2"
     >
-      {collapsed ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
-      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color ?? 'var(--faint)' }} />
+      {collapsed ? (
+        <ChevronRight size={13} className="shrink-0" />
+      ) : (
+        <ChevronDown size={13} className="shrink-0" />
+      )}
+      {onCheck && (
+        <span
+          role="checkbox"
+          aria-checked={checkState === 'all'}
+          title="폴더 전체 선택/해제"
+          onClick={(e) => {
+            e.stopPropagation()
+            onCheck()
+          }}
+          className={cn(
+            'grid size-4 shrink-0 place-items-center rounded border text-[10px] leading-none transition-colors',
+            checkState === 'all'
+              ? 'border-accent bg-accent text-white'
+              : checkState === 'some'
+                ? 'border-accent bg-accent/25 text-accent'
+                : 'border-line bg-surface hover:border-accent'
+          )}
+        >
+          {checkState !== 'none' && '✓'}
+        </span>
+      )}
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color ?? 'var(--faint)' }}
+      />
       <span className="min-w-0 flex-1 truncate">{name}</span>
       <span className="shrink-0 text-faint">({count})</span>
     </button>
@@ -219,21 +302,19 @@ function RefPicker({
   folders,
   selected,
   onChange,
-  emptyLabel
+  emptyLabel,
+  collapseKey
 }: {
   items: (VibeItem | CharRefItem)[]
   folders: ListFolder[]
   selected: number[]
   onChange: (ids: number[]) => void
   emptyLabel: string
+  /** 접기 상태 저장 키 (바이브/캐릭레퍼 각각 독립) */
+  collapseKey: string
 }): React.JSX.Element {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const toggleFolder = (key: string): void =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+  // 기본 접힘 + 상태 영속 (커스텀)
+  const { isCollapsed, toggle } = usePickerCollapse(collapseKey)
 
   const groups = [
     ...folders.map((f) => ({
@@ -266,7 +347,11 @@ function RefPicker({
         title={item.name}
       >
         {item.thumbnail ? (
-          <img src={`data:image/webp;base64,${item.thumbnail}`} className="h-full w-full object-cover" alt="" />
+          <img
+            src={`data:image/webp;base64,${item.thumbnail}`}
+            className="h-full w-full object-cover"
+            alt=""
+          />
         ) : (
           <span className="grid h-full w-full place-items-center bg-surface-2 text-faint">
             <ImageOff size={16} />
@@ -278,6 +363,20 @@ function RefPicker({
           </span>
         )}
       </button>
+    )
+  }
+
+  // 폴더 단위 전체 선택/해제 (커스텀) — 하나라도 선택돼 있으면 재클릭 시 전체 해제 (항상 취소 가능)
+  const groupCheck = (list: (VibeItem | CharRefItem)[]): 'none' | 'some' | 'all' => {
+    const n = list.filter((it) => selected.includes(it.id)).length
+    return n === 0 ? 'none' : n === list.length ? 'all' : 'some'
+  }
+  const toggleGroup = (list: (VibeItem | CharRefItem)[]): void => {
+    const ids = list.map((it) => it.id)
+    onChange(
+      ids.some((id) => selected.includes(id))
+        ? selected.filter((id) => !ids.includes(id))
+        : [...selected, ...ids]
     )
   }
 
@@ -293,11 +392,13 @@ function RefPicker({
                 name={g.name}
                 color={g.color}
                 count={g.list.length}
-                collapsed={collapsed.has(g.key)}
-                onToggle={() => toggleFolder(g.key)}
+                collapsed={isCollapsed(g.key)}
+                onToggle={() => toggle(g.key)}
+                checkState={groupCheck(g.list)}
+                onCheck={() => toggleGroup(g.list)}
               />
             )}
-            {!collapsed.has(g.key) && (
+            {(!showFolders || !isCollapsed(g.key)) && (
               <div className="grid grid-cols-3 gap-1.5">{g.list.map(tile)}</div>
             )}
           </div>
@@ -307,48 +408,263 @@ function RefPicker({
   )
 }
 
-/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 (두 다이얼로그 공용) */
+type SelectionPatch = {
+  characterIds?: number[]
+  charRefIds?: number[]
+  vibeIds?: number[]
+  useCoords?: boolean
+  positions?: CharPositions
+  roles?: CharRoles
+}
+
+/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 + 캐릭터 위치/역할 지정 (두 다이얼로그 공용) */
 function SelectionPanel({
   characterIds,
   charRefIds,
   vibeIds,
+  useCoords,
+  positions,
+  roles,
   onPatch
 }: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
-  onPatch: (patch: { characterIds?: number[]; charRefIds?: number[]; vibeIds?: number[] }) => void
+  useCoords?: boolean
+  positions?: CharPositions
+  roles?: CharRoles
+  onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
   const crefs = useCharRefsStore((s) => s.items)
   const crefFolders = useCharRefsStore((s) => s.folders)
   return (
-    <div className="grid grid-cols-3 gap-3">
-      <div className="space-y-1.5">
-        <SectionTitle icon={<User size={13} />} title="캐릭터" count={characterIds.length} />
-        <CharacterPicker selected={characterIds} onChange={(ids) => onPatch({ characterIds: ids })} />
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <SectionTitle icon={<User size={13} />} title="캐릭터" count={characterIds.length} />
+          <CharacterPicker
+            selected={characterIds}
+            onChange={(ids) => onPatch({ characterIds: ids })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <SectionTitle
+            icon={<Users size={13} />}
+            title="캐릭터 레퍼런스"
+            count={charRefIds.length}
+          />
+          <RefPicker
+            items={crefs}
+            folders={crefFolders}
+            selected={charRefIds}
+            onChange={(ids) => onPatch({ charRefIds: ids })}
+            emptyLabel="캐릭레퍼가 없습니다"
+            collapseKey="picker_open_crefs"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <SectionTitle icon={<Waves size={13} />} title="바이브" count={vibeIds.length} />
+          <RefPicker
+            items={vibes}
+            folders={vibeFolders}
+            selected={vibeIds}
+            onChange={(ids) => onPatch({ vibeIds: ids })}
+            emptyLabel="바이브가 없습니다"
+            collapseKey="picker_open_vibes"
+          />
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <SectionTitle icon={<Users size={13} />} title="캐릭터 레퍼런스" count={charRefIds.length} />
-        <RefPicker
-          items={crefs}
-          folders={crefFolders}
-          selected={charRefIds}
-          onChange={(ids) => onPatch({ charRefIds: ids })}
-          emptyLabel="캐릭레퍼가 없습니다"
-        />
+      <RolePanel characterIds={characterIds} roles={roles} onPatch={onPatch} />
+      <PositionPanel
+        characterIds={characterIds}
+        useCoords={useCoords}
+        positions={positions}
+        onPatch={onPatch}
+      />
+    </div>
+  )
+}
+
+/** 행위 역할 지정 (커스텀) — 역할을 주면 생성 시 씬의 하는쪽/당하는쪽 태그가
+ *  그 캐릭터 프롬프트 뒤에 자동으로 합쳐진다. 카드에는 외형만 있으면 됨 */
+function RolePanel({
+  characterIds,
+  roles,
+  onPatch
+}: {
+  characterIds: number[]
+  roles?: CharRoles
+  onPatch: (patch: SelectionPatch) => void
+}): React.JSX.Element | null {
+  const items = useCharactersStore((s) => s.items)
+  const chars = characterIds
+    .map((id) => items.find((c) => c.id === id))
+    .filter((c): c is CharacterCard => !!c)
+  if (chars.length === 0) return null
+
+  const setRole = (id: number, role: CharRole | null): void => {
+    const next: CharRoles = { ...(roles ?? {}) }
+    if (role) next[id] = role
+    else delete next[id]
+    onPatch({ roles: next })
+  }
+
+  const OPTIONS: { value: CharRole | null; label: string; title: string }[] = [
+    { value: null, label: '없음', title: '카드 프롬프트 그대로 사용' },
+    { value: 'source', label: '하는쪽', title: '씬의 하는쪽 태그를 프롬프트 뒤에 합침' },
+    { value: 'target', label: '당하는쪽', title: '씬의 당하는쪽 태그를 프롬프트 뒤에 합침' }
+  ]
+
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Users size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">행위 역할</span>
+        <span className="text-[11px] text-faint">
+          역할을 주면 씬의 하는쪽/당하는쪽 태그가 그 캐릭터에 자동으로 합쳐져요
+        </span>
       </div>
-      <div className="space-y-1.5">
-        <SectionTitle icon={<Waves size={13} />} title="바이브" count={vibeIds.length} />
-        <RefPicker
-          items={vibes}
-          folders={vibeFolders}
-          selected={vibeIds}
-          onChange={(ids) => onPatch({ vibeIds: ids })}
-          emptyLabel="바이브가 없습니다"
-        />
+      <div className="mt-2 flex flex-wrap gap-2">
+        {chars.map((c, i) => {
+          const current = roles?.[c.id] ?? null
+          return (
+            <div
+              key={c.id}
+              className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-1.5 py-1"
+            >
+              {c.thumbnail ? (
+                <img
+                  src={`data:image/webp;base64,${c.thumbnail}`}
+                  className="size-6 shrink-0 rounded object-cover"
+                  alt=""
+                />
+              ) : (
+                <span className="grid size-6 shrink-0 place-items-center rounded bg-paper text-faint">
+                  <User size={12} />
+                </span>
+              )}
+              <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
+              <div className="flex overflow-hidden rounded border border-line">
+                {OPTIONS.map((o) => (
+                  <button
+                    key={o.label}
+                    title={o.title}
+                    className={cn(
+                      'px-1.5 py-0.5 text-[10.5px] transition-colors',
+                      current === o.value
+                        ? o.value === null
+                          ? 'bg-surface text-fg'
+                          : 'bg-accent text-white'
+                        : 'text-faint hover:bg-paper'
+                    )}
+                    onClick={() => setRole(c.id, o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </div>
+    </div>
+  )
+}
+
+/** 캐릭터 위치 지정 (커스텀) — 위치 적용 on/off + 선택 캐릭터별 5x5 격자 오버라이드 */
+function PositionPanel({
+  characterIds,
+  useCoords,
+  positions,
+  onPatch
+}: {
+  characterIds: number[]
+  useCoords?: boolean
+  positions?: CharPositions
+  onPatch: (patch: SelectionPatch) => void
+}): React.JSX.Element {
+  const items = useCharactersStore((s) => s.items)
+  const chars = characterIds
+    .map((id) => items.find((c) => c.id === id))
+    .filter((c): c is CharacterCard => !!c)
+
+  const setPos = (id: number, c: { x: number; y: number }): void =>
+    onPatch({ positions: { ...(positions ?? {}), [id]: c } })
+  const resetPos = (id: number): void => {
+    const next = { ...(positions ?? {}) }
+    delete next[id]
+    onPatch({ positions: next })
+  }
+
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Crosshair size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">위치 적용</span>
+        <span className="text-[11px] text-faint">캐릭터 배치 좌표 (NAI 다중 캐릭터)</span>
+        <div className="flex-1" />
+        <Switch checked={!!useCoords} onCheckedChange={(v) => onPatch({ useCoords: v })} />
+      </div>
+      {useCoords &&
+        (chars.length === 0 ? (
+          <p className="mt-2 text-[11.5px] text-faint">
+            캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.
+          </p>
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {chars.map((c, i) => {
+              const pos = positions?.[c.id]
+              const center = pos ?? c.center ?? { x: 0.5, y: 0.5 }
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-1.5 py-1"
+                >
+                  {c.thumbnail ? (
+                    <img
+                      src={`data:image/webp;base64,${c.thumbnail}`}
+                      className="size-6 shrink-0 rounded object-cover"
+                      alt=""
+                    />
+                  ) : (
+                    <span className="grid size-6 shrink-0 place-items-center rounded bg-paper text-faint">
+                      <User size={12} />
+                    </span>
+                  )}
+                  <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
+                        title="위치 지정"
+                      >
+                        <Crosshair size={11} />
+                        {center.x},{center.y}
+                        {!pos && <span className="text-faint">(기본)</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto">
+                      <PositionPicker center={center} onPick={(nc) => setPos(c.id, nc)} />
+                    </PopoverContent>
+                  </Popover>
+                  {pos && (
+                    <button
+                      className="grid size-5 place-items-center rounded text-faint hover:text-fg"
+                      title="카드 기본 위치로"
+                      onClick={() => resetPos(c.id)}
+                    >
+                      <RotateCcw size={11} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
     </div>
   )
 }
@@ -374,8 +690,8 @@ export function SequenceDialog({
         <div className="border-b border-line px-4 py-3">
           <DialogTitle>캐릭터 / 레퍼런스 큐 반복</DialogTitle>
           <DialogDescription className="mt-0.5">
-            항목의 캐릭터·레퍼런스를 바꿔가며 예약 전체를 반복 생성합니다. 반복 중에는 메인
-            설정의 캐릭터/레퍼런스가 적용되지 않습니다.
+            항목의 캐릭터·레퍼런스를 바꿔가며 예약 전체를 반복 생성합니다. 반복 중에는 메인 설정의
+            캐릭터/레퍼런스가 적용되지 않습니다.
           </DialogDescription>
         </div>
 
@@ -455,6 +771,29 @@ function EntryEditor({
           onChange={(e) => onPatch({ name: e.target.value })}
         />
         <div className="flex-1" />
+        {/* 캐릭터 2명 이상이면 "1명씩" 선택지 — 누르면 캐릭터마다 항목 1개로 쪼개져 한 명씩 돌아간다.
+            안 누르면 지금처럼 한 항목에서 여러 명이 같이 그려진다 (커스텀) */}
+        {entry.characterIds.length >= 2 && (
+          <button
+            className="flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-accent transition-colors hover:bg-surface"
+            title="이 항목의 캐릭터를 1명씩 항목으로 나눠 한 명씩 차례로 그리게 합니다"
+            onClick={() => {
+              const chars = useCharactersStore.getState().items
+              const replacements = entry.characterIds.map((cid, i) => ({
+                ...entry,
+                id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+                name: chars.find((c) => c.id === cid)?.name?.trim() || `${entry.name} ${i + 1}`,
+                characterIds: [cid],
+                positions:
+                  entry.positions?.[cid] != null ? { [cid]: entry.positions[cid] } : undefined
+              }))
+              useSceneExtrasStore.getState().replaceEntry(entry.id, replacements)
+              toast(`${replacements.length}개 항목으로 분리 — 한 명씩 차례로 그립니다`, 'success')
+            }}
+          >
+            <Split size={13} /> 1명씩 분리
+          </button>
+        )}
         <button
           className={cn(
             'grid size-7 place-items-center rounded-md transition-colors',
@@ -478,6 +817,9 @@ function EntryEditor({
           characterIds={entry.characterIds}
           charRefIds={entry.charRefIds}
           vibeIds={entry.vibeIds}
+          useCoords={entry.useCoords}
+          positions={entry.positions}
+          roles={entry.roles}
           onPatch={onPatch}
         />
       </div>
@@ -531,6 +873,31 @@ export function AdditionDialog({
             {current.vibeIds.length}
           </span>
           <div className="flex-1" />
+          {/* 씬 여러 개 + 캐릭터 여러 명이면 "1명씩" 선택지 — 씬 순서대로 캐릭터를 한 명씩 배분.
+              안 누르면 지금처럼 모든 씬에 전원이 함께 들어간다 (커스텀) */}
+          {sceneIds != null && sceneIds.length >= 2 && current.characterIds.length >= 2 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-accent"
+              title="씬 순서대로 캐릭터를 1명씩 나눠 배정합니다 (씬1←캐릭1, 씬2←캐릭2…)"
+              onClick={() => {
+                // 씬 목록 순서대로 배분 (선택 순서가 아니라 보이는 순서)
+                const order = useScenesStore.getState().scenes.map((s) => s.id)
+                const targets = [...sceneIds].sort((a, b) => order.indexOf(a) - order.indexOf(b))
+                const chars = current.characterIds
+                targets.forEach((sid, i) => {
+                  updateAddition(presetId, sid, {
+                    ...current,
+                    characterIds: [chars[i % chars.length]]
+                  })
+                })
+                toast(`씬 ${targets.length}개에 1명씩 배분됨`, 'success')
+              }}
+            >
+              <Split size={13} /> 씬마다 1명씩
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -542,15 +909,185 @@ export function AdditionDialog({
             <Trash2 size={13} /> 비우기
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           <SelectionPanel
             characterIds={current.characterIds}
             charRefIds={current.charRefIds}
             vibeIds={current.vibeIds}
+            useCoords={current.useCoords}
+            positions={current.positions}
+            roles={current.roles}
             onPatch={patch}
           />
+          {firstId != null && sceneIds?.length === 1 && <SceneRoleTagsEditor sceneId={firstId} />}
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** 씬 행위 태그 편집 (커스텀) — 역할(하는쪽/당하는쪽)이 지정된 캐릭터에 합쳐질 태그.
+ *  단일 씬을 열었을 때만 표시. 입력을 벗어나면 저장 */
+function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Element | null {
+  const scene = useScenesStore((s) => s.scenes.find((x) => x.id === sceneId))
+  const update = useScenesStore((s) => s.update)
+  if (!scene) return null
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Split size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">씬 행위 태그</span>
+        <span className="text-[11px] text-faint">
+          역할이 지정된 캐릭터 프롬프트 뒤에 자동으로 합쳐짐. sex, fellatio처럼 그냥 쓰면
+          source#/target#이 자동으로 붙어요 (포즈·표정 태그는 그대로)
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="space-y-1">
+          <span className="text-[11px] font-medium text-muted">하는쪽 태그</span>
+          <RoleTagTextarea
+            key={`src-${scene.id}`}
+            initial={scene.sourceTags}
+            placeholder="source#sex, source#missionary, on top, smirk …"
+            onCommit={(v) => {
+              if (v !== scene.sourceTags) void update(scene.id, { sourceTags: v })
+            }}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-[11px] font-medium text-muted">당하는쪽 태그</span>
+          <RoleTagTextarea
+            key={`tgt-${scene.id}`}
+            initial={scene.targetTags}
+            placeholder="target#sex, target#missionary, lying, on back …"
+            onCommit={(v) => {
+              if (v !== scene.targetTags) void update(scene.id, { targetTags: v })
+            }}
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
+/** 행위 태그 입력 (커스텀) — 쉼표 단위 현재 토큰으로 단보루 태그 자동완성 (한글 검색 포함).
+ *  source#/target# 접두사는 검색어에서 떼고, 선택하면 접두사를 그대로 유지한 채 완성한다.
+ *  ↑↓ 이동 · Enter/Tab 선택 · Esc 닫기. 입력을 벗어나면 저장(기존과 동일) */
+function RoleTagTextarea({
+  initial,
+  placeholder,
+  onCommit
+}: {
+  initial: string
+  placeholder: string
+  onCommit: (value: string) => void
+}): React.JSX.Element {
+  const [value, setValue] = useState(initial)
+  const [items, setItems] = useState<{ tag: string; count: number; ko?: string }[]>([])
+  const [sel, setSel] = useState(0)
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const tokenRef = useRef<{ start: number; end: number; prefix: string }>({
+    start: 0,
+    end: 0,
+    prefix: ''
+  })
+
+  const queryAt = (text: string, caret: number): void => {
+    // 커서 앞의 현재 토큰 (쉼표/줄바꿈 기준)
+    const m = /[^,\n]*$/.exec(text.slice(0, caret))
+    let token = m?.[0] ?? ''
+    const lead = token.length - token.replace(/^\s+/, '').length
+    token = token.slice(lead)
+    const start = caret - token.length
+    const prefix = /^(source#|target#)/i.exec(token)?.[0] ?? ''
+    const q = token.slice(prefix.length).trim()
+    tokenRef.current = { start, end: caret, prefix }
+    clearTimeout(timer.current)
+    if (q.length < 1) {
+      setOpen(false)
+      return
+    }
+    timer.current = setTimeout(() => {
+      void window.nais.invoke('tags:search', { query: q, limit: 8 }).then(({ items }) => {
+        setItems(items)
+        setSel(0)
+        setOpen(items.length > 0)
+      })
+    }, 120)
+  }
+
+  const accept = (tag: string): void => {
+    const { start, end, prefix } = tokenRef.current
+    const next = `${value.slice(0, start)}${prefix}${tag}, ${value.slice(end)}`
+    setValue(next)
+    setOpen(false)
+    const caret = start + prefix.length + tag.length + 2
+    requestAnimationFrame(() => {
+      ref.current?.focus()
+      ref.current?.setSelectionRange(caret, caret)
+    })
+  }
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        value={value}
+        rows={3}
+        spellCheck={false}
+        placeholder={placeholder}
+        className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
+        onChange={(e) => {
+          setValue(e.target.value)
+          queryAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
+        }}
+        onKeyDown={(e) => {
+          if (!open) return
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setSel((s) => Math.min(s + 1, items.length - 1))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setSel((s) => Math.max(s - 1, 0))
+          } else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault()
+            if (items[sel]) accept(items[sel].tag)
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          }
+        }}
+        onBlur={() => {
+          setOpen(false)
+          onCommit(value)
+        }}
+      />
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-0.5 overflow-hidden rounded-md border border-line bg-paper shadow-xl"
+          // 클릭으로 포커스를 뺏지 않아야 blur 저장보다 선택이 먼저 처리된다
+          onPointerDown={(e) => e.preventDefault()}
+        >
+          {items.map((it, i) => (
+            <button
+              key={it.tag}
+              className={cn(
+                'flex w-full items-center gap-2 px-2 py-1 text-left text-[12px]',
+                i === sel ? 'bg-accent/15 text-accent' : 'hover:bg-surface-2'
+              )}
+              onClick={() => accept(it.tag)}
+              onMouseEnter={() => setSel(i)}
+            >
+              <span className="min-w-0 flex-1 truncate">{it.tag}</span>
+              {it.ko && <span className="shrink-0 text-[11px] text-muted">{it.ko}</span>}
+              <span className="shrink-0 font-mono text-[10px] text-faint">
+                {it.count >= 1000 ? `${Math.round(it.count / 1000)}k` : it.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

@@ -52,6 +52,30 @@ export interface CharRefItem {
   folderId: number | null
 }
 
+/** 캐릭터 배치 좌표 (커스텀). charId → {x,y}. 이 큐/씬에서만 카드 기본 위치를 덮어씀 */
+export type CharPositions = Record<number, { x: number; y: number }>
+
+/** 씬 행위 역할 (커스텀) — 캐릭터에 지정하면 생성 시 씬의 하는쪽/당하는쪽 태그가
+ *  그 캐릭터 프롬프트 뒤에 자동으로 합쳐진다. 카드는 외형만 갖고 있으면 됨 */
+export type CharRole = 'source' | 'target'
+/** charId → 역할 */
+export type CharRoles = Record<number, CharRole>
+
+/** 큐 반복 항목 (커스텀) — 캐릭터/레퍼런스 조합을 바꿔가며 반복 생성. 대기 항목
+ *  재구성(생성 중 편집 반영)을 위해 요청에 스냅샷으로 실린다. */
+export interface SequenceEntry {
+  id: string
+  name: string
+  characterIds: number[]
+  charRefIds: number[]
+  vibeIds: number[]
+  enabled: boolean
+  useCoords?: boolean
+  positions?: CharPositions
+  /** 캐릭터별 행위 역할 (커스텀) — 씬의 하는쪽/당하는쪽 태그를 자동으로 얹는다 */
+  roles?: CharRoles
+}
+
 export interface GenerationRequest {
   prompt: string
   /** Optional NAIS2-style split prompt parts. prompt is still the merged send text. */
@@ -78,10 +102,17 @@ export interface GenerationRequest {
   source?: SourceImage
   /** 씬 생성이면 씬 id (저장 시 images.scene_id 연결) */
   sceneId?: number
+  /** 예약 후 씬 태그가 바뀌어도 실행 직전에 재병합하기 위한 예약 당시 기본 프롬프트 */
+  sceneBasePrompt?: string
+  sceneBaseNegativePrompt?: string
+  /** 분할 프롬프트 사용 시 예약 당시 가변(additional) 원문 */
+  sceneBaseAdditionalPrompt?: string
   /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
   charRefIds?: number[]
+  /** 이 요청을 만든 큐 반복 항목 스냅샷 (커스텀) — 대기 항목 재구성 시 동일 조합으로 복원. null=일반 */
+  sceneSequenceEntry?: SequenceEntry | null
 }
 
 export interface PromptParts {
@@ -90,7 +121,38 @@ export interface PromptParts {
   detail: string
 }
 
+/** 생성 당시 실제 참조한 파일 조각의 스냅샷 — 메타데이터 확인용 */
+export interface FragmentPromptMetadata {
+  /** 입력에 적힌 토큰 그대로. 예: <a1>, <*의상/casual> */
+  token: string
+  /** 정규화된 조각 경로 */
+  path: string
+  /** 프롬프트/네거티브/캐릭터 등 사용 위치 */
+  location: string
+  /** 이번 생성에서 선택되고 중첩 파일 조각까지 치환된 한 줄 */
+  selected: string
+  /** 생성 당시 조각이 가진 전체 유효 후보 줄 */
+  content: string
+}
+
 export type QueueItemState = 'pending' | 'generating' | 'done' | 'failed' | 'cancelled'
+
+/** 렌더러로 보내는 큐 요약 항목 (커스텀 — 성능). 수천 장 큐에서 프롬프트 등
+ *  대형 request를 매 변경마다 IPC로 직렬화하면 장마다 렉이 걸린다.
+ *  UI에 필요한 최소 필드만 보내고, 전체 request는 queue:pending으로 필요할 때만. */
+export interface QueueItemLite {
+  id: string
+  state: QueueItemState
+  sceneId?: number
+  error?: string
+  filePath?: string
+}
+
+export interface QueueStatusLite {
+  items: QueueItemLite[]
+  running: boolean
+  delayMs: number
+}
 
 export interface QueueItem {
   id: string
@@ -138,16 +200,16 @@ export interface ListFolder {
 }
 export type CharacterFolder = ListFolder
 
-/** 무채색 테마에 어울리는 채도 낮은 폴더 색 프리셋 */
+/** 폴더 색 프리셋 — 한눈에 구분되는 선명한 색 */
 export const FOLDER_COLORS = [
-  '#c47a72', // red
-  '#c9a34f', // amber
-  '#6f9e78', // green
-  '#6a9e9e', // teal
-  '#7089b5', // blue
-  '#9080b5', // purple
-  '#b57a9e', // pink
-  '#8a8a90' // gray
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#a855f7', // purple
+  '#ec4899' // pink
 ] as const
 
 export type CharacterCardPatch = Partial<
@@ -212,6 +274,7 @@ export const EMOTIONS = [
 export interface ImageMetadata {
   prompt: string
   promptParts?: PromptParts & { negative?: string; inpainting?: string }
+  fragmentPrompts?: FragmentPromptMetadata[]
   negativePrompt: string
   seed?: number
   steps?: number
@@ -243,7 +306,8 @@ export interface ScenePreset {
   sceneCount?: number
 }
 
-/** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외) */
+/** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외).
+ *  promptParts: 3분할(고정/가변/디테일)도 프리셋마다 저장/복원 (커스텀) — params_json에 함께 실림 */
 export type PresetParams = Partial<
   Pick<
     GenerationRequest,
@@ -258,6 +322,7 @@ export type PresetParams = Partial<
     | 'variety'
     | 'qualityToggle'
     | 'ucPreset'
+    | 'promptParts'
   >
 >
 
@@ -284,6 +349,12 @@ export interface Scene {
   reserveCount: number
   /** 씬별 variety+ 강제 적용 (커스텀. false = 메인 설정 따름) */
   varietyPlus: boolean
+  /** 하는쪽 행위 태그 (커스텀) — 역할이 '하는쪽'인 캐릭터 프롬프트 뒤에 합쳐짐 */
+  sourceTags: string
+  /** 당하는쪽 행위 태그 (커스텀) — 역할이 '당하는쪽'인 캐릭터 프롬프트 뒤에 합쳐짐 */
+  targetTags: string
+  /** 내보내기 번호 (커스텀) — 지정 시 내보내는 파일명이 "01" 등 번호가 됨. null = 씬 이름 사용 */
+  exportNo: number | null
   /** 목록 카드용: 최신 생성 이미지 썸네일 (없으면 '') */
   thumbnail: string
   /** 최신 생성 이미지의 원본 파일 경로 (카드에 풀해상도로 선명하게 표시. 없으면 '') */
@@ -318,6 +389,8 @@ export interface IpcInvokeMap {
   'db:status': { req: void; res: { version: number; path: string } }
   /** 앱 버전 */
   'app:version': { req: void; res: { version: string } }
+  /** 데이터 폴더(userData) 탐색기로 열기 (커스텀) */
+  'app:openDataFolder': { req: void; res: void }
   'nai:verifyToken': {
     req: { token: string }
     res: { valid: boolean; subscription?: SubscriptionInfo; error?: string }
@@ -335,8 +408,17 @@ export interface IpcInvokeMap {
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
   'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
+  /** 우선 등록 (커스텀) — 생성 중인 항목 바로 다음에 끼워넣어 다음 차례로 */
+  'queue:enqueueNext': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
   'queue:cancel': { req: { ids: string[] }; res: void }
-  'queue:status': { req: void; res: QueueStatus }
+  /** 대기(pending) 항목의 요청을 최신값으로 교체 (커스텀 — 생성 중 편집 반영) */
+  'queue:updatePending': {
+    req: { updates: { id: string; request: GenerationRequest }[] }
+    res: void
+  }
+  /** 대기 항목의 전체 request (커스텀 — 재구성용). 요약 브로드캐스트엔 없는 상세를 필요할 때만 */
+  'queue:pending': { req: void; res: { items: { id: string; request: GenerationRequest }[] } }
+  'queue:status': { req: void; res: QueueStatusLite }
   'images:list': {
     req: { limit: number; offset: number }
     res: { items: HistoryItem[]; total: number }
@@ -400,8 +482,9 @@ export interface IpcInvokeMap {
   }
   /** 파일 탐색기에서 해당 파일 위치 열기 (파일 선택 상태로) */
   'images:showInFolder': { req: { filePath: string }; res: void }
-  /** OS 네이티브 드래그 시작 — 이미지를 앱 밖(탐색기 등)으로 끌어 저장 (NAIS2 기능) */
-  'images:startDrag': { req: { filePath: string }; res: void }
+  /** OS 네이티브 드래그 시작 — 이미지를 앱 밖(탐색기 등)으로 끌어 저장 (NAIS2 기능).
+   *  toWeb=true면 창 통과를 끄고 드래그 → 내장 브라우저(webview) 업로드 칸에 바로 드롭 */
+  'images:startDrag': { req: { filePath: string; toWeb?: boolean }; res: void }
   /** 다른 이름으로 저장 — 파일 저장 다이얼로그로 복사 */
   'images:saveAs': { req: { filePath: string }; res: { saved: boolean } }
   /** 이미지를 클립보드로 복사 */
@@ -457,8 +540,11 @@ export interface IpcInvokeMap {
   'promptPresets:delete': { req: { id: number }; res: void }
   /** 업데이트 다운로드 시작 (완료 시 자동 설치/재시작) */
   'update:start': { req: void; res: void }
-  /** 전체 데이터 JSON 내보내기 (저장 다이얼로그) */
-  'backup:export': { req: void; res: { saved: boolean } }
+  /** 지금 업데이트 확인 (커스텀 — 정보 화면 열 때 실시간 재확인). 결과는 update:status 이벤트로 */
+  'update:check': { req: void; res: void }
+  /** 전체 데이터 JSON 내보내기 (저장 다이얼로그).
+   *  includeSecrets=true면 NAI 토큰·클플 인증을 평문으로 포함 (내보내기 전 반드시 물어볼 것, 커스텀) */
+  'backup:export': { req: { includeSecrets?: boolean }; res: { saved: boolean } }
   /** DB 백업 폴더 열기 (커스텀 — 자동 스냅샷 보관소) */
   'backup:openFolder': { req: void; res: void }
   /** 지금 즉시 DB 백업 스냅샷 생성 (커스텀) */
@@ -491,13 +577,32 @@ export interface IpcInvokeMap {
       patch: Partial<
         Pick<
           Scene,
-          'name' | 'prompt' | 'negativePrompt' | 'width' | 'height' | 'reserveCount' | 'varietyPlus'
+          | 'name'
+          | 'prompt'
+          | 'negativePrompt'
+          | 'width'
+          | 'height'
+          | 'reserveCount'
+          | 'varietyPlus'
+          | 'sourceTags'
+          | 'targetTags'
+          | 'exportNo'
         >
       >
     }
     res: void
   }
+  /** 씬 내보내기 번호 일괄 부여 (커스텀) — ids 순서대로 start부터 순번. start=null이면 번호 제거 */
+  'scenes:assignExportNumbers': { req: { ids: number[]; start: number | null }; res: void }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
+  /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
+  'scenes:duplicatePreset': { req: { id: number }; res: { id: number } }
+  /** 씬들을 다른 프리셋으로 복사 — 원본 유지 (커스텀, bulkMove=잘라내기와 짝) */
+  /** 다른 프리셋으로 복사 — 새로 만든 씬 id들을 (넘긴 순서대로) 함께 반환 */
+  'scenes:bulkCopy': {
+    req: { ids: number[]; presetId: number }
+    res: { copied: number; ids: number[] }
+  }
   'scenes:delete': { req: { id: number }; res: void }
   'scenes:reorder': { req: { ids: number[] }; res: void }
   /** 예약: 전체 취소(count=0 등 절대값 설정) */
@@ -511,16 +616,18 @@ export interface IpcInvokeMap {
   'scenes:bulkClearFavorites': { req: { ids: number[] }; res: void }
   'scenes:bulkClearImages': {
     req: { ids: number[]; keepFavorites?: boolean }
-    res: { deleted: number }
+    res: { deleted: number; ids: number[] }
   }
+  /** 소프트삭제된 이미지 복원 (실행취소, 커스텀) */
+  'scenes:restoreImages': { req: { ids: number[] }; res: void }
   'scenes:bulkExportZip': { req: { ids: number[] }; res: { count: number } }
   /** 씬 상세 이미지 페이지네이션 (수만 장 대비) */
   'scenes:images': {
     req: { sceneId: number; limit: number; offset: number; favoritesOnly?: boolean }
     res: { items: SceneImage[]; total: number }
   }
-  /** 씬의 즐겨찾기 제외 전체 삭제 (파일 포함) */
-  'scenes:deleteNonFavorites': { req: { sceneId: number }; res: { deleted: number } }
+  /** 씬의 즐겨찾기 제외 전체 소프트삭제 — 반환에 복원용 이미지 id 포함 */
+  'scenes:deleteNonFavorites': { req: { sceneId: number }; res: { deleted: number; ids: number[] } }
   'images:setFavorite': { req: { id: number; favorite: boolean }; res: void }
   /** 이미지 삭제 — deleteFile=true면 파일까지(씬 상세), 아니면 기록만(히스토리, 파일 보존) */
   'images:delete': { req: { id: number; deleteFile?: boolean }; res: void }
@@ -530,12 +637,28 @@ export interface IpcInvokeMap {
   'scenes:openFolder': { req: { sceneId: number }; res: { ok: boolean } }
   /** 씬 JSON 내보내기/불러오기 (파일 다이얼로그, 활성 프리셋 기준) */
   'scenes:exportJson': { req: { presetId: number }; res: { saved: boolean } }
-  'scenes:importJson': { req: { presetId: number }; res: { count: number } }
+  /** 불러오기 — 씬에 캐릭터탭(characters/sharedCharacters)이 실려 있으면 카드로 만들고
+   *  additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에 연결한다. roles = 행위 역할 (커스텀) */
+  'scenes:importJson': {
+    req: { presetId: number }
+    res: {
+      count: number
+      additions: { sceneId: number; characterIds: number[]; roles?: CharRoles }[]
+    }
+  }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */
   'scenes:exportZip': { req: { mode: 'favorites' | 'sceneTop' }; res: { count: number } }
-  /** 선택 씬 이미지를 폴더로 그대로 복사 (커스텀). policy 미지정+충돌 시 conflicts 반환 */
+  /** 이미지를 폴더로 그대로 복사 (커스텀). scope=씬 ids 또는 즐겨찾기/각 씬 최상단.
+   *  policy 미지정+충돌 시 conflicts 반환 */
   'scenes:exportToFolder': {
-    req: { ids: number[]; dir?: string; policy?: 'overwrite' | 'rename' | 'skip' }
+    req: {
+      ids?: number[]
+      mode?: 'favorites' | 'sceneTop'
+      /** ids와 함께: 해당 씬들의 즐겨찾기 이미지만 (커스텀) */
+      favoritesOnly?: boolean
+      dir?: string
+      policy?: 'overwrite' | 'rename' | 'skip'
+    }
     res: {
       canceled?: true
       dir?: string
@@ -590,11 +713,93 @@ export interface IpcInvokeMap {
   'crefs:folderCollapse': { req: { id: number; collapsed: boolean }; res: void }
   'crefs:folderColor': { req: { id: number; color: string | null }; res: void }
   'crefs:folderDelete': { req: { id: number }; res: void }
+  // ── Cloudflare R2 업로드 (커스텀) — 인증은 safeStorage 암호화, 로컬 저장만 ──
+  /** 검증(버킷 목록 호출) 성공 시에만 저장 */
+  'r2:setAuth': {
+    req: { accountId: string; accessKeyId: string; secretAccessKey: string }
+    res: { ok: boolean; error?: string }
+  }
+  'r2:authStatus': { req: void; res: { connected: boolean; accountId: string } }
+  'r2:deleteAuth': { req: void; res: void }
+  /** R2 API 토큰 발급 페이지를 기본 브라우저로 */
+  'r2:openTokenPage': { req: void; res: void }
+  'r2:listBuckets': { req: void; res: { buckets: string[] } }
+  /** prefix 하위 폴더(CommonPrefixes)와 객체 목록 (1000개 페이지네이션 전부) */
+  'r2:list': {
+    req: { bucket: string; prefix: string }
+    res: { folders: string[]; objects: R2Object[] }
+  }
+  'r2:createFolder': { req: { bucket: string; prefix: string; name: string }; res: void }
+  /** 파일/폴더 선택 다이얼로그 → 업로드 큐에 추가 (폴더는 재귀, 개수 제한 없음) */
+  'r2:pickUpload': {
+    req: { bucket: string; prefix: string; kind: 'files' | 'folder' }
+    res: { queued: number }
+  }
+  /** 드래그 앤 드롭된 경로들을 업로드 큐에 추가 */
+  'r2:uploadPaths': {
+    req: { bucket: string; prefix: string; paths: string[] }
+    res: { queued: number }
+  }
+  'r2:uploadStatus': { req: void; res: R2UploadStatus }
+  'r2sync:getConfig': { req: { presetId: number }; res: R2SyncConfig }
+  'r2sync:setConfig': { req: { presetId: number; config: R2SyncConfig }; res: void }
+  'r2sync:run': { req: { presetId: number }; res: R2SyncStatus }
+  'r2sync:status': { req: { presetId: number }; res: R2SyncStatus }
+  'r2sync:resolveConflicts': {
+    req: { presetId: number; choice: 'overwrite' | 'skip'; remember: boolean }
+    res: R2SyncStatus
+  }
+  'r2:retryFailed': { req: void; res: { queued: number } }
+  'r2:cancelUpload': { req: void; res: void }
+  'r2:clearUploadHistory': { req: void; res: void }
+}
+
+/** Automatic R2 synchronization settings, stored independently for each scene preset. */
+export interface R2SyncConfig {
+  enabled: boolean
+  bucket: string
+  /** Target folder with a trailing slash, or an empty string for the bucket root. */
+  prefix: string
+  deleteOnUnfavorite: boolean
+  conflictPolicy: 'ask' | 'overwrite' | 'skip'
+}
+
+export interface R2SyncStatus {
+  presetId: number
+  running: boolean
+  conflicts: string[]
+  last: {
+    uploaded: number
+    renamed: number
+    deleted: number
+    skipped: number
+    errors: string[]
+    at: string
+  } | null
+}
+
+/** R2 객체 (표시용) */
+export interface R2Object {
+  key: string
+  size: number
+  lastModified: string
+}
+
+/** R2 업로드 큐 상태 (커스텀) */
+export interface R2UploadStatus {
+  running: boolean
+  bucket: string
+  total: number
+  done: number
+  failedCount: number
+  /** 실패 항목 (표시 상한 200) — 재시도 대상 */
+  failed: { name: string; key: string; error: string }[]
+  currentName: string
 }
 
 /** 메인 → 렌더러 이벤트 채널 */
 export interface IpcEventMap {
-  'queue:changed': QueueStatus
+  'queue:changed': QueueStatusLite
   /** 생성 완료 등으로 잔액이 갱신될 때 */
   'anlas:balance': { anlas: number }
   'generation:progress': {
@@ -610,9 +815,12 @@ export interface IpcEventMap {
   'vibes:encoded': Record<string, never>
   /** 자동 업데이트 상태 (GitHub release) */
   'update:status': {
-    state: 'available' | 'none' | 'downloading' | 'downloaded' | 'error'
+    state: 'checking' | 'available' | 'none' | 'downloading' | 'downloaded' | 'error'
     version?: string
     percent?: number
     message?: string
   }
+  /** R2 업로드 진행 상황 (커스텀) */
+  'r2:progress': R2UploadStatus
+  'r2sync:status': R2SyncStatus
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { GenerationRequest, HistoryItem, PromptParts, QueueStatus } from '@shared/types'
+import type { GenerationRequest, HistoryItem, PromptParts, QueueStatusLite } from '@shared/types'
 import { enabledCharacters, linkedCharRefIds } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
@@ -49,7 +49,11 @@ interface GenerationState {
   setSubscriptionTier: (tier: string) => void
   anlasBalance: number | null
   refreshAnlas: () => Promise<void>
-  queue: QueueStatus | null
+  queue: QueueStatusLite | null
+  /** 씬별 대기(pending) 수 미리 집계 (커스텀 — 성능). 카드마다 전체 큐를 필터하지 않게 */
+  pendingBySceneId: Record<number, number>
+  /** 지금 생성 중인 항목의 씬 id (커스텀 — 성능) */
+  generatingSceneId: number | null
   /** 진행 중 미리보기 (data URL 아님, base64) */
   previewPng: string | null
   progress: { stepIx: number; totalSteps: number } | null
@@ -109,6 +113,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
   },
   queue: null,
+  pendingBySceneId: {},
+  generatingSceneId: null,
   previewPng: null,
   progress: null,
   genStartAt: null,
@@ -175,7 +181,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       }
     }
     const queue = await window.nais.invoke('queue:status', undefined)
-    set({ queue })
+    set({ queue, ...deriveQueue(queue) })
     await get().refreshHistory()
     void get().refreshAnlas()
   },
@@ -239,8 +245,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     // 씬의 "아직 시작 안 한" 항목들은 취소 후 예약으로 되돌린다 (남은 개수 유실 방지)
     const bySceneId = new Map<number, number>()
     for (const i of active) {
-      if (i.state === 'pending' && i.request.sceneId != null) {
-        bySceneId.set(i.request.sceneId, (bySceneId.get(i.request.sceneId) ?? 0) + 1)
+      if (i.state === 'pending' && i.sceneId != null) {
+        bySceneId.set(i.sceneId, (bySceneId.get(i.sceneId) ?? 0) + 1)
       }
     }
     await window.nais.invoke('queue:cancel', { ids: active.map((i) => i.id) })
@@ -323,6 +329,24 @@ function persistParams(request: GenerationRequest): void {
   }, 400)
 }
 
+/** 큐 요약에서 파생 상태 계산 (커스텀 — 성능): 씬별 대기 수 + 생성 중 씬.
+ *  카드들이 전체 items를 각자 필터하는 대신 이 집계만 구독한다 (O(N) 1회 ↔ O(N×카드수)) */
+function deriveQueue(queue: QueueStatusLite): {
+  pendingBySceneId: Record<number, number>
+  generatingSceneId: number | null
+} {
+  const pendingBySceneId: Record<number, number> = {}
+  let generatingSceneId: number | null = null
+  for (const i of queue.items) {
+    if (i.state === 'pending' && i.sceneId != null) {
+      pendingBySceneId[i.sceneId] = (pendingBySceneId[i.sceneId] ?? 0) + 1
+    } else if (i.state === 'generating' && i.sceneId != null) {
+      generatingSceneId = i.sceneId
+    }
+  }
+  return { pendingBySceneId, generatingSceneId }
+}
+
 /** 메인 프로세스 이벤트 구독 — 앱 시작 시 1회 */
 export function bindGenerationEvents(): () => void {
   // 생성 소요 시간 추적 (id별 시작 시각 → 완료 시 평균 갱신)
@@ -358,7 +382,7 @@ export function bindGenerationEvents(): () => void {
       localStorage.setItem('gen_avg_ms', String(avg))
     }
 
-    useGenerationStore.setState({ queue, genStartAt, avgDurationMs: avg })
+    useGenerationStore.setState({ queue, genStartAt, avgDurationMs: avg, ...deriveQueue(queue) })
     // 새로 실패한 항목은 토스트로 알림 (배지 대신 통합 처리)
     const prevFailed = new Set(prev?.items.filter((i) => i.state === 'failed').map((i) => i.id))
     for (const item of queue.items) {

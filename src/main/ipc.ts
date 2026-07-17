@@ -1,5 +1,16 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  Notification,
+  session,
+  shell
+} from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
+import { removeComments } from '../shared/nai-presets'
 import {
   createCharacter,
   createFolder,
@@ -25,6 +36,7 @@ import {
   deleteFragmentFolder,
   exportTxtFragment,
   exportAllFragmentsZip,
+  fragmentSource,
   importTxtFragments,
   listFragments,
   renameFragmentFolder,
@@ -33,7 +45,7 @@ import {
   setFragmentFolderColor,
   updateFragment
 } from './fragments/repo'
-import { resetSequentialCounters } from './fragments/processor'
+import { processWildcards, resetSequentialCounters } from './fragments/processor'
 import {
   deleteNaiToken,
   getNaiToken,
@@ -71,8 +83,11 @@ import {
   getPresetName,
   updateScene,
   duplicateScene,
+  duplicatePreset,
+  bulkCopyScenes,
   deleteScene,
   reorderScenes,
+  assignExportNumbers,
   setReserveAll,
   adjustReserveAll,
   bulkMove,
@@ -80,6 +95,7 @@ import {
   bulkSetResolution,
   bulkClearFavorites,
   bulkClearImages,
+  restoreImages,
   bulkExportZip,
   exportToFolder,
   sceneImages,
@@ -100,7 +116,7 @@ import {
 } from './prompts/repo'
 import { exportAll, importAll } from './backup/repo'
 import { importNais2 } from './backup/nais2'
-import { startUpdateDownload } from './updater'
+import { checkForUpdatesNow, startUpdateDownload } from './updater'
 import { countTokens } from './nai/tokenizer'
 import {
   addRefImages,
@@ -116,6 +132,34 @@ import {
   updateRefImage
 } from './refs/repo'
 import { lookupTags, searchTags } from './tags'
+import {
+  cancelUpload,
+  clearUploadHistory,
+  createR2Folder,
+  deleteR2Auth,
+  enqueueUpload,
+  listBuckets,
+  listObjects,
+  openR2TokenPage,
+  r2AuthStatus,
+  retryFailed,
+  setR2Auth,
+  uploadStatus
+} from './r2/client'
+import {
+  getSyncConfig,
+  presetIdsForAllImages,
+  presetIdsForImages,
+  presetIdsForScenes,
+  resolveConflicts,
+  runSync,
+  scheduleSync,
+  scheduleSyncForImages,
+  scheduleSyncForPresets,
+  scheduleSyncForScenes,
+  setSyncConfig,
+  syncStatus
+} from './r2/sync'
 import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, extname, join } from 'path'
@@ -140,6 +184,9 @@ export function broadcast<C extends keyof IpcEventMap>(channel: C, payload: IpcE
 export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQueue }): void {
   handle('db:status', () => ({ version: ctx.dbVersion, path: getDbPath() }))
   handle('app:version', () => ({ version: app.getVersion() }))
+  handle('app:openDataFolder', () => {
+    void shell.openPath(app.getPath('userData'))
+  })
 
   handle('nai:verifyToken', ({ token }) => verifyToken(token))
 
@@ -166,10 +213,15 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
 
   handle('queue:enqueue', ({ request, count }) => ({ ids: ctx.queue.enqueue(request, count) }))
   handle('queue:enqueueMany', ({ requests }) => ({ ids: ctx.queue.enqueueMany(requests) }))
+  handle('queue:enqueueNext', ({ requests }) => ({ ids: ctx.queue.enqueueNext(requests) }))
+  handle('queue:updatePending', ({ updates }) => {
+    ctx.queue.updatePending(updates)
+  })
+  handle('queue:pending', () => ({ items: ctx.queue.pendingItems() }))
   handle('queue:cancel', ({ ids }) => {
     ctx.queue.cancel(ids)
   })
-  handle('queue:status', () => ctx.queue.status())
+  handle('queue:status', () => ctx.queue.statusLite())
 
   handle('images:list', ({ limit, offset }) => listImages(limit, offset))
   handle('images:payload', ({ id }) => ({ payloadJson: getImagePayload(id) }))
@@ -181,6 +233,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('scenePresets:delete', ({ id }) => {
     deletePreset(id)
+    scheduleSync(id)
   })
   handle('scenePresets:reorder', ({ ids }) => {
     reorderPresets(ids)
@@ -216,8 +269,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('update:start', () => {
     startUpdateDownload()
   })
+  handle('update:check', () => {
+    checkForUpdatesNow()
+  })
 
-  handle('backup:export', async () => {
+  handle('backup:export', async ({ includeSecrets }) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const stamp = new Date().toISOString().slice(0, 10)
     const result = await dialog.showSaveDialog(win, {
@@ -226,7 +282,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return { saved: false }
-    writeFileSync(result.filePath, JSON.stringify(exportAll()))
+    writeFileSync(result.filePath, JSON.stringify(exportAll(includeSecrets === true)))
     return { saved: true }
   })
 
@@ -289,21 +345,36 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:trash', () => ({ items: listTrashedScenes() }))
   handle('scenes:restore', ({ ids }) => {
     restoreScenes(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:purge', async ({ ids }) => {
+    const presetIds = presetIdsForScenes(ids)
     await purgeScenes(ids)
+    scheduleSyncForPresets(presetIds)
   })
   handle('scenes:create', ({ presetId, name }) => ({ id: createScene(presetId, name) }))
   handle('scenes:get', ({ id }) => ({ scene: getScene(id) }))
   handle('scenes:update', ({ id, patch }) => {
     updateScene(id, patch)
+    if (patch.name !== undefined) scheduleSyncForScenes([id])
   })
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
+  handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
+  handle('scenes:bulkCopy', ({ ids, presetId }) => {
+    const newIds = bulkCopyScenes(ids, presetId)
+    return { copied: newIds.length, ids: newIds }
+  })
   handle('scenes:delete', ({ id }) => {
     deleteScene(id)
+    scheduleSyncForScenes([id])
   })
   handle('scenes:reorder', ({ ids }) => {
     reorderScenes(ids)
+    scheduleSyncForScenes(ids)
+  })
+  handle('scenes:assignExportNumbers', ({ ids, start }) => {
+    assignExportNumbers(ids, start)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:setReserveAll', ({ presetId, count }) => {
     setReserveAll(presetId, count)
@@ -312,38 +383,104 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     adjustReserveAll(presetId, delta)
   })
   handle('scenes:bulkMove', ({ ids, presetId }) => {
+    const previousPresetIds = presetIdsForScenes(ids)
     bulkMove(ids, presetId)
+    scheduleSyncForPresets([...previousPresetIds, presetId])
   })
   handle('scenes:bulkDelete', ({ ids }) => {
     bulkDelete(ids)
+    scheduleSyncForScenes(ids)
   })
   handle('scenes:bulkSetResolution', ({ ids, width, height }) => {
     bulkSetResolution(ids, width, height)
   })
   handle('scenes:bulkClearFavorites', ({ ids }) => {
     bulkClearFavorites(ids)
+    scheduleSyncForScenes(ids)
   })
-  handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => ({
-    deleted: bulkClearImages(ids, keepFavorites)
-  }))
+  handle('scenes:bulkClearImages', ({ ids, keepFavorites }) => {
+    const imageIds = bulkClearImages(ids, keepFavorites)
+    scheduleSyncForScenes(ids)
+    return { deleted: imageIds.length, ids: imageIds }
+  })
   handle('scenes:bulkExportZip', async ({ ids }) => ({ count: await bulkExportZip(ids) }))
   handle('scenes:images', ({ sceneId, limit, offset, favoritesOnly }) =>
     sceneImages(sceneId, limit, offset, favoritesOnly)
   )
-  handle('scenes:deleteNonFavorites', ({ sceneId }) => ({
-    deleted: deleteNonFavorites(sceneId)
-  }))
+  handle('scenes:deleteNonFavorites', ({ sceneId }) => {
+    const imageIds = deleteNonFavorites(sceneId)
+    scheduleSyncForScenes([sceneId])
+    return { deleted: imageIds.length, ids: imageIds }
+  })
+  handle('scenes:restoreImages', ({ ids }) => {
+    restoreImages(ids)
+    scheduleSyncForImages(ids)
+  })
   handle('images:setFavorite', ({ id, favorite }) => {
     setImageFavorite(id, favorite)
+    scheduleSyncForImages([id])
   })
   handle('images:delete', ({ id, deleteFile }) => {
+    const presetIds = presetIdsForImages([id])
     deleteImage(id, deleteFile === true)
+    scheduleSyncForPresets(presetIds)
   })
-  handle('images:clearAll', () => ({ count: clearAllImages() }))
+  handle('images:clearAll', () => {
+    const presetIds = presetIdsForAllImages()
+    const count = clearAllImages()
+    scheduleSyncForPresets(presetIds)
+    return { count }
+  })
   handle('scenes:exportJson', async ({ presetId }) => ({ saved: await exportScenesJson(presetId) }))
-  handle('scenes:importJson', async ({ presetId }) => ({ count: await importScenesJson(presetId) }))
+  handle('scenes:importJson', ({ presetId }) => importScenesJson(presetId))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
-  handle('scenes:exportToFolder', ({ ids, dir, policy }) => exportToFolder(ids, { dir, policy }))
+  handle('scenes:exportToFolder', ({ ids, mode, favoritesOnly, dir, policy }) =>
+    exportToFolder({ ids, mode, favoritesOnly }, { dir, policy })
+  )
+
+  // ── Cloudflare R2 업로드 (커스텀) ──────────────────────────────────
+  handle('r2:setAuth', (auth) => setR2Auth(auth))
+  handle('r2:authStatus', () => r2AuthStatus())
+  handle('r2:deleteAuth', () => {
+    deleteR2Auth()
+  })
+  handle('r2:openTokenPage', () => {
+    openR2TokenPage()
+  })
+  handle('r2:listBuckets', async () => ({ buckets: await listBuckets() }))
+  handle('r2:list', ({ bucket, prefix }) => listObjects(bucket, prefix))
+  handle('r2:createFolder', ({ bucket, prefix, name }) => createR2Folder(bucket, prefix, name))
+  handle('r2:pickUpload', async ({ bucket, prefix, kind }) => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const r = await dialog.showOpenDialog(win, {
+      title: kind === 'folder' ? '업로드할 폴더 선택' : '업로드할 파일 선택',
+      properties:
+        kind === 'folder' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections']
+    })
+    if (r.canceled || r.filePaths.length === 0) return { queued: 0 }
+    return { queued: enqueueUpload(bucket, prefix, r.filePaths) }
+  })
+  handle('r2:uploadPaths', ({ bucket, prefix, paths }) => ({
+    queued: enqueueUpload(bucket, prefix, paths)
+  }))
+  handle('r2:uploadStatus', () => uploadStatus())
+  handle('r2:retryFailed', () => ({ queued: retryFailed() }))
+  handle('r2:cancelUpload', () => {
+    cancelUpload()
+  })
+  handle('r2:clearUploadHistory', () => {
+    clearUploadHistory()
+  })
+  handle('r2sync:getConfig', ({ presetId }) => getSyncConfig(presetId))
+  handle('r2sync:setConfig', ({ presetId, config }) => {
+    setSyncConfig(presetId, config)
+    if (config.enabled) scheduleSync(presetId)
+  })
+  handle('r2sync:run', ({ presetId }) => runSync(presetId))
+  handle('r2sync:status', ({ presetId }) => syncStatus(presetId))
+  handle('r2sync:resolveConflicts', ({ presetId, choice, remember }) =>
+    resolveConflicts(presetId, choice, remember)
+  )
 
   handle('settings:get', ({ key }) => ({ value: getSetting(key) }))
   handle('settings:set', ({ key, value }) => {
@@ -414,7 +551,17 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
 
   handle('tags:search', ({ query, limit }) => ({ items: searchTags(query, limit) }))
   handle('tags:lookup', ({ tags }) => ({ items: lookupTags(tags) }))
-  handle('tokens:count', ({ texts }) => ({ counts: texts.map(countTokens) }))
+  // 토큰 수는 실제 전송될 프롬프트 기준 (커스텀) — 주석(#) 제거 + 조각(<a1> 등) 확장 후 센다.
+  // 랜덤 조각은 뽑기마다 길이가 달라지므로 항상 첫 줄 기준(rng=0)으로 세서 숫자가 흔들리지 않고,
+  // peek 모드라 <*순차> 조각의 진행 카운터도 건드리지 않는다.
+  handle('tokens:count', ({ texts }) => {
+    const src = fragmentSource()
+    return {
+      counts: texts.map((t) =>
+        countTokens(processWildcards(removeComments(t), src, () => 0, { peek: true }))
+      )
+    }
+  })
 
   handle('images:showInFolder', ({ filePath }) => {
     if (isUnderImagesRoot(filePath)) shell.showItemInFolder(filePath)
@@ -426,7 +573,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   // Windows에서 startDrag는 드래그가 끝날 때까지 블로킹되므로 호출 뒤 복원하면 된다.
   // 파일명: "씬이름_3.png" 대신 "씬이름.png"으로 — 연번 없는 임시 복사본을 드래그.
   // (대상 폴더에 같은 이름이 있으면 OS가 충돌 처리를 맡는다)
-  handle('images:startDrag', async ({ filePath }) => {
+  handle('images:startDrag', async ({ filePath, toWeb }) => {
     if (!isUnderImagesRoot(filePath)) return
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     if (!win) return
@@ -456,7 +603,14 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       }
     }
 
-    // 반투명 + 마우스 통과: 창이 위에 있어도 "뚫고" 뒤의 탐색기 등에 바로 놓을 수 있다.
+    // 웹 모드: 창 통과를 끄고 그대로 드래그 → 내장 브라우저(webview) 업로드 칸에 바로 드롭.
+    // (통과를 켜면 드래그가 앱을 뚫고 지나가 webview가 못 받는다)
+    if (toWeb) {
+      win.webContents.startDrag({ file: dragPath, icon })
+      return
+    }
+
+    // 그 외: 반투명 + 마우스 통과 — 창이 위에 있어도 "뚫고" 뒤의 탐색기/바깥 브라우저에 놓는다.
     // (통과 중엔 앱 자체에는 드롭 불가 — 메타데이터 보기는 우클릭 메뉴로 가능)
     win.setOpacity(0.3)
     win.setIgnoreMouseEvents(true)
@@ -534,17 +688,17 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
           .get(filePath) as { payload_json: string } | undefined
         const fromDb = row?.payload_json ? metadataFromPayloadJson(row.payload_json) : null
         // 1) PNG tEXt 우선. 단, 예전 저장본/포맷 변환본처럼 nais3-params 청크가 빠진 경우
-        // DB payload_json의 NAIS3 로컬 메타데이터(promptParts)를 합쳐서 3분할을 복원한다.
+        // DB payload_json의 NAIS3 로컬 메타데이터를 합쳐 3분할·조각 스냅샷을 복원한다.
         const buf = readFileSync(filePath)
         const fromPng = await metadataFromPng(buf)
-        if (fromPng) {
+        if (fromPng)
           return {
-            meta:
-              !fromPng.promptParts && fromDb?.promptParts
-                ? { ...fromPng, promptParts: fromDb.promptParts }
-                : fromPng
+            meta: {
+              ...fromPng,
+              promptParts: fromPng.promptParts ?? fromDb?.promptParts,
+              fragmentPrompts: fromPng.fragmentPrompts ?? fromDb?.fragmentPrompts
+            }
           }
-        }
         // 2) 폴백: DB payload_json (우리 스트리밍 이미지는 tEXt가 없을 수 있음)
         if (fromDb) return { meta: fromDb }
         return { error: '메타데이터를 찾지 못했습니다' }
@@ -716,5 +870,29 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(color)
   })
 
-  ctx.queue.on('changed', (status) => broadcast('queue:changed', status))
+  // 생성 완료 알림 (커스텀) — 큐가 idle로 전환될 때 이번 실행에서 끝난 장수를 Windows 알림으로.
+  // 소리 없음(silent). 설정 notify_on_complete !== '0' 일 때만 (기본 켜짐).
+  let queueWasRunning = false
+  let doneAtRunStart = 0
+  ctx.queue.on('changed', (status) => {
+    broadcast('queue:changed', status)
+    const doneNow = status.items.filter((i) => i.state === 'done').length
+    if (status.running && !queueWasRunning) doneAtRunStart = doneNow
+    if (!status.running && queueWasRunning) {
+      const completed = doneNow - doneAtRunStart
+      // 2장 이상일 때만 — 1장짜리 즉석 생성엔 알림이 과함 (사용자 결정)
+      if (
+        completed >= 2 &&
+        getSetting('notify_on_complete') !== '0' &&
+        Notification.isSupported()
+      ) {
+        new Notification({
+          title: 'NAIS3 Custom — 생성 완료',
+          body: `이미지 ${completed}장 생성이 끝났어요`,
+          silent: true
+        }).show()
+      }
+    }
+    queueWasRunning = status.running
+  })
 }

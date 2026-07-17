@@ -36,7 +36,7 @@ export function HistoryPanel(): React.JSX.Element {
   }
 
   return (
-    <aside className="flex h-full w-[240px] flex-col rounded-xl border border-line bg-surface">
+    <aside className="flex h-full w-full min-w-[220px] flex-col rounded-xl border border-line bg-surface">
       {/* 헤더는 창 드래그 영역 */}
       <div className="drag flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
         <History size={14} className="text-muted" />

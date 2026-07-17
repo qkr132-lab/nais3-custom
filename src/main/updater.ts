@@ -7,6 +7,12 @@ import { tmpdir } from 'os'
 import { basename, join, resolve } from 'path'
 import { promisify } from 'util'
 import { broadcast } from './ipc'
+import {
+  isNewerVersion,
+  releaseVersion,
+  type GitHubRelease,
+  type GitHubReleaseAsset
+} from './update-release'
 
 // electron-updater는 CJS — ESM에서 named import가 깨질 수 있어 default에서 구조분해
 const { autoUpdater } = electronUpdater
@@ -15,6 +21,7 @@ const execFileP = promisify(execFile)
 // NAIS3 Custom 배포 저장소 — 자동 업데이트가 이 저장소의 릴리즈를 확인한다
 const REPO = 'qkr132-lab/nais3-custom'
 const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`
+const RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`
 
 /**
  * 자동 업데이트.
@@ -27,13 +34,16 @@ export function setupUpdater(): void {
   if (!app.isPackaged) return // dev에선 확인 안 함
 
   if (process.platform === 'darwin') {
-    void checkMacUpdate()
-    setInterval(() => void checkMacUpdate(), 6 * 60 * 60 * 1000)
+    void checkPublishedUpdate(true)
+    setInterval(() => void checkPublishedUpdate(true), 6 * 60 * 60 * 1000)
     return
   }
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  // 실험판 앱도 exp.yml이 아닌 공개 안정판 latest.yml을 확인한다.
+  autoUpdater.channel = 'latest'
+  autoUpdater.allowPrerelease = false
 
   autoUpdater.on('update-available', (info) => {
     broadcast('update:status', { state: 'available', version: info.version })
@@ -50,18 +60,26 @@ export function setupUpdater(): void {
     setTimeout(() => autoUpdater.quitAndInstall(), 1200)
   })
   autoUpdater.on('error', (err) => {
-    broadcast('update:status', { state: 'error', message: err?.message ?? String(err) })
+    broadcast('update:status', { state: 'error', message: readableError(err) })
   })
 
-  void autoUpdater.checkForUpdates().catch(() => {
-    /* 네트워크 오류 등은 조용히 무시 (버튼은 안 뜸) */
-  })
+  void checkPublishedUpdate(true)
   setInterval(
     () => {
-      void autoUpdater.checkForUpdates().catch(() => {})
+      void checkPublishedUpdate(true)
     },
     6 * 60 * 60 * 1000
   )
+}
+
+/** 지금 업데이트 확인 (커스텀) — 정보 화면을 열 때마다 실시간 재확인. 결과는 update:status로 */
+export function checkForUpdatesNow(): void {
+  if (!app.isPackaged) {
+    broadcast('update:status', { state: 'none' }) // dev에선 확인 안 함
+    return
+  }
+  broadcast('update:status', { state: 'checking' })
+  void checkPublishedUpdate(false)
 }
 
 /** 다운로드 시작 (타이틀바/설정 버튼 클릭) */
@@ -71,49 +89,72 @@ export function startUpdateDownload(): void {
     return
   }
   void autoUpdater.downloadUpdate().catch((err) => {
-    broadcast('update:status', { state: 'error', message: err?.message ?? String(err) })
+    broadcast('update:status', { state: 'error', message: readableError(err) })
   })
 }
 
-// ─── macOS 커스텀 업데이터 ───────────────────────────────────────────
+// ─── GitHub 공개 릴리스 확인 ──────────────────────────────────────────
 
-interface GhAsset {
-  name: string
-  browser_download_url: string
-  size: number
+let macAsset: GitHubReleaseAsset | null = null
+
+function readableError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 180) || '알 수 없는 오류'
 }
 
-let macAsset: GhAsset | null = null
-
-function isNewer(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false
-  }
-  return false
+async function fetchLatestPublishedRelease(): Promise<GitHubRelease> {
+  const res = await fetch(RELEASE_API, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10_000),
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': `NAIS3-Custom/${app.getVersion()}`,
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+  })
+  if (!res.ok) throw new Error(`GitHub 릴리스 응답 ${res.status}`)
+  return (await res.json()) as GitHubRelease
 }
 
-async function checkMacUpdate(): Promise<void> {
+async function checkPublishedUpdate(silentNetworkError: boolean): Promise<void> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json' }
-    })
-    if (!res.ok) return
-    const rel = (await res.json()) as { tag_name?: string; assets?: GhAsset[] }
-    const version = String(rel.tag_name ?? '').replace(/^v/, '')
-    if (!version || !isNewer(version, app.getVersion())) {
+    const release = await fetchLatestPublishedRelease()
+    const version = releaseVersion(release)
+    if (!version) throw new Error('GitHub 릴리스 버전 형식이 올바르지 않습니다')
+    if (!isNewerVersion(version, app.getVersion())) {
       broadcast('update:status', { state: 'none' })
       return
     }
-    // 아키텍처에 맞는 mac zip (예: nais3-1.0.1-arm64-mac.zip)
-    const asset = (rel.assets ?? []).find((a) => a.name.endsWith(`${process.arch}-mac.zip`))
-    if (!asset) return
-    macAsset = asset
-    broadcast('update:status', { state: 'available', version })
-  } catch {
-    /* 조용히 무시 */
+
+    if (process.platform === 'darwin') {
+      const asset = (release.assets ?? []).find((a) => a.name.endsWith(`${process.arch}-mac.zip`))
+      if (!asset) throw new Error(`버전 ${version}의 ${process.arch} macOS 파일이 없습니다`)
+      macAsset = asset
+      broadcast('update:status', { state: 'available', version })
+      return
+    }
+
+    if (process.platform !== 'win32') {
+      broadcast('update:status', { state: 'none' })
+      return
+    }
+
+    const assets = release.assets ?? []
+    const hasManifest = assets.some((asset) => asset.name === 'latest.yml')
+    const hasInstaller = assets.some(
+      (asset) => asset.name.includes(`-${version}-`) && asset.name.endsWith('-setup.exe')
+    )
+    if (!hasManifest || !hasInstaller) {
+      throw new Error(`버전 ${version}의 Windows 업데이트 파일 구성이 올바르지 않습니다`)
+    }
+
+    await autoUpdater.checkForUpdates()
+  } catch (error) {
+    if (silentNetworkError) {
+      broadcast('update:status', { state: 'none' })
+      return
+    }
+    broadcast('update:status', { state: 'error', message: readableError(error) })
   }
 }
 

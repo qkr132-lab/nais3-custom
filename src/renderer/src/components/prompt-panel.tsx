@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  CalendarPlus,
   ChevronDown,
   ChevronUp,
   ImageUp,
@@ -15,7 +16,9 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { estimateAnlas } from '@shared/anlas'
-import { useCharactersStore } from '../stores/characters-store'
+import type { SequenceEntry } from '@shared/types'
+import { enabledCharacters, linkedCharRefIds, useCharactersStore } from '../stores/characters-store'
+import { hasAddition, useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useFragmentsStore } from '../stores/fragments-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
@@ -55,6 +58,7 @@ export function PromptPanel(): React.JSX.Element {
   const crefOverlayOpen = useCharRefsStore((s) => s.overlayOpen)
   const setCrefOpen = useCharRefsStore((s) => s.setOverlayOpen)
   const enabledCrefs = useCharRefsStore((s) => s.items.filter((c) => c.enabled).length)
+  const crefItems = useCharRefsStore((s) => s.items)
   const source = useGenerationStore((s) => s.source)
   const [paramsOpen, setParamsOpen] = useState(false)
   const [tagExplorerOpen, setTagExplorerOpen] = useState(false)
@@ -68,8 +72,17 @@ export function PromptPanel(): React.JSX.Element {
   // 씬 모드: 생성은 예약된 씬들을 예약 수만큼 큐에 넣는다. 예약 0이면 생성 버튼 비활성.
   const centerMode = useLayoutStore((s) => s.centerMode)
   const sceneReserved = useScenesStore((s) => totalReserved(s.scenes))
+  const sceneCount = useScenesStore((s) => s.scenes.length)
+  const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const generateReserved = useScenesStore((s) => s.generateReserved)
   const isScene = centerMode === 'scene'
+  // 예약 총비용 계산용 (커스텀) — 씬 해상도·큐 반복·씬별 추가·연결 레퍼까지 반영
+  const scenes = useScenesStore((s) => s.scenes)
+  const activePresetId = useScenesStore((s) => s.activePresetId)
+  const seqEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
+  const seqEntries = useSceneExtrasStore((s) => s.entries)
+  const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
+  const additions = useSceneExtrasStore((s) => s.additions)
   // 프롬프트/네거티브 개별 접기 — 하나를 접으면 다른 하나가 넓어짐
   const [posCollapsed, setPosCollapsed] = useState(false)
   const [negCollapsed, setNegCollapsed] = useState(false)
@@ -154,6 +167,61 @@ export function PromptPanel(): React.JSX.Element {
       }),
     [request.width, request.height, request.steps, subscriptionTier, batchCount, enabledCrefs]
   )
+
+  // 예약 전체 예상 비용 (커스텀) — "다 뽑으면 얼마?"를 생성 전에 보여준다.
+  // 씬별 해상도 × 예약 수 × 큐 반복 회차, 캐릭레퍼 사용료(씬별 추가·연결 레퍼 포함)까지 합산.
+  const sceneAnlas = useMemo(() => {
+    if (!isScene) return null
+    const reserved = scenes.filter((s) => s.reserveCount > 0)
+    if (reserved.length === 0) return null
+    const active = seqEnabled ? seqEntries.filter((e) => e.enabled) : []
+    const rounds: (SequenceEntry | null)[] = active.length > 0 ? active : [null]
+    const isOpus = subscriptionTier === 'opus'
+    const enabledCharIds = enabledCharacters().map((c) => c.id)
+    const enabledCrefIds = crefItems.filter((c) => c.enabled).map((c) => c.id)
+    let images = 0
+    let total = 0
+    for (const entry of rounds) {
+      for (const s of reserved) {
+        const addRaw = additionsEnabled ? additions[activePresetId]?.[s.id] : undefined
+        const add = hasAddition(addRaw) ? addRaw : null
+        // buildSceneRequest와 동일한 규칙으로 캐릭레퍼 수 산정 (사용료 5A/장/레퍼)
+        const charIds = new Set([
+          ...(add?.characterIds ?? []),
+          ...(entry ? entry.characterIds : enabledCharIds)
+        ])
+        const linked = linkedCharRefIds(charIds)
+        const refCount = entry
+          ? new Set([...entry.charRefIds, ...(add?.charRefIds ?? []), ...linked]).size
+          : (add && add.charRefIds.length > 0) || linked.length > 0
+            ? new Set([...enabledCrefIds, ...(add?.charRefIds ?? []), ...linked]).size
+            : enabledCrefIds.length
+        const est = estimateAnlas({
+          width: s.width,
+          height: s.height,
+          steps: request.steps,
+          charRefCount: refCount,
+          isOpus,
+          batchCount: s.reserveCount
+        })
+        images += s.reserveCount
+        total += est.total
+      }
+    }
+    return { images, total, rounds: rounds.length }
+  }, [
+    isScene,
+    scenes,
+    seqEnabled,
+    seqEntries,
+    additionsEnabled,
+    additions,
+    activePresetId,
+    request.steps,
+    subscriptionTier,
+    crefItems,
+    charItems
+  ])
 
   // 오버레이는 하나만 열림 — 서로 배타
   const only = (target: 'char' | 'frag' | 'vibe' | 'cref'): void => {
@@ -380,24 +448,42 @@ export function PromptPanel(): React.JSX.Element {
             <Square size={14} /> 취소 ({queueCount})
           </Button>
         ) : isScene ? (
-          <Button
-            variant="accent"
-            size="lg"
-            className="flex-1 gap-2"
-            disabled={sceneReserved === 0}
-            title={
-              sceneReserved === 0
-                ? '씬에 예약(+)을 걸어야 생성할 수 있습니다'
-                : `예약된 ${sceneReserved}장 생성`
-            }
-            onClick={() => void generateReserved()}
-          >
-            씬 생성
-            {sceneReserved > 0 && (
-              // 한글 '장'이 mono 폴백(Windows Consolas)에서 깨져 보여 기본 폰트(Pretendard) 사용
-              <span className="text-[12px] opacity-75">{sceneReserved}장</span>
-            )}
-          </Button>
+          <>
+            <Button
+              variant="default"
+              size="lg"
+              className="shrink-0 gap-1.5 px-3 text-[12px]"
+              disabled={sceneCount === 0}
+              title={`현재 모듈의 모든 씬에 ${batchCount}장씩 예약 추가 (총 ${sceneCount * batchCount}장)`}
+              onClick={() => void adjustReserveAll(1)}
+            >
+              <CalendarPlus size={14} /> 전체 예약
+            </Button>
+            <Button
+              variant="accent"
+              size="lg"
+              className="flex-1 gap-2"
+              disabled={sceneReserved === 0}
+              title={
+                sceneReserved === 0
+                  ? '씬에 예약(+)을 걸어야 생성할 수 있습니다'
+                  : sceneAnlas
+                    ? `총 ${sceneAnlas.images}장${sceneAnlas.rounds > 1 ? ` (큐 반복 ${sceneAnlas.rounds}회차)` : ''} · 예상 ${sceneAnlas.total > 0 ? `${sceneAnlas.total} Anlas` : '무료'}`
+                    : `예약된 ${sceneReserved}장 생성`
+              }
+              onClick={() => void generateReserved()}
+            >
+              씬 생성
+              {sceneReserved > 0 && (
+                // 한글 '장'이 mono 폴백(Windows Consolas)에서 깨져 보여 기본 폰트(Pretendard) 사용
+                // 총 장수(큐 반복 회차 반영) + 예상 Anlas — "다 뽑으면 얼마" 미리보기 (커스텀)
+                <span className="text-[12px] opacity-75">
+                  {sceneAnlas?.images ?? sceneReserved}장
+                  {sceneAnlas ? ` · ${sceneAnlas.total > 0 ? `${sceneAnlas.total}A` : '무료'}` : ''}
+                </span>
+              )}
+            </Button>
+          </>
         ) : (
           <Button
             variant="accent"

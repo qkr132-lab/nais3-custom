@@ -8,14 +8,15 @@ import {
   Keyboard,
   KeyRound,
   Image as ImageIcon,
+  Loader2,
   Palette,
+  RefreshCw,
   RotateCcw,
   Save,
   Trash2,
   Upload
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import discordSvg from '../assets/discord.svg'
 import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { THEME_PRESETS } from '../lib/theme-presets'
@@ -140,6 +141,7 @@ function AppearanceSection(): React.JSX.Element {
 function GenerationSection(): React.JSX.Element {
   const [streaming, setStreaming] = useState(true)
   const [delay, setDelay] = useState(600)
+  const [notify, setNotify] = useState(true) // 생성 완료 알림 (커스텀, 기본 켜짐)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const setPromptSplitEnabled = useGenerationStore((s) => s.setPromptSplitEnabled)
   // 확인 창 전역 끄기 (커스텀)
@@ -156,6 +158,9 @@ function GenerationSection(): React.JSX.Element {
     })
     void window.nais.invoke('settings:get', { key: 'gen_delay_ms' }).then(({ value }) => {
       if (value != null && value !== '') setDelay(Number(value))
+    })
+    void window.nais.invoke('settings:get', { key: 'notify_on_complete' }).then(({ value }) => {
+      setNotify(value !== '0')
     })
   }, [])
 
@@ -186,6 +191,18 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row label="확인 창 끄기" hint="삭제 등 '정말 하시겠어요?' 확인을 건너뜀 (주의)">
         <Switch checked={confirmsOff} onCheckedChange={setConfirmsOff} />
+      </Row>
+      <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">
+        <Switch
+          checked={notify}
+          onCheckedChange={(v) => {
+            setNotify(v)
+            void window.nais.invoke('settings:set', {
+              key: 'notify_on_complete',
+              value: v ? '1' : '0'
+            })
+          }}
+        />
       </Row>
     </div>
   )
@@ -254,7 +271,7 @@ function StorageSection(): React.JSX.Element {
   const [autoSave, setAutoSave] = useState(true)
   const [format, setFormat] = useState('png')
   const [dateFolders, setDateFolders] = useState(true)
-  const [exportPerScene, setExportPerScene] = useState(false)
+  const [imgTrash, setImgTrash] = useState('60') // 이미지 삭제 유예 분 (커스텀, 기본 60)
 
   useEffect(() => {
     void window.nais
@@ -267,8 +284,8 @@ function StorageSection(): React.JSX.Element {
       .invoke('settings:get', { key: 'date_folders' })
       .then(({ value }) => setDateFolders(value !== '0'))
     void window.nais
-      .invoke('settings:get', { key: 'export_per_scene_folder' })
-      .then(({ value }) => setExportPerScene(value === '1'))
+      .invoke('settings:get', { key: 'image_trash_minutes' })
+      .then(({ value }) => setImgTrash(value || '60'))
   }, [])
 
   return (
@@ -292,18 +309,6 @@ function StorageSection(): React.JSX.Element {
             }}
           />
         </Row>
-        <Row label="폴더로 내보낼 때 씬별 폴더" hint="켜면 씬 이름 폴더로 나눔, 끄면 이미지만 한곳에">
-          <Switch
-            checked={exportPerScene}
-            onCheckedChange={(v) => {
-              setExportPerScene(v)
-              void window.nais.invoke('settings:set', {
-                key: 'export_per_scene_folder',
-                value: v ? '1' : '0'
-              })
-            }}
-          />
-        </Row>
         <Row label="이미지 포맷" hint="WEBP는 용량이 더 작음">
           <Select
             value={format}
@@ -318,6 +323,25 @@ function StorageSection(): React.JSX.Element {
             <SelectContent>
               <SelectItem value="png">PNG</SelectItem>
               <SelectItem value="webp">WEBP</SelectItem>
+            </SelectContent>
+          </Select>
+        </Row>
+        <Row label="이미지 삭제 유예" hint="이 시간 안엔 Ctrl+Z로 복원 가능, 지나면 휴지통으로">
+          <Select
+            value={imgTrash}
+            onValueChange={(v) => {
+              setImgTrash(v)
+              void window.nais.invoke('settings:set', { key: 'image_trash_minutes', value: v })
+            }}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10분</SelectItem>
+              <SelectItem value="60">1시간</SelectItem>
+              <SelectItem value="360">6시간</SelectItem>
+              <SelectItem value="1440">24시간</SelectItem>
             </SelectContent>
           </Select>
         </Row>
@@ -371,13 +395,16 @@ function AutoBackupSection(): React.JSX.Element {
     <div className="mt-1 border-t border-line pt-3">
       <p className="text-[13px] text-ink">자동 백업</p>
       <p className="mt-0.5 text-[11.5px] text-faint">
-        앱을 켤 때마다 하루 1회 전체 DB를 자동 백업합니다. 아래 용량 상한을 넘으면 오래된
-        백업부터 자동 삭제돼요 (최신 3개는 항상 보존). 복원은 백업 폴더의 .db를 nais3.db 위치에
-        덮어쓰면 됩니다.
+        앱을 켤 때마다 하루 1회 전체 DB를 자동 백업합니다. 아래 용량 상한을 넘으면 오래된 백업부터
+        자동 삭제돼요 (최신 3개는 항상 보존). 복원은 백업 폴더의 .db를 nais3.db 위치에 덮어쓰면
+        됩니다.
       </p>
       <div className="mt-2 flex items-center gap-2">
         <span className="text-[12px] text-muted">
-          현재 <span className="font-medium text-ink">{info.count}개 · {usedLabel}</span>
+          현재{' '}
+          <span className="font-medium text-ink">
+            {info.count}개 · {usedLabel}
+          </span>
         </span>
         <div className="flex-1" />
         <span className="text-[12px] text-muted">최대 용량</span>
@@ -431,8 +458,22 @@ function BackupButtons(): React.JSX.Element {
         variant="default"
         className="gap-1.5"
         onClick={async () => {
-          const r = await window.nais.invoke('backup:export', undefined)
-          if (r.saved) toast('내보내기 완료', 'success')
+          // 계정 정보 포함 여부 — 중대 결정이라 "확인 창 끄기"여도 반드시 묻는다 (커스텀)
+          const includeSecrets = await askConfirm('계정 정보도 포함할까요?', {
+            message:
+              'NAI 토큰과 클라우드플레어 인증을 백업 파일에 평문으로 넣습니다.\n' +
+              '다른 PC로 옮길 때만 "포함"을 누르고, 파일은 절대 남과 공유하지 마세요.\n' +
+              '"아니요"를 누르면 씬·라이브러리·설정만 내보냅니다.',
+            confirmLabel: '포함해서 내보내기',
+            danger: true,
+            important: true
+          })
+          const r = await window.nais.invoke('backup:export', { includeSecrets })
+          if (r.saved)
+            toast(
+              includeSecrets ? '내보내기 완료 (계정 정보 포함 — 파일 주의!)' : '내보내기 완료',
+              'success'
+            )
         }}
       >
         <Upload size={14} /> 내보내기
@@ -676,11 +717,17 @@ function AboutSection(): React.JSX.Element {
   const [version, setVersion] = useState('')
   const updateStatus = useUpdateStore((s) => s.status)
   const updateVersion = useUpdateStore((s) => s.version)
+  const updateMessage = useUpdateStore((s) => s.message)
   const updatePercent = useUpdateStore((s) => s.percent)
   const startUpdate = useUpdateStore((s) => s.start)
 
   useEffect(() => {
     void window.nais.invoke('app:version', undefined).then((r) => setVersion(r.version))
+    // 정보 화면을 열 때마다 실시간 재확인 (커스텀) — 다운로드/설치 중엔 방해하지 않음
+    const s = useUpdateStore.getState().status
+    if (s !== 'downloading' && s !== 'downloaded') {
+      void window.nais.invoke('update:check', undefined)
+    }
   }, [])
 
   return (
@@ -690,8 +737,8 @@ function AboutSection(): React.JSX.Element {
       <p className="mt-1">NovelAI Image Studio 3</p>
       <p className="font-mono text-[11.5px] text-faint">버전 {version || '…'}</p>
 
-      {/* 업데이트 상태 */}
-      <div className="mt-1">
+      {/* 업데이트 상태 — 열 때마다 새로 확인 */}
+      <div className="mt-1 flex items-center gap-2">
         {updateStatus === 'available' ? (
           <Button variant="accent" className="gap-1.5" onClick={startUpdate}>
             <Download size={14} /> 새 버전 {updateVersion} 업데이트
@@ -700,35 +747,31 @@ function AboutSection(): React.JSX.Element {
           <span className="text-[12px] text-accent">업데이트 다운로드 중 {updatePercent}%…</span>
         ) : updateStatus === 'downloaded' ? (
           <span className="text-[12px] text-accent">업데이트 설치 — 곧 재시작됩니다</span>
+        ) : updateStatus === 'checking' ? (
+          <span className="flex items-center gap-1.5 text-[12px] text-muted">
+            <Loader2 size={12} className="animate-spin" /> 업데이트 확인 중…
+          </span>
+        ) : updateStatus === 'error' ? (
+          <span className="max-w-[420px] break-words text-[12px] text-danger" title={updateMessage}>
+            업데이트 확인 실패{updateMessage ? `: ${updateMessage}` : ''}
+          </span>
         ) : (
           <span className="text-[12px] text-faint">최신 버전입니다</span>
         )}
-      </div>
-
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() => window.open('https://discord.gg/bFxP5Qvaz', '_blank')}
-          className="inline-flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
-        >
-          <img src={discordSvg} className="size-4" alt="" /> Discord
-        </button>
-        <button
-          onClick={() => window.open('https://www.patreon.com/c/sunakgo', '_blank')}
-          className="inline-flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
-        >
-          <PatreonIcon /> Patreon
-        </button>
+        {/* 수동 재확인 */}
+        {updateStatus !== 'checking' &&
+          updateStatus !== 'downloading' &&
+          updateStatus !== 'downloaded' && (
+            <button
+              className="grid size-6 place-items-center rounded-md text-faint transition-colors hover:bg-surface-2 hover:text-ink"
+              title="업데이트 다시 확인"
+              onClick={() => void window.nais.invoke('update:check', undefined)}
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
       </div>
     </div>
-  )
-}
-
-/** Patreon 로고 (currentColor) */
-function PatreonIcon(): React.JSX.Element {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21M2 21.6h3.5V2.41H2V21.6z" />
-    </svg>
   )
 }
 

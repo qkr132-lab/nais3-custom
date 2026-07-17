@@ -24,6 +24,7 @@ import type { GenerationRequest } from '../../shared/types'
 export {
   QUALITY_TAGS_SUFFIX,
   UC_PRESETS_V45_FULL,
+  UC_PRESETS_V45_WEB_FULL,
   mergeQualityTags,
   mergeUcPreset,
   removeComments

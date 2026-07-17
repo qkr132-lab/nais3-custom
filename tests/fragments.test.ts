@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   processWildcards,
   resetSequentialCounters,
-  type FragmentSource
+  type FragmentSource,
+  type FragmentTrace
 } from '../src/main/fragments/processor'
 
 const source: FragmentSource = {
@@ -48,6 +49,27 @@ describe('조각/와일드카드 치환 (NAIS2 이식)', () => {
 
   it('선택된 줄 안의 조각도 재귀 치환', () => {
     expect(processWildcards('<nested>', source, first)).toBe('long hair, smile')
+  })
+
+  it('메타데이터용 조각 스냅샷에 토큰·선택값·전체 후보를 기록한다', () => {
+    const trace: FragmentTrace[] = []
+    expect(processWildcards('1girl, <nested>', source, first, { trace })).toBe(
+      '1girl, long hair, smile'
+    )
+    expect(trace).toEqual([
+      {
+        token: '<nested>',
+        path: 'nested',
+        selected: 'long hair, smile',
+        content: '<hair>, smile'
+      },
+      {
+        token: '<hair>',
+        path: 'hair',
+        selected: 'long hair',
+        content: 'long hair\nshort hair\ntwin tails'
+      }
+    ])
   })
 
   it('자기 참조 조각은 깊이 가드로 정지 (NAIS2엔 없던 안전장치)', () => {

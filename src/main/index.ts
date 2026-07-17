@@ -8,26 +8,30 @@ import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
+import type { FragmentTrace } from './fragments/processor'
 import { removeComments } from '../shared/nai-presets'
+import { refreshScenePrompts } from '../shared/scene-request'
+import type { FragmentPromptMetadata } from '../shared/types'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
+import { migrateFromSharedFolder, needsMigration } from './migrate-data'
 import { setupUpdater } from './updater'
 import { logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance, generateImageStream, generateImageZip } from './nai/client'
 import { prepareCharRefs, prepareVibes } from './refs/prepare'
 import { GenerationQueue } from './queue/generation-queue'
-import { getPresetName, getScene, purgeOldTrash } from './scenes/repo'
+import { getPresetName, getScene, purgeOldTrash, purgeOldDeletedImages } from './scenes/repo'
 
 // 앱 이름 (dev 메뉴바·dock에서 'Electron' 대신 표시). 패키징 앱은 productName 사용
 app.setName('NAIS3 Custom')
 
-// 데이터 폴더는 기존 NAIS3(%APPDATA%\NAIS3)를 "그대로" 공유한다 (커스텀).
-// 예전 커스텀 빌드가 이 폴더에 데이터를 쌓았고, 사용자가 폴더·토큰·설정을 끊김 없이
-// 이어 쓰길 원하므로 별도 폴더로 분리하지 않는다. 설치 프로그램만 별도(appId 분리)이고
-// 데이터는 한 곳을 본다 → 업데이트해도 토큰/설정이 초기화되지 않는다.
-// userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
-app.setPath('userData', join(app.getPath('appData'), 'NAIS3'))
+// 데이터 폴더: 자체 폴더(%APPDATA%\NAIS3 Custom) — v1.5.0부터 공식 NAIS3와 완전 분리.
+// (v1.1.6~1.4.3의 공유 방식은 커스텀 DB 마이그레이션이 공식 NAIS3를 못 켜게 만드는
+//  사고를 일으켜 폐기.) userData 접근(initDb 등) 전에 호출해야 경로가 확정된다.
+// ⚠️ 이관(migrateFromSharedFolder)은 whenReady에서 스플래시 창을 띄운 뒤 실행 —
+//    창 없이 여기서 동기로 돌리면 큰 폴더에서 "반응 없음"으로 보여 강제 종료 사고가 난다 (v1.5.7 수정)
+app.setPath('userData', join(app.getPath('appData'), 'NAIS3 Custom'))
 
 // 중복 실행 방지 (특히 Windows) — 두 번째 실행은 기존 창을 앞으로
 if (!app.requestSingleInstanceLock()) {
@@ -51,8 +55,9 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1600,
     height: 900,
-    minWidth: 1080,
-    minHeight: 640,
+    // 작은 노트북/분할 화면에서도 사용 가능. 렌더러가 폭에 따라 패널을 세로 배치한다.
+    minWidth: 760,
+    minHeight: 520,
     show: false,
     autoHideMenuBar: true,
     frame: false,
@@ -86,8 +91,37 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.nais3.custom')
+
+  // 첫 실행 이관 — 스플래시를 먼저 띄워 "반응 없음"으로 보이지 않게 (v1.5.7 수정).
+  // 복사는 비동기 + 웹 캐시 제외라 보통 수 초 안에 끝난다
+  if (needsMigration()) {
+    const splash = new BrowserWindow({
+      width: 380,
+      height: 130,
+      frame: false,
+      resizable: false,
+      alwaysOnTop: true,
+      backgroundColor: '#0f0f10'
+    })
+    void splash.loadURL(
+      'data:text/html;charset=utf-8,' +
+        encodeURIComponent(
+          `<body style="margin:0;display:grid;place-items:center;height:100vh;background:#0f0f10;color:#e8eaf0;font-family:'Malgun Gothic',sans-serif">
+             <div style="text-align:center">
+               <div style="font-size:15px;font-weight:700">데이터 폴더 이관 중…</div>
+               <div style="margin-top:6px;font-size:12px;color:#9aa1b2">첫 실행 한 번만 — 기존 데이터를 복사하고 있어요</div>
+             </div>
+           </body>`
+        )
+    )
+    try {
+      await migrateFromSharedFolder()
+    } finally {
+      splash.destroy()
+    }
+  }
 
   protocol.handle('nais-image', (request) => {
     const url = new URL(request.url)
@@ -111,6 +145,9 @@ app.whenReady().then(() => {
   // 시작 시 자동 백업(하루 1회) + 보관 기간 지난 휴지통 씬 자동 영구삭제 (커스텀 — 실수 대비)
   autoBackupIfDue()
   void purgeOldTrash()
+  // 유예시간 지난 소프트삭제 이미지 정리 (앱 시작 + 5분마다 — 켜둔 채로도 시각 계산). 커스텀
+  void purgeOldDeletedImages()
+  setInterval(() => void purgeOldDeletedImages(), 5 * 60 * 1000)
 
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
   const queue = new GenerationQueue(async (rawRequest, id, signal) => {
@@ -120,24 +157,32 @@ app.whenReady().then(() => {
     // 배치 항목마다 여기서 치환 — 매 장 다른 와일드카드 결과가 나온다.
     // 주석 제거가 반드시 먼저 — 주석 줄이 조각을 소모하거나(순차 카운터),
     // 와일드카드 처리의 재조립이 개행을 지워 주석 범위가 전체로 번지는 것 방지 (NAIS2와 동일 순서)
+    const latestScene = rawRequest.sceneId ? getScene(rawRequest.sceneId) : null
+    const queuedRequest = latestScene ? refreshScenePrompts(rawRequest, latestScene) : rawRequest
     const fragSource = fragmentSource()
-    const sub = (text: string): string => processWildcards(removeComments(text), fragSource)
+    const fragmentPrompts: FragmentPromptMetadata[] = []
+    const sub = (text: string, location: string): string => {
+      const trace: FragmentTrace[] = []
+      const value = processWildcards(removeComments(text), fragSource, Math.random, { trace })
+      fragmentPrompts.push(...trace.map((item) => ({ ...item, location })))
+      return value
+    }
     let request = {
-      ...rawRequest,
-      prompt: sub(rawRequest.prompt),
-      negativePrompt: sub(rawRequest.negativePrompt),
-      characterPrompts: rawRequest.characterPrompts.map((c) => ({
+      ...queuedRequest,
+      prompt: sub(queuedRequest.prompt, '프롬프트'),
+      negativePrompt: sub(queuedRequest.negativePrompt, '네거티브'),
+      characterPrompts: queuedRequest.characterPrompts.map((c, index) => ({
         ...c,
-        prompt: sub(c.prompt),
-        negativePrompt: sub(c.negativePrompt)
+        prompt: sub(c.prompt, `캐릭터 ${index + 1} 프롬프트`),
+        negativePrompt: sub(c.negativePrompt, `캐릭터 ${index + 1} 네거티브`)
       }))
     }
 
     // 바이브/캐릭레퍼는 DB의 enabled 항목에서 준비 (바이브는 필요 시 인코딩 — 2 Anlas, 캐시됨).
     // 요청에 vibeIds/charRefIds가 있으면 enabled 대신 그 id들만 (씬 큐 반복/씬별 추가)
-    const { vibes, newlyEncoded } = await prepareVibes(token, rawRequest.vibeIds)
+    const { vibes, newlyEncoded } = await prepareVibes(token, queuedRequest.vibeIds)
     if (newlyEncoded.length) broadcast('vibes:encoded', {}) // 카드 인코딩 표시 갱신
-    const characterReferences = await prepareCharRefs(rawRequest.charRefIds)
+    const characterReferences = await prepareCharRefs(queuedRequest.charRefIds)
 
     let source = request.source
     // i2i/인페인트: 소스 해상도를 유효 NAI 해상도(64 배수·픽셀 상한)로 스냅하고 이미지를 맞춰 리사이즈.
@@ -213,14 +258,21 @@ app.whenReady().then(() => {
       format: imageFormat,
       sceneName: scene?.name,
       scenePresetName: scene ? (getPresetName(scene.presetId) ?? undefined) : undefined,
-      localMetadata: request.promptParts
-        ? {
-            promptParts: {
-              ...request.promptParts,
-              negative: request.negativePrompt
+      // 큐 반복으로 만든 이미지는 항목 이름(1명씩 분리 시 = 캐릭터 이름)을 기록 —
+      // 내보내기에서 캐릭터별 폴더로 나누는 기준 (커스텀)
+      queueLabel: request.sceneSequenceEntry?.name?.trim() || undefined,
+      localMetadata:
+        request.promptParts || fragmentPrompts.length > 0
+          ? {
+              promptParts: request.promptParts
+                ? {
+                    ...request.promptParts,
+                    negative: request.negativePrompt
+                  }
+                : undefined,
+              fragmentPrompts: fragmentPrompts.length > 0 ? fragmentPrompts : undefined
             }
-          }
-        : undefined
+          : undefined
     })
 
     // 씬 생성이면 해당 씬 갱신 알림 (목록 썸네일/개수, 상세 이미지 갱신용)

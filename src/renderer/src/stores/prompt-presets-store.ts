@@ -15,8 +15,19 @@ export function pickPresetParams(req: GenerationRequest): PresetParams {
     noiseSchedule: req.noiseSchedule,
     variety: req.variety,
     qualityToggle: req.qualityToggle,
-    ucPreset: req.ucPreset
+    ucPreset: req.ucPreset,
+    // 3분할(고정/가변/디테일)도 프리셋마다 저장 — 전환 시 함께 복원 (커스텀)
+    promptParts: req.promptParts ? { ...req.promptParts } : undefined
   }
+}
+
+/** 프리셋의 3분할 복원값 — 구버전(분할 미저장) 프리셋은 프롬프트 전체를 고정 칸으로 */
+export function presetPromptParts(p: Pick<PromptPreset, 'prompt' | 'params'>): {
+  base: string
+  additional: string
+  detail: string
+} {
+  return p.params?.promptParts ?? { base: p.prompt, additional: '', detail: '' }
 }
 
 interface PromptPresetsState {
@@ -85,17 +96,23 @@ export const usePromptPresetsStore = create<PromptPresetsState>((set, get) => ({
     if (activeId !== id) return
     // 활성 프리셋을 삭제한 경우 — 편집 내용이 어디에도 저장 안 되는 상태를 만들지 않는다:
     if (rest.length > 0) {
-      // 1) 이전 프리셋(없으면 첫 번째)으로 자동 전환 + 적용
+      // 1) 이전 프리셋(없으면 첫 번째)으로 자동 전환 + 적용 (3분할 포함)
       const next = rest[Math.max(0, idx - 1)]
       get().setActive(next.id)
-      useGenerationStore
-        .getState()
-        .patchRequest({ prompt: next.prompt, negativePrompt: next.negativePrompt })
+      useGenerationStore.getState().patchRequest({
+        prompt: next.prompt,
+        negativePrompt: next.negativePrompt,
+        promptParts: presetPromptParts(next)
+      })
     } else {
       // 2) 전부 삭제됐으면 기본 프리셋을 새로 만들어 활성화 (빈 프롬프트)
       const newId = await get().create('기본', '', '')
       get().setActive(newId)
-      useGenerationStore.getState().patchRequest({ prompt: '', negativePrompt: '' })
+      useGenerationStore.getState().patchRequest({
+        prompt: '',
+        negativePrompt: '',
+        promptParts: { base: '', additional: '', detail: '' }
+      })
     }
   }
 }))

@@ -6,6 +6,7 @@ type UpdateStatus = IpcEventMap['update:status']
 interface UpdateState {
   status: UpdateStatus['state'] | 'idle'
   version?: string
+  message?: string
   percent: number
   start: () => void
 }
@@ -25,6 +26,7 @@ export function bindUpdateEvents(): () => void {
     useUpdateStore.setState({
       status: s.state,
       version: s.version ?? useUpdateStore.getState().version,
+      message: s.message,
       percent: s.percent ?? useUpdateStore.getState().percent
     })
   })

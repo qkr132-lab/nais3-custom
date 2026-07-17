@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import type { ImageMetadata, UcPresetIndex } from '@shared/types'
-import { QUALITY_TAGS_SUFFIX, UC_PRESETS_V45_FULL } from '@shared/nai-presets'
+import {
+  QUALITY_TAGS_SUFFIX,
+  UC_PRESETS_V45_FULL,
+  UC_PRESETS_V45_WEB_FULL
+} from '@shared/nai-presets'
 import { imageUrl } from '../lib/constants'
 import { useCharactersStore } from './characters-store'
 import { mergePromptParts, useGenerationStore } from './generation-store'
@@ -15,10 +19,16 @@ function stripQuality(prompt: string): string {
     : prompt
 }
 function stripUcPreset(uc: string, idx: number): string {
-  const preset = UC_PRESETS_V45_FULL[idx as keyof typeof UC_PRESETS_V45_FULL]
-  if (!preset) return uc
-  if (uc === preset) return ''
-  return uc.startsWith(preset + ', ') ? uc.slice(preset.length + 2) : uc
+  const presets = [
+    UC_PRESETS_V45_FULL[idx as keyof typeof UC_PRESETS_V45_FULL],
+    UC_PRESETS_V45_WEB_FULL[idx as keyof typeof UC_PRESETS_V45_WEB_FULL]
+  ]
+  for (const preset of new Set(presets)) {
+    if (!preset) continue
+    if (uc === preset) return ''
+    if (uc.startsWith(preset + ', ')) return uc.slice(preset.length + 2)
+  }
+  return uc
 }
 
 interface MetadataState {

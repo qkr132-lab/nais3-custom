@@ -1,4 +1,4 @@
-import { Check, Copy, ImageOff, Loader2 } from 'lucide-react'
+import { Check, Copy, ImageOff, Loader2, Puzzle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ImageMetadata } from '@shared/types'
 import { useMetadataStore } from '../stores/metadata-store'
@@ -6,6 +6,7 @@ import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 const UC_LABELS: Record<number, string> = { 0: 'Heavy', 1: 'Light', 3: 'Human Focus', 4: 'None' }
 
@@ -53,9 +54,21 @@ export function MetadataDialog(): React.JSX.Element {
     if (!meta) return
     const lines: string[] = []
     lines.push(`[프롬프트]\n${meta.prompt}`)
+    if (meta.fragmentPrompts?.length) {
+      lines.push(
+        `[조각 프롬프트]\n${meta.fragmentPrompts
+          .map(
+            (fragment) =>
+              `${fragment.token} (${fragment.location})\n선택: ${fragment.selected}\n전체 후보:\n${fragment.content}`
+          )
+          .join('\n\n')}`
+      )
+    }
     if (meta.negativePrompt) lines.push(`[네거티브]\n${meta.negativePrompt}`)
     meta.characterPrompts?.forEach((c, i) => {
-      lines.push(`[캐릭터 ${i + 1}]\n${c.prompt}${c.negativePrompt ? `\nuc: ${c.negativePrompt}` : ''}`)
+      lines.push(
+        `[캐릭터 ${i + 1}]\n${c.prompt}${c.negativePrompt ? `\nuc: ${c.negativePrompt}` : ''}`
+      )
     })
     const params: string[] = []
     if (meta.seed != null) params.push(`시드 ${meta.seed}`)
@@ -78,7 +91,13 @@ export function MetadataDialog(): React.JSX.Element {
             <span className="text-[12px] font-normal text-faint">— 체크한 항목만 적용</span>
           </DialogTitle>
           <div className="flex-1" />
-          <Button size="sm" variant="ghost" className="mr-6 gap-1.5" disabled={!meta} onClick={copyAll}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mr-6 gap-1.5"
+            disabled={!meta}
+            onClick={copyAll}
+          >
             <Copy size={13} /> 전체 복사
           </Button>
         </div>
@@ -175,13 +194,10 @@ export function MetadataDialog(): React.JSX.Element {
               {meta.promptParts ? (
                 <SplitPreview meta={meta} sel={sel} toggle={toggle} />
               ) : (
-                <Field
-                  k="prompt"
-                  label="프롬프트"
-                  value={meta.prompt}
-                  sel={sel}
-                  toggle={toggle}
-                />
+                <Field k="prompt" label="프롬프트" value={meta.prompt} sel={sel} toggle={toggle} />
+              )}
+              {meta.fragmentPrompts && meta.fragmentPrompts.length > 0 && (
+                <FragmentPromptPreview items={meta.fragmentPrompts} />
               )}
               <Field
                 k="negativePrompt"
@@ -211,7 +227,10 @@ export function MetadataDialog(): React.JSX.Element {
                               <p className="text-[10.5px] text-faint">네거티브</p>
                               <CopyButton value={c.negativePrompt} label="캐릭터 네거티브 복사" />
                             </div>
-                            <PromptText value={c.negativePrompt} className="text-[11.5px] text-muted" />
+                            <PromptText
+                              value={c.negativePrompt}
+                              className="text-[11.5px] text-muted"
+                            />
                           </>
                         )}
                       </div>
@@ -233,6 +252,62 @@ export function MetadataDialog(): React.JSX.Element {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function FragmentPromptPreview({
+  items
+}: {
+  items: NonNullable<ImageMetadata['fragmentPrompts']>
+}): React.JSX.Element {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-[12px] font-medium text-muted">
+          <Puzzle size={13} className="text-accent" /> 조각 프롬프트 {items.length}
+        </p>
+        <CopyButton
+          value={items.map((item) => `${item.token}: ${item.selected}`).join('\n')}
+          label="조각 프롬프트 복사"
+        />
+      </div>
+      <div className="flex flex-wrap gap-1.5 rounded-md border border-line bg-surface-2/40 p-2.5">
+        {items.map((item, index) => (
+          <Tooltip key={`${item.location}-${item.path}-${index}`}>
+            <TooltipTrigger asChild>
+              <button className="flex max-w-full items-center gap-1 rounded-full border border-accent/25 bg-accent/8 px-2 py-1 font-mono text-[11.5px] text-accent transition-colors hover:border-accent/60 hover:bg-accent/15">
+                <Puzzle size={10} className="shrink-0" />
+                <span className="truncate">{item.token}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-h-72 w-[min(440px,calc(100vw-32px))] overflow-y-auto p-3">
+              <div className="space-y-2 text-left">
+                <div>
+                  <p className="text-[10.5px] text-faint">사용 위치 · 조각 경로</p>
+                  <p className="font-mono text-[11.5px] text-muted">
+                    {item.location} · {item.path}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10.5px] font-medium text-accent">
+                    이번 생성에서 선택된 조각 줄
+                  </p>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-relaxed">
+                    {item.selected || '(빈 값)'}
+                  </p>
+                </div>
+                <div className="border-t border-line pt-2">
+                  <p className="text-[10.5px] text-faint">생성 당시 전체 후보</p>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted">
+                    {item.content || '(내용 없음)'}
+                  </p>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -331,15 +406,31 @@ function Field({
   )
 }
 
-/** 프롬프트 표시 — 내용만큼 늘어나고(겹침 없음), 드래그 선택 가능. 아주 길면 자체 스크롤 */
-function PromptText({ value, className }: { value: string; className?: string }): React.JSX.Element {
+/** 프롬프트 표시 — 내용만큼 늘어나고(겹침 없음), 드래그 선택 가능. 아주 길면 자체 스크롤.
+ *  클릭하면 통째로 클립보드 복사 (드래그로 일부 선택 중이면 복사 안 함 — 선택 우선). 커스텀 */
+function PromptText({
+  value,
+  className
+}: {
+  value: string
+  className?: string
+}): React.JSX.Element {
   return (
     <div
       className={cn(
-        'max-h-[45vh] select-text overflow-y-auto whitespace-pre-wrap break-words font-mono leading-relaxed text-ink',
+        'max-h-[45vh] select-text overflow-y-auto whitespace-pre-wrap break-all font-mono leading-relaxed text-ink',
+        value && 'cursor-pointer rounded-sm transition-colors hover:bg-accent/5',
         !value && 'font-sans text-faint',
         className
       )}
+      title={value ? '클릭하면 전체 복사' : undefined}
+      onClick={() => {
+        if (!value) return
+        // 드래그로 일부만 선택한 경우엔 그 선택을 존중 (통째 복사로 덮지 않음)
+        if ((window.getSelection()?.toString().length ?? 0) > 0) return
+        void navigator.clipboard.writeText(value)
+        toast('복사됨', 'success')
+      }}
     >
       {value || '(없음)'}
     </div>
@@ -392,7 +483,10 @@ function Stat({
         checked ? 'border-accent/50' : 'border-line opacity-50'
       )}
     >
-      <button onClick={() => toggle(k)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <button
+        onClick={() => toggle(k)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
         <span
           className={cn(
             'grid size-4 shrink-0 place-items-center rounded border transition-colors',
@@ -403,7 +497,10 @@ function Stat({
         </span>
         <span className="min-w-0">
           <span className="block text-[10.5px] text-faint">{label}</span>
-          <span className="block truncate font-mono text-[12.5px] text-ink">{value}</span>
+          {/* 긴 값은 잘리되(레이아웃 안 깨짐) 호버 툴팁으로 전체 확인 */}
+          <span className="block truncate font-mono text-[12.5px] text-ink" title={String(value)}>
+            {value}
+          </span>
         </span>
       </button>
       {/* 값 복사 — 호버 시 표시 (시드 등 개별 복사) */}

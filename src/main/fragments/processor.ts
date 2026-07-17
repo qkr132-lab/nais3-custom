@@ -16,6 +16,13 @@ export interface FragmentSource {
   getLines: (path: string) => string[] | null
 }
 
+export interface FragmentTrace {
+  token: string
+  path: string
+  selected: string
+  content: string
+}
+
 const MAX_DEPTH = 10
 const sequentialCounters = new Map<string, number>()
 
@@ -31,7 +38,9 @@ function processFileWildcards(
   prompt: string,
   source: FragmentSource,
   rng: () => number,
-  depth: number
+  depth: number,
+  peek: boolean,
+  trace?: FragmentTrace[]
 ): string {
   if (depth > MAX_DEPTH) return prompt
   const filePattern = /<([^<>]+)>/g
@@ -61,13 +70,20 @@ function processFileWildcards(
     if (isSequential) {
       const index = sequentialCounters.get(path) ?? 0
       line = lines[index % lines.length]
-      sequentialCounters.set(path, index + 1)
+      // peek(토큰 세기 등 미리보기)면 순차 카운터를 진행시키지 않는다 — 실제 생성 순서 보존
+      if (!peek) sequentialCounters.set(path, index + 1)
     } else {
       line = lines[Math.floor(rng() * lines.length)]
     }
 
+    // 바깥 조각을 먼저 기록해 표시 순서를 입력 순서와 맞춘다. 선택값은 재귀 치환 후 채운다.
+    const traceIndex = trace?.length
+    if (trace) trace.push({ token: match, path, selected: '', content: lines.join('\n') })
+
     // 선택된 줄 안의 중첩 조각 재귀 치환
-    return processFileWildcards(line, source, rng, depth + 1)
+    const selected = processFileWildcards(line, source, rng, depth + 1, peek, trace)
+    if (traceIndex != null && trace) trace[traceIndex].selected = selected
+    return selected
   })
 }
 
@@ -117,10 +133,11 @@ function processSimpleWildcards(prompt: string, rng: () => number): string {
 export function processWildcards(
   prompt: string,
   source: FragmentSource,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  opts: { peek?: boolean; trace?: FragmentTrace[] } = {}
 ): string {
   if (!prompt) return prompt
-  let result = processFileWildcards(prompt, source, rng, 0)
+  let result = processFileWildcards(prompt, source, rng, 0, opts.peek ?? false, opts.trace)
   result = processParenthesisWildcards(result, rng)
   result = processSimpleWildcards(result, rng)
   return result

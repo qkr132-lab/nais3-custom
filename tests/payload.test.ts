@@ -8,6 +8,7 @@ import {
   removeComments,
   varietySigma,
   UC_PRESETS_V45_FULL,
+  UC_PRESETS_V45_WEB_FULL,
   QUALITY_TAGS_SUFFIX,
   type NaiImagePayload
 } from '../src/main/nai/payload'
@@ -48,6 +49,9 @@ describe('payload builder', () => {
   it('UC 프리셋은 유저 네거티브 앞에 ", "로 병합된다 (실캡처 확정 규칙)', () => {
     expect(mergeUcPreset('lowres', 0)).toBe(UC_PRESETS_V45_FULL[0] + ', lowres')
     expect(mergeUcPreset('', 0)).toBe(UC_PRESETS_V45_FULL[0])
+    expect(mergeUcPreset('lowres', 0)).not.toMatch(/^nsfw(?:,|$)/)
+    expect(mergeUcPreset('lowres', 1)).not.toMatch(/^nsfw(?:,|$)/)
+    expect(mergeUcPreset('lowres', 3)).not.toMatch(/^nsfw(?:,|$)/)
   })
 
   it('시드와 핵심 파라미터가 요청 그대로 payload에 들어간다', () => {
@@ -142,7 +146,7 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
       [k: string]: unknown
     }
     const ucPreset = p.ucPreset as UcPresetIndex
-    const presetText = UC_PRESETS_V45_FULL[ucPreset]
+    const presetText = UC_PRESETS_V45_WEB_FULL[ucPreset]
     // 캡처의 negative는 프리셋이 이미 병합된 결과 — 유저 입력분만 분리 (None이면 병합 없음)
     let userNegative = p.negative_prompt
     if (presetText) {
@@ -195,7 +199,7 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
   ])('%s — 같은 입력이면 웹과 동일한 payload를 만든다', (name) => {
     const fx = loadFixture(name)
     const built = buildGenerateImagePayload(requestFromFixture(fx), { stream: 'msgpack' })
-    expect(built).toEqual(fx)
+    expect(built).toEqual(customizeCapturedFixture(fx))
   })
 
   it('nai-web-charref.json — 캐릭터 레퍼런스: secondary = 1−fidelity, Variety+ 유지', () => {
@@ -211,7 +215,7 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
         }
       ]
     })
-    expect(built).toEqual(fx)
+    expect(built).toEqual(customizeCapturedFixture(fx))
     // 실캡처 핵심: CharRef가 있어도 skip_cfg_above_sigma는 58 그대로다
     expect(built.parameters.skip_cfg_above_sigma).toBe(58)
   })
@@ -230,7 +234,7 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
         }
       ]
     })
-    expect(built).toEqual(fx)
+    expect(built).toEqual(customizeCapturedFixture(fx))
   })
 
   it('nai-web-i2i.json — i2i도 웹과 동일한 payload를 만든다 (action, strength/noise, 캐시 키)', () => {
@@ -252,10 +256,48 @@ describe('NAI 웹 실캡처 fixture 동일성 (2026-07-05, V4.5 full)', () => {
         imageCacheSecretKey: p.image_cache_secret_key
       }
     })
-    expect(built).toEqual(fx)
+    expect(built).toEqual(customizeCapturedFixture(fx))
+  })
+
+  it('인페인트는 add_original_image=true — 꺼지면 반복 인페인트마다 마스크 밖까지 재인코딩돼 노이즈가 누적된다 (NAIS2에서 실제 발생한 회귀)', () => {
+    const p = buildGenerateImagePayload(baseRequest, {
+      i2i: {
+        strength: 0.7,
+        noise: 0,
+        extraNoiseSeed: 1,
+        colorCorrect: false,
+        imageBase64: 'aW1n',
+        maskBase64: 'bWFzaw=='
+      }
+    })
+    expect(p.action).toBe('infill')
+    const params = p.parameters as unknown as {
+      add_original_image: boolean
+      mask: string
+      request_type: string
+    }
+    expect(params.add_original_image).toBe(true)
+    expect(params.mask).toBe('bWFzaw==')
+    expect(params.request_type).toBe('NativeInfillingRequest')
   })
 })
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 실캡처와 커스텀판의 의도된 차이: 자동 UC 맨 앞의 nsfw 한 토큰만 제외한다. */
+function customizeCapturedFixture(fixture: NaiImagePayload): NaiImagePayload {
+  const copy = structuredClone(fixture)
+  const params = copy.parameters as {
+    ucPreset: UcPresetIndex
+    negative_prompt: string
+    v4_negative_prompt: { caption: { base_caption: string } }
+  }
+  if (UC_PRESETS_V45_WEB_FULL[params.ucPreset].startsWith('nsfw,')) {
+    params.negative_prompt = params.negative_prompt.replace(/^nsfw,\s*/, '')
+    params.v4_negative_prompt.caption.base_caption =
+      params.v4_negative_prompt.caption.base_caption.replace(/^nsfw,\s*/, '')
+  }
+  return copy
 }

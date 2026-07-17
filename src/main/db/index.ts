@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
-import { migrations } from './migrations'
+import { migrations, reconcileSchema } from './migrations'
 
 /** 현재 시각(ms) — 자동 백업 주기 판정용 (Date.now는 메인 프로세스에서 정상 동작) */
 function nowMs(): number {
@@ -58,6 +58,9 @@ export function initDb(): { version: number; path: string } {
         'NAIS3를 최신 버전으로 업데이트하세요.'
     )
   }
+
+  // user_version이 (공식 NAIS3와의 충돌 등으로) 실제 스키마와 어긋난 DB 자가복구 — 항상 실행, 정상 DB엔 no-op
+  reconcileSchema(db)
 
   return { version: target, path }
 }
