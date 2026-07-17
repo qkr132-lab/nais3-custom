@@ -35,16 +35,12 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const baseNegative = useGenerationStore((s) => s.request.negativePrompt)
   const charItems = useCharactersStore((s) => s.items)
   const previewPng = useGenerationStore((s) => s.previewPng)
-  const generatingSceneId = useGenerationStore(
-    (s) => s.queue?.items.find((i) => i.state === 'generating')?.request.sceneId ?? null
-  )
+  const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
   const streaming = generatingSceneId === scene.id
-  // 이 씬의 큐 잔여(대기+생성 중) — 생성 중 추가한 예약이 여기 반영돼 숫자가 실시간으로 오른다
+  // 이 씬의 큐 잔여(대기+생성 중) — 생성 중 추가한 예약이 여기 반영돼 숫자가 실시간으로 오른다.
+  // 수천 장 큐에서도 O(1) 집계 구독 (커스텀 — 성능)
   const queueRemaining = useGenerationStore(
-    (s) =>
-      (s.queue?.items ?? []).filter(
-        (i) => (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
-      ).length
+    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingSceneId === scene.id ? 1 : 0)
   )
   // 표시할 예약/잔여 수 = 아직 안 뽑은 예약 + 큐에 든 것 (둘 중 하나만 값이 있음)
   const pendingCount = scene.reserveCount + queueRemaining

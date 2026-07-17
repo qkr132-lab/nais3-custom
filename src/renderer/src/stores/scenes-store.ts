@@ -469,7 +469,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     // 취소되면 queue:changed가 와서 상세/카드 숫자가 바로 줄어든다
     if (delta < 0 && generating && scene.reserveCount === 0) {
       const pendingIds = (q?.items ?? [])
-        .filter((i) => i.state === 'pending' && i.request.sceneId === id)
+        .filter((i) => i.state === 'pending' && i.sceneId === id)
         .map((i) => i.id)
       if (pendingIds.length > 0) {
         const cancel = pendingIds.slice(-Math.min(pendingIds.length, Math.abs(step)))
@@ -782,9 +782,9 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   resyncPendingScenes: async () => {
     // 생성 중 편집 반영 — 아직 안 뽑힌(pending) 씬 항목을 현재 상태로 다시 만들어 큐에 교체.
     // 이미 서버로 넘어간 generating 항목은 건드리지 않는다. 다른 프리셋 항목도 스킵.
-    const q = useGenerationStore.getState().queue
-    if (!q) return
-    const pending = q.items.filter((i) => i.state === 'pending' && i.request.sceneId != null)
+    // 브로드캐스트는 요약본이라 전체 request는 여기서만 필요할 때 조회한다 (커스텀 — 성능)
+    const { items } = await window.nais.invoke('queue:pending', undefined)
+    const pending = items.filter((i) => i.request.sceneId != null)
     if (pending.length === 0) return
     await ensureExtrasData()
     const byId = new Map(get().scenes.map((s) => [s.id, s]))

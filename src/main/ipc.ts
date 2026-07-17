@@ -217,10 +217,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('queue:updatePending', ({ updates }) => {
     ctx.queue.updatePending(updates)
   })
+  handle('queue:pending', () => ({ items: ctx.queue.pendingItems() }))
   handle('queue:cancel', ({ ids }) => {
     ctx.queue.cancel(ids)
   })
-  handle('queue:status', () => ctx.queue.status())
+  handle('queue:status', () => ctx.queue.statusLite())
 
   handle('images:list', ({ limit, offset }) => listImages(limit, offset))
   handle('images:payload', ({ id }) => ({ payloadJson: getImagePayload(id) }))

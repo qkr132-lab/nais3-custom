@@ -137,6 +137,23 @@ export interface FragmentPromptMetadata {
 
 export type QueueItemState = 'pending' | 'generating' | 'done' | 'failed' | 'cancelled'
 
+/** 렌더러로 보내는 큐 요약 항목 (커스텀 — 성능). 수천 장 큐에서 프롬프트 등
+ *  대형 request를 매 변경마다 IPC로 직렬화하면 장마다 렉이 걸린다.
+ *  UI에 필요한 최소 필드만 보내고, 전체 request는 queue:pending으로 필요할 때만. */
+export interface QueueItemLite {
+  id: string
+  state: QueueItemState
+  sceneId?: number
+  error?: string
+  filePath?: string
+}
+
+export interface QueueStatusLite {
+  items: QueueItemLite[]
+  running: boolean
+  delayMs: number
+}
+
 export interface QueueItem {
   id: string
   state: QueueItemState
@@ -399,7 +416,9 @@ export interface IpcInvokeMap {
     req: { updates: { id: string; request: GenerationRequest }[] }
     res: void
   }
-  'queue:status': { req: void; res: QueueStatus }
+  /** 대기 항목의 전체 request (커스텀 — 재구성용). 요약 브로드캐스트엔 없는 상세를 필요할 때만 */
+  'queue:pending': { req: void; res: { items: { id: string; request: GenerationRequest }[] } }
+  'queue:status': { req: void; res: QueueStatusLite }
   'images:list': {
     req: { limit: number; offset: number }
     res: { items: HistoryItem[]; total: number }
@@ -780,7 +799,7 @@ export interface R2UploadStatus {
 
 /** 메인 → 렌더러 이벤트 채널 */
 export interface IpcEventMap {
-  'queue:changed': QueueStatus
+  'queue:changed': QueueStatusLite
   /** 생성 완료 등으로 잔액이 갱신될 때 */
   'anlas:balance': { anlas: number }
   'generation:progress': {

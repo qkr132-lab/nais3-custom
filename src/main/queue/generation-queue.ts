@@ -1,6 +1,11 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import type { GenerationRequest, QueueItem, QueueStatus } from '../../shared/types'
+import type {
+  GenerationRequest,
+  QueueItem,
+  QueueStatus,
+  QueueStatusLite
+} from '../../shared/types'
 import { RateLimitError } from '../nai/client'
 
 /** 429 재시도 상한 (커스텀) */
@@ -124,6 +129,26 @@ export class GenerationQueue extends EventEmitter {
     return { items: [...this.items.values()], running: this.running, delayMs: this.delayMs }
   }
 
+  /** 렌더러용 요약 상태 (커스텀 — 성능). 수천 장 큐에서 request(프롬프트 등)까지
+   *  매 변경마다 직렬화하면 장마다 렉 — UI에 필요한 최소 필드만 내보낸다. */
+  statusLite(): QueueStatusLite {
+    const items = [...this.items.values()].map((i) => ({
+      id: i.id,
+      state: i.state,
+      sceneId: i.request.sceneId,
+      error: i.error,
+      filePath: i.filePath
+    }))
+    return { items, running: this.running, delayMs: this.delayMs }
+  }
+
+  /** 대기 항목의 전체 request — 재구성(생성 중 편집 반영) 등 상세가 필요할 때만 조회 */
+  pendingItems(): { id: string; request: GenerationRequest }[] {
+    return [...this.items.values()]
+      .filter((i) => i.state === 'pending')
+      .map((i) => ({ id: i.id, request: i.request }))
+  }
+
   private async run(): Promise<void> {
     if (this.running) return
     this.running = true
@@ -187,10 +212,28 @@ export class GenerationQueue extends EventEmitter {
     return undefined
   }
 
+  /** 변경 알림 코얼레싱 (커스텀 — 성능): 장마다 여러 번(시작/완료/루프) 연달아 발생하는
+   *  변경을 100ms 창으로 묶는다. 마지막 상태는 트레일링 발신이 보장하므로 유실 없음. */
+  private emitTimer: NodeJS.Timeout | null = null
+  private lastEmitAt = 0
   private emitChanged(): void {
-    this.emit('changed', this.status())
+    const now = Date.now()
+    const since = now - this.lastEmitAt
+    if (since >= EMIT_COALESCE_MS) {
+      this.lastEmitAt = now
+      this.emit('changed', this.statusLite())
+      return
+    }
+    if (this.emitTimer) return // 이미 트레일링 발신 예약됨
+    this.emitTimer = setTimeout(() => {
+      this.emitTimer = null
+      this.lastEmitAt = Date.now()
+      this.emit('changed', this.statusLite())
+    }, EMIT_COALESCE_MS - since)
   }
 }
+
+const EMIT_COALESCE_MS = 100
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

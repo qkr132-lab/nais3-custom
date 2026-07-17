@@ -586,9 +586,7 @@ function SceneGrid(): React.JSX.Element {
 
   // 스트리밍: 현재 생성 중인 씬과 미리보기 프레임 (해당 씬 카드에만 전달)
   const previewPng = useGenerationStore((s) => s.previewPng)
-  const generatingSceneId = useGenerationStore(
-    (s) => s.queue?.items.find((i) => i.state === 'generating')?.request.sceneId ?? null
-  )
+  const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
 
   async function exportJson(): Promise<void> {
     await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
@@ -1520,12 +1518,9 @@ const SceneCard = memo(function SceneCard({
     : 0
 
   // 생성 중 이 씬의 남은 개수 (메인 큐 pending+generating) — NAIS2처럼 배지가 줄어들며 표시.
-  // 큐 반복 사용 시 항목×예약 전체가 반영된다.
+  // 큐 반복 사용 시 항목×예약 전체가 반영된다. 수천 장 큐에서도 카드당 O(1) (커스텀 — 성능)
   const queueRemaining = useGenerationStore(
-    (s) =>
-      s.queue?.items.filter(
-        (i) => (i.state === 'pending' || i.state === 'generating') && i.request.sceneId === scene.id
-      ).length ?? 0
+    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingSceneId === scene.id ? 1 : 0)
   )
   const badgeCount = scene.reserveCount + queueRemaining
 
