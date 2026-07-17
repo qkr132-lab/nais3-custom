@@ -22,9 +22,11 @@ import {
   hasAddition,
   useSceneExtrasStore,
   type CharPositions,
+  type CharRoles,
   type SceneAddition,
   type SequenceEntry
 } from '../stores/scene-extras-store'
+import type { CharRole } from '@shared/types'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { useScenesStore } from '../stores/scenes-store'
@@ -412,15 +414,17 @@ type SelectionPatch = {
   vibeIds?: number[]
   useCoords?: boolean
   positions?: CharPositions
+  roles?: CharRoles
 }
 
-/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 + 캐릭터 위치 지정 (두 다이얼로그 공용) */
+/** 캐릭터+캐릭레퍼+바이브 3열 선택 패널 + 캐릭터 위치/역할 지정 (두 다이얼로그 공용) */
 function SelectionPanel({
   characterIds,
   charRefIds,
   vibeIds,
   useCoords,
   positions,
+  roles,
   onPatch
 }: {
   characterIds: number[]
@@ -428,6 +432,7 @@ function SelectionPanel({
   vibeIds: number[]
   useCoords?: boolean
   positions?: CharPositions
+  roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
@@ -471,12 +476,99 @@ function SelectionPanel({
           />
         </div>
       </div>
+      <RolePanel characterIds={characterIds} roles={roles} onPatch={onPatch} />
       <PositionPanel
         characterIds={characterIds}
         useCoords={useCoords}
         positions={positions}
         onPatch={onPatch}
       />
+    </div>
+  )
+}
+
+/** 행위 역할 지정 (커스텀) — 역할을 주면 생성 시 씬의 하는쪽/당하는쪽 태그가
+ *  그 캐릭터 프롬프트 뒤에 자동으로 합쳐진다. 카드에는 외형만 있으면 됨 */
+function RolePanel({
+  characterIds,
+  roles,
+  onPatch
+}: {
+  characterIds: number[]
+  roles?: CharRoles
+  onPatch: (patch: SelectionPatch) => void
+}): React.JSX.Element | null {
+  const items = useCharactersStore((s) => s.items)
+  const chars = characterIds
+    .map((id) => items.find((c) => c.id === id))
+    .filter((c): c is CharacterCard => !!c)
+  if (chars.length === 0) return null
+
+  const setRole = (id: number, role: CharRole | null): void => {
+    const next: CharRoles = { ...(roles ?? {}) }
+    if (role) next[id] = role
+    else delete next[id]
+    onPatch({ roles: next })
+  }
+
+  const OPTIONS: { value: CharRole | null; label: string; title: string }[] = [
+    { value: null, label: '없음', title: '카드 프롬프트 그대로 사용' },
+    { value: 'source', label: '하는쪽', title: '씬의 하는쪽 태그를 프롬프트 뒤에 합침' },
+    { value: 'target', label: '당하는쪽', title: '씬의 당하는쪽 태그를 프롬프트 뒤에 합침' }
+  ]
+
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Users size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">행위 역할</span>
+        <span className="text-[11px] text-faint">
+          역할을 주면 씬의 하는쪽/당하는쪽 태그가 그 캐릭터에 자동으로 합쳐져요
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {chars.map((c, i) => {
+          const current = roles?.[c.id] ?? null
+          return (
+            <div
+              key={c.id}
+              className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-1.5 py-1"
+            >
+              {c.thumbnail ? (
+                <img
+                  src={`data:image/webp;base64,${c.thumbnail}`}
+                  className="size-6 shrink-0 rounded object-cover"
+                  alt=""
+                />
+              ) : (
+                <span className="grid size-6 shrink-0 place-items-center rounded bg-paper text-faint">
+                  <User size={12} />
+                </span>
+              )}
+              <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
+              <div className="flex overflow-hidden rounded border border-line">
+                {OPTIONS.map((o) => (
+                  <button
+                    key={o.label}
+                    title={o.title}
+                    className={cn(
+                      'px-1.5 py-0.5 text-[10.5px] transition-colors',
+                      current === o.value
+                        ? o.value === null
+                          ? 'bg-surface text-fg'
+                          : 'bg-accent text-white'
+                        : 'text-faint hover:bg-paper'
+                    )}
+                    onClick={() => setRole(c.id, o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -727,6 +819,7 @@ function EntryEditor({
           vibeIds={entry.vibeIds}
           useCoords={entry.useCoords}
           positions={entry.positions}
+          roles={entry.roles}
           onPatch={onPatch}
         />
       </div>
@@ -816,17 +909,71 @@ export function AdditionDialog({
             <Trash2 size={13} /> 비우기
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           <SelectionPanel
             characterIds={current.characterIds}
             charRefIds={current.charRefIds}
             vibeIds={current.vibeIds}
             useCoords={current.useCoords}
             positions={current.positions}
+            roles={current.roles}
             onPatch={patch}
           />
+          {firstId != null && sceneIds?.length === 1 && <SceneRoleTagsEditor sceneId={firstId} />}
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** 씬 행위 태그 편집 (커스텀) — 역할(하는쪽/당하는쪽)이 지정된 캐릭터에 합쳐질 태그.
+ *  단일 씬을 열었을 때만 표시. 입력을 벗어나면 저장 */
+function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Element | null {
+  const scene = useScenesStore((s) => s.scenes.find((x) => x.id === sceneId))
+  const update = useScenesStore((s) => s.update)
+  if (!scene) return null
+  return (
+    <div className="rounded-md border border-line bg-paper p-2">
+      <div className="flex items-center gap-2">
+        <Split size={13} className="text-muted" />
+        <span className="text-[12px] font-medium text-muted">씬 행위 태그</span>
+        <span className="text-[11px] text-faint">
+          역할이 지정된 캐릭터 프롬프트 뒤에 자동으로 합쳐지는 태그 (예: source#sex,
+          source#doggystyle)
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="space-y-1">
+          <span className="text-[11px] font-medium text-muted">하는쪽 태그</span>
+          <textarea
+            key={`src-${scene.id}`}
+            defaultValue={scene.sourceTags}
+            rows={3}
+            spellCheck={false}
+            placeholder="source#sex, source#missionary, on top, smirk …"
+            className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
+            onBlur={(e) => {
+              if (e.target.value !== scene.sourceTags)
+                void update(scene.id, { sourceTags: e.target.value })
+            }}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-[11px] font-medium text-muted">당하는쪽 태그</span>
+          <textarea
+            key={`tgt-${scene.id}`}
+            defaultValue={scene.targetTags}
+            rows={3}
+            spellCheck={false}
+            placeholder="target#sex, target#missionary, lying, on back …"
+            className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
+            onBlur={(e) => {
+              if (e.target.value !== scene.targetTags)
+                void update(scene.id, { targetTags: e.target.value })
+            }}
+          />
+        </label>
+      </div>
+    </div>
   )
 }

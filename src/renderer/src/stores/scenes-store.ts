@@ -162,6 +162,13 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   const charIds = new Set(orderedCharIds)
   // 위치(좌표): 씬별 추가 > 큐 항목 > 카드 기본 순으로 오버라이드 (커스텀)
   const charactersById = new Map(useCharactersStore.getState().items.map((c) => [c.id, c]))
+  // 행위 역할 (커스텀): 역할이 지정된 캐릭터는 씬의 하는쪽/당하는쪽 태그를 프롬프트 뒤에 합친다
+  const roleTags = (id: number): string => {
+    const role = add?.roles?.[id] ?? entry?.roles?.[id]
+    if (role === 'source') return scene.sourceTags ?? ''
+    if (role === 'target') return scene.targetTags ?? ''
+    return ''
+  }
   const characterPrompts = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
@@ -169,7 +176,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     })
     .slice(0, 6)
     .map((c) => ({
-      prompt: c.prompt,
+      prompt: appendPrompt(c.prompt, roleTags(c.id)),
       negativePrompt: c.negativePrompt,
       center: add?.positions?.[c.id] ?? entry?.positions?.[c.id] ?? c.center,
       enabled: true as const
@@ -415,7 +422,9 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         width: patch.width,
         height: patch.height,
         reserveCount: patch.reserveCount,
-        varietyPlus: patch.varietyPlus
+        varietyPlus: patch.varietyPlus,
+        sourceTags: patch.sourceTags,
+        targetTags: patch.targetTags
       }
     })
   },

@@ -606,7 +606,8 @@ function SceneGrid(): React.JSX.Element {
           useSceneExtrasStore.getState().updateAddition(activePresetId, a.sceneId, {
             characterIds: a.characterIds,
             charRefIds: [],
-            vibeIds: []
+            vibeIds: [],
+            ...(a.roles ? { roles: a.roles } : {})
           })
         }
         useSceneExtrasStore.getState().setAdditionsEnabled(true)

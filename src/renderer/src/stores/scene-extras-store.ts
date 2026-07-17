@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import type { CharPositions, SequenceEntry } from '@shared/types'
+import type { CharPositions, CharRoles, SequenceEntry } from '@shared/types'
 
-export type { CharPositions, SequenceEntry }
+export type { CharPositions, CharRoles, SequenceEntry }
 
 /**
  * 씬 모드 커스텀 확장 (NAIS2 Custom 이식):
@@ -21,6 +21,8 @@ export interface SceneAddition {
   useCoords?: boolean
   /** 캐릭터별 위치 오버라이드 (커스텀) */
   positions?: CharPositions
+  /** 캐릭터별 행위 역할 (커스텀) — 씬의 하는쪽/당하는쪽 태그가 프롬프트 뒤에 얹힘 */
+  roles?: CharRoles
 }
 
 /** presetId → sceneId → 추가 선택 */
@@ -159,11 +161,17 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     const rSet = new Set(charRefIds ?? [])
     const vSet = new Set(vibeIds ?? [])
     if (cSet.size === 0 && rSet.size === 0 && vSet.size === 0) return
-    // 삭제된 캐릭터의 위치 오버라이드도 함께 제거 (useCoords 등 나머지는 보존)
+    // 삭제된 캐릭터의 위치·역할 오버라이드도 함께 제거 (useCoords 등 나머지는 보존)
     const stripPositions = (pos?: CharPositions): CharPositions | undefined => {
       if (!pos) return pos
       const next: CharPositions = {}
       for (const [id, c] of Object.entries(pos)) if (!cSet.has(Number(id))) next[Number(id)] = c
+      return next
+    }
+    const stripRoles = (roles?: CharRoles): CharRoles | undefined => {
+      if (!roles) return roles
+      const next: CharRoles = {}
+      for (const [id, r] of Object.entries(roles)) if (!cSet.has(Number(id))) next[Number(id)] = r
       return next
     }
     const filterAdd = (a: SceneAddition): SceneAddition => ({
@@ -171,7 +179,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       characterIds: a.characterIds.filter((id) => !cSet.has(id)),
       charRefIds: a.charRefIds.filter((id) => !rSet.has(id)),
       vibeIds: a.vibeIds.filter((id) => !vSet.has(id)),
-      positions: stripPositions(a.positions)
+      positions: stripPositions(a.positions),
+      roles: stripRoles(a.roles)
     })
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
@@ -185,7 +194,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
         characterIds: e.characterIds.filter((id) => !cSet.has(id)),
         charRefIds: e.charRefIds.filter((id) => !rSet.has(id)),
         vibeIds: e.vibeIds.filter((id) => !vSet.has(id)),
-        positions: stripPositions(e.positions)
+        positions: stripPositions(e.positions),
+        roles: stripRoles(e.roles)
       })),
       additions: nextAdditions
     })

@@ -28,6 +28,8 @@ interface Row {
   height: number
   reserve_count: number
   variety_plus: number
+  source_tags: string
+  target_tags: string
   export_no: number | null
 }
 
@@ -44,6 +46,8 @@ function toScene(
     height: r.height,
     reserveCount: r.reserve_count,
     varietyPlus: r.variety_plus === 1,
+    sourceTags: r.source_tags ?? '',
+    targetTags: r.target_tags ?? '',
     exportNo: r.export_no,
     thumbnail: r.thumb ? r.thumb.toString('base64') : '',
     thumbnailPath: r.thumb_path ?? '',
@@ -100,7 +104,7 @@ export function deletePreset(id: number): void {
 export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
@@ -118,7 +122,7 @@ export function listScenes(presetId: number): Scene[] {
 export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: string })[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.export_no,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.export_no,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
@@ -208,7 +212,7 @@ export function getPresetName(id: number): string | null {
 export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
-      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, export_no,
+      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = ? AND deleted_at IS NULL) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
@@ -249,8 +253,8 @@ export function duplicateScene(id: number): number {
     return Number(
       db
         .prepare(
-          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
+          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
         )
         .run(
           s.preset_id,
@@ -260,7 +264,9 @@ export function duplicateScene(id: number): number {
           s.width,
           s.height,
           s.sort_order + 1,
-          s.variety_plus ?? 0
+          s.variety_plus ?? 0,
+          s.source_tags ?? '',
+          s.target_tags ?? ''
         ).lastInsertRowid
     )
   })()
@@ -287,13 +293,13 @@ export function duplicatePreset(id: number): number {
     )
     const scenes = db
       .prepare(
-        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, export_no
+        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, export_no
          FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all(id) as Record<string, unknown>[]
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, export_no)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
     )
     for (const s of scenes) {
       ins.run(
@@ -305,6 +311,8 @@ export function duplicatePreset(id: number): number {
         s.height,
         s.sort_order,
         s.variety_plus ?? 0,
+        s.source_tags ?? '',
+        s.target_tags ?? '',
         s.export_no ?? null
       )
     }
@@ -326,8 +334,8 @@ export function bulkCopyScenes(ids: number[], presetId: number): number[] {
         .get(presetId) as { m: number }
     ).m
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, export_no)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
     )
     for (const id of ids) {
       const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as Row | undefined
@@ -341,6 +349,8 @@ export function bulkCopyScenes(ids: number[], presetId: number): number[] {
         s.height,
         ++order,
         s.variety_plus ?? 0,
+        s.source_tags ?? '',
+        s.target_tags ?? '',
         s.export_no ?? null
       )
       newIds.push(Number(r.lastInsertRowid))
@@ -357,6 +367,8 @@ const FIELDS: Record<string, string> = {
   height: 'height',
   reserveCount: 'reserve_count',
   varietyPlus: 'variety_plus',
+  sourceTags: 'source_tags',
+  targetTags: 'target_tags',
   exportNo: 'export_no'
 }
 
@@ -608,7 +620,7 @@ export function deleteImage(id: number, deleteFile: boolean): void {
 export async function exportScenesJson(presetId: number): Promise<boolean> {
   const scenes = getDb()
     .prepare(
-      'SELECT name, prompt, negative_prompt, width, height FROM gen_scenes WHERE preset_id = ? ORDER BY sort_order, id'
+      'SELECT name, prompt, negative_prompt, width, height, source_tags, target_tags FROM gen_scenes WHERE preset_id = ? ORDER BY sort_order, id'
     )
     .all(presetId) as Row[]
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -623,22 +635,27 @@ export async function exportScenesJson(presetId: number): Promise<boolean> {
     prompt: s.prompt,
     negativePrompt: s.negative_prompt,
     width: s.width,
-    height: s.height
+    height: s.height,
+    // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
+    ...(s.source_tags?.trim() ? { sourceTags: s.source_tags } : {}),
+    ...(s.target_tags?.trim() ? { targetTags: s.target_tags } : {})
   }))
   writeFileSync(result.filePath, JSON.stringify({ version: 1, scenes: data }, null, 2), 'utf-8')
   return true
 }
 
-/** 씬 JSON에 실린 씬별 캐릭터탭 (커스텀) */
+/** 씬 JSON에 실린 캐릭터탭 (커스텀). role = 행위 역할 (씬의 하는쪽/당하는쪽 태그가 얹힘) */
 interface ImportSceneCharacter {
   name?: string
   prompt?: string
   negativePrompt?: string
+  role?: 'source' | 'target'
 }
 
-export async function importScenesJson(
-  presetId: number
-): Promise<{ count: number; additions: { sceneId: number; characterIds: number[] }[] }> {
+export async function importScenesJson(presetId: number): Promise<{
+  count: number
+  additions: { sceneId: number; characterIds: number[]; roles?: Record<number, 'source' | 'target'> }[]
+}> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showOpenDialog(win, {
     title: '씬 불러오기',
@@ -649,6 +666,8 @@ export async function importScenesJson(
   const parsed = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as {
     /** 캐릭터탭을 담을 캐릭터 폴더 이름 (커스텀) — 미지정 시 파일 이름 */
     characterFolder?: string
+    /** 모든 씬에 공용으로 연결되는 캐릭터탭 (커스텀) — 씬의 use로 골라 붙일 수 있다 */
+    sharedCharacters?: ImportSceneCharacter[]
     scenes?: {
       name?: string
       prompt?: string
@@ -657,29 +676,40 @@ export async function importScenesJson(
       negativePrompt?: string
       width?: number
       height?: number
-      /** 씬별 캐릭터탭 (커스텀) — 카드로 만들고 "씬별 캐릭터 추가"에 연결된다 */
+      /** 행위 태그 (커스텀) — 역할 있는 캐릭터 프롬프트 뒤에 생성 시 합쳐짐 */
+      sourceTags?: string
+      targetTags?: string
+      /** 이 씬에 붙일 공용 캐릭터 이름들 (커스텀) — 생략 시 전원 */
+      use?: string[]
+      /** 씬 전용 캐릭터탭 (커스텀) — 씬마다 카드가 따로 만들어진다 */
       characters?: ImportSceneCharacter[]
     }[]
   }
   const scenes = parsed.scenes ?? []
+  const shared = (parsed.sharedCharacters ?? []).filter((c) => c.prompt?.trim())
   const db = getDb()
   const max = db
     .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM gen_scenes WHERE preset_id = ?')
     .get(presetId) as { m: number }
   let order = max.m
   const stmt = db.prepare(
-    'INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, source_tags, target_tags)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
   // 캐릭터탭 준비 (커스텀) — 프롬프트가 있는 탭만 유효
   const validChars = (s: { characters?: ImportSceneCharacter[] }): ImportSceneCharacter[] =>
     (s.characters ?? []).filter((c) => c.prompt?.trim())
-  const hasChars = scenes.some((s) => validChars(s).length > 0)
+  const hasChars = shared.length > 0 || scenes.some((s) => validChars(s).length > 0)
   const insChar = db.prepare(
     `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled)
      VALUES (?, ?, ?, ?, ?, 0)`
   )
-  const additions: { sceneId: number; characterIds: number[] }[] = []
+  const additions: {
+    sceneId: number
+    characterIds: number[]
+    roles?: Record<number, 'source' | 'target'>
+  }[] = []
 
   db.transaction(() => {
     // 폴더: characterFolder(없으면 파일 이름)와 같은 이름이 있으면 재사용, 없으면 생성
@@ -709,6 +739,27 @@ export async function importScenesJson(
       ).m
     }
 
+    // 카드는 enabled=0으로 생성 — 메인 생성에 끼지 않고 씬별 추가로만 쓰인다
+    const createCard = (c: ImportSceneCharacter, fallbackName: string): number =>
+      Number(
+        insChar.run(
+          c.name?.trim() || fallbackName,
+          c.prompt ?? '',
+          c.negativePrompt ?? '',
+          folderId,
+          ++charOrder
+        ).lastInsertRowid
+      )
+
+    // 공용 캐릭터: 같은 폴더에 같은 이름 카드가 있으면 재사용 (재임포트 시 중복 방지)
+    const sharedCards = shared.map((c) => {
+      const name = c.name?.trim() || '캐릭터'
+      const existing = db
+        .prepare('SELECT id FROM character_prompts WHERE folder_id IS ? AND name = ?')
+        .get(folderId, name) as { id: number } | undefined
+      return { id: existing?.id ?? createCard(c, name), name, role: c.role }
+    })
+
     for (const s of scenes) {
       const sceneId = Number(
         stmt.run(
@@ -718,24 +769,32 @@ export async function importScenesJson(
           s.negativePrompt ?? '',
           s.width ?? 832,
           s.height ?? 1216,
-          ++order
+          ++order,
+          s.sourceTags ?? '',
+          s.targetTags ?? ''
         ).lastInsertRowid
       )
-      const chars = validChars(s)
-      if (chars.length === 0) continue
-      // 카드는 enabled=0으로 생성 — 메인 생성에 끼지 않고 씬별 추가로만 쓰인다
-      const characterIds = chars.map((c) =>
-        Number(
-          insChar.run(
-            c.name?.trim() || `${s.name ?? '씬'} 캐릭터`,
-            c.prompt ?? '',
-            c.negativePrompt ?? '',
-            folderId,
-            ++charOrder
-          ).lastInsertRowid
-        )
-      )
-      additions.push({ sceneId, characterIds })
+      const characterIds: number[] = []
+      const roles: Record<number, 'source' | 'target'> = {}
+      // 공용 캐릭터 연결 — use가 있으면 그 이름들만, 없으면 전원
+      const useNames = Array.isArray(s.use) ? s.use : null
+      for (const card of sharedCards) {
+        if (useNames && !useNames.includes(card.name)) continue
+        characterIds.push(card.id)
+        if (card.role) roles[card.id] = card.role
+      }
+      // 씬 전용 캐릭터탭
+      for (const c of validChars(s)) {
+        const id = createCard(c, `${s.name ?? '씬'} 캐릭터`)
+        characterIds.push(id)
+        if (c.role) roles[id] = c.role
+      }
+      if (characterIds.length === 0) continue
+      additions.push({
+        sceneId,
+        characterIds,
+        ...(Object.keys(roles).length > 0 ? { roles } : {})
+      })
     }
   })()
   return { count: scenes.length, additions }

@@ -320,6 +320,15 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 내보내기에서 캐릭터별 폴더로 나누는 데 사용. 일반 생성은 NULL
   (db) => {
     db.exec(`ALTER TABLE images ADD COLUMN queue_label TEXT;`)
+  },
+
+  // v18 (커스텀): 씬 행위 태그 — 역할(하는쪽/당하는쪽)이 지정된 캐릭터 프롬프트 뒤에
+  // 생성 시 자동으로 합쳐진다. 카드는 외형만 두고 행위는 씬이 갖게 하는 구조
+  (db) => {
+    db.exec(`
+      ALTER TABLE gen_scenes ADD COLUMN source_tags TEXT NOT NULL DEFAULT '';
+      ALTER TABLE gen_scenes ADD COLUMN target_tags TEXT NOT NULL DEFAULT '';
+    `)
   }
 ]
 
@@ -351,6 +360,8 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')
   ensureColumn('images', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('images', 'queue_label', 'queue_label TEXT')
+  ensureColumn('gen_scenes', 'source_tags', "source_tags TEXT NOT NULL DEFAULT ''")
+  ensureColumn('gen_scenes', 'target_tags', "target_tags TEXT NOT NULL DEFAULT ''")
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

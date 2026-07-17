@@ -55,6 +55,12 @@ export interface CharRefItem {
 /** 캐릭터 배치 좌표 (커스텀). charId → {x,y}. 이 큐/씬에서만 카드 기본 위치를 덮어씀 */
 export type CharPositions = Record<number, { x: number; y: number }>
 
+/** 씬 행위 역할 (커스텀) — 캐릭터에 지정하면 생성 시 씬의 하는쪽/당하는쪽 태그가
+ *  그 캐릭터 프롬프트 뒤에 자동으로 합쳐진다. 카드는 외형만 갖고 있으면 됨 */
+export type CharRole = 'source' | 'target'
+/** charId → 역할 */
+export type CharRoles = Record<number, CharRole>
+
 /** 큐 반복 항목 (커스텀) — 캐릭터/레퍼런스 조합을 바꿔가며 반복 생성. 대기 항목
  *  재구성(생성 중 편집 반영)을 위해 요청에 스냅샷으로 실린다. */
 export interface SequenceEntry {
@@ -66,6 +72,8 @@ export interface SequenceEntry {
   enabled: boolean
   useCoords?: boolean
   positions?: CharPositions
+  /** 캐릭터별 행위 역할 (커스텀) — 씬의 하는쪽/당하는쪽 태그를 자동으로 얹는다 */
+  roles?: CharRoles
 }
 
 export interface GenerationRequest {
@@ -324,6 +332,10 @@ export interface Scene {
   reserveCount: number
   /** 씬별 variety+ 강제 적용 (커스텀. false = 메인 설정 따름) */
   varietyPlus: boolean
+  /** 하는쪽 행위 태그 (커스텀) — 역할이 '하는쪽'인 캐릭터 프롬프트 뒤에 합쳐짐 */
+  sourceTags: string
+  /** 당하는쪽 행위 태그 (커스텀) — 역할이 '당하는쪽'인 캐릭터 프롬프트 뒤에 합쳐짐 */
+  targetTags: string
   /** 내보내기 번호 (커스텀) — 지정 시 내보내는 파일명이 "01" 등 번호가 됨. null = 씬 이름 사용 */
   exportNo: number | null
   /** 목록 카드용: 최신 생성 이미지 썸네일 (없으면 '') */
@@ -553,6 +565,8 @@ export interface IpcInvokeMap {
           | 'height'
           | 'reserveCount'
           | 'varietyPlus'
+          | 'sourceTags'
+          | 'targetTags'
           | 'exportNo'
         >
       >
@@ -604,11 +618,14 @@ export interface IpcInvokeMap {
   'scenes:openFolder': { req: { sceneId: number }; res: { ok: boolean } }
   /** 씬 JSON 내보내기/불러오기 (파일 다이얼로그, 활성 프리셋 기준) */
   'scenes:exportJson': { req: { presetId: number }; res: { saved: boolean } }
-  /** 불러오기 — 씬에 캐릭터탭(characters)이 실려 있으면 캐릭터 카드로 만들고
-   *  additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에 연결한다 (커스텀) */
+  /** 불러오기 — 씬에 캐릭터탭(characters/sharedCharacters)이 실려 있으면 카드로 만들고
+   *  additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에 연결한다. roles = 행위 역할 (커스텀) */
   'scenes:importJson': {
     req: { presetId: number }
-    res: { count: number; additions: { sceneId: number; characterIds: number[] }[] }
+    res: {
+      count: number
+      additions: { sceneId: number; characterIds: number[]; roles?: CharRoles }[]
+    }
   }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */
   'scenes:exportZip': { req: { mode: 'favorites' | 'sceneTop' }; res: { count: number } }
