@@ -629,15 +629,26 @@ export async function exportScenesJson(presetId: number): Promise<boolean> {
   return true
 }
 
-export async function importScenesJson(presetId: number): Promise<number> {
+/** 씬 JSON에 실린 씬별 캐릭터탭 (커스텀) */
+interface ImportSceneCharacter {
+  name?: string
+  prompt?: string
+  negativePrompt?: string
+}
+
+export async function importScenesJson(
+  presetId: number
+): Promise<{ count: number; additions: { sceneId: number; characterIds: number[] }[] }> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showOpenDialog(win, {
     title: '씬 불러오기',
     properties: ['openFile'],
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || result.filePaths.length === 0) return 0
+  if (result.canceled || result.filePaths.length === 0) return { count: 0, additions: [] }
   const parsed = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as {
+    /** 캐릭터탭을 담을 캐릭터 폴더 이름 (커스텀) — 미지정 시 파일 이름 */
+    characterFolder?: string
     scenes?: {
       name?: string
       prompt?: string
@@ -646,6 +657,8 @@ export async function importScenesJson(presetId: number): Promise<number> {
       negativePrompt?: string
       width?: number
       height?: number
+      /** 씬별 캐릭터탭 (커스텀) — 카드로 만들고 "씬별 캐릭터 추가"에 연결된다 */
+      characters?: ImportSceneCharacter[]
     }[]
   }
   const scenes = parsed.scenes ?? []
@@ -657,20 +670,75 @@ export async function importScenesJson(presetId: number): Promise<number> {
   const stmt = db.prepare(
     'INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
   )
+
+  // 캐릭터탭 준비 (커스텀) — 프롬프트가 있는 탭만 유효
+  const validChars = (s: { characters?: ImportSceneCharacter[] }): ImportSceneCharacter[] =>
+    (s.characters ?? []).filter((c) => c.prompt?.trim())
+  const hasChars = scenes.some((s) => validChars(s).length > 0)
+  const insChar = db.prepare(
+    `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled)
+     VALUES (?, ?, ?, ?, ?, 0)`
+  )
+  const additions: { sceneId: number; characterIds: number[] }[] = []
+
   db.transaction(() => {
+    // 폴더: characterFolder(없으면 파일 이름)와 같은 이름이 있으면 재사용, 없으면 생성
+    let folderId: number | null = null
+    let charOrder = 0
+    if (hasChars) {
+      const folderName =
+        parsed.characterFolder?.trim() || basename(result.filePaths[0], '.json')
+      const existing = db
+        .prepare('SELECT id FROM character_folders WHERE name = ?')
+        .get(folderName) as { id: number } | undefined
+      if (existing) folderId = existing.id
+      else {
+        const maxFolder = db
+          .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders')
+          .get() as { m: number }
+        folderId = Number(
+          db
+            .prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)')
+            .run(folderName, maxFolder.m + 1).lastInsertRowid
+        )
+      }
+      charOrder = (
+        db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_prompts').get() as {
+          m: number
+        }
+      ).m
+    }
+
     for (const s of scenes) {
-      stmt.run(
-        presetId,
-        s.name ?? '씬',
-        s.prompt ?? s.scenePrompt ?? '', // NAIS2 파일은 scenePrompt
-        s.negativePrompt ?? '',
-        s.width ?? 832,
-        s.height ?? 1216,
-        ++order
+      const sceneId = Number(
+        stmt.run(
+          presetId,
+          s.name ?? '씬',
+          s.prompt ?? s.scenePrompt ?? '', // NAIS2 파일은 scenePrompt
+          s.negativePrompt ?? '',
+          s.width ?? 832,
+          s.height ?? 1216,
+          ++order
+        ).lastInsertRowid
       )
+      const chars = validChars(s)
+      if (chars.length === 0) continue
+      // 카드는 enabled=0으로 생성 — 메인 생성에 끼지 않고 씬별 추가로만 쓰인다
+      const characterIds = chars.map((c) =>
+        Number(
+          insChar.run(
+            c.name?.trim() || `${s.name ?? '씬'} 캐릭터`,
+            c.prompt ?? '',
+            c.negativePrompt ?? '',
+            folderId,
+            ++charOrder
+          ).lastInsertRowid
+        )
+      )
+      additions.push({ sceneId, characterIds })
     }
   })()
-  return scenes.length
+  return { count: scenes.length, additions }
 }
 
 /** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */

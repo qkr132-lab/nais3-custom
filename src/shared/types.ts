@@ -604,7 +604,12 @@ export interface IpcInvokeMap {
   'scenes:openFolder': { req: { sceneId: number }; res: { ok: boolean } }
   /** 씬 JSON 내보내기/불러오기 (파일 다이얼로그, 활성 프리셋 기준) */
   'scenes:exportJson': { req: { presetId: number }; res: { saved: boolean } }
-  'scenes:importJson': { req: { presetId: number }; res: { count: number } }
+  /** 불러오기 — 씬에 캐릭터탭(characters)이 실려 있으면 캐릭터 카드로 만들고
+   *  additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에 연결한다 (커스텀) */
+  'scenes:importJson': {
+    req: { presetId: number }
+    res: { count: number; additions: { sceneId: number; characterIds: number[] }[] }
+  }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */
   'scenes:exportZip': { req: { mode: 'favorites' | 'sceneTop' }; res: { count: number } }
   /** 이미지를 폴더로 그대로 복사 (커스텀). scope=씬 ids 또는 즐겨찾기/각 씬 최상단.

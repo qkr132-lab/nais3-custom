@@ -61,6 +61,7 @@ import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { useSceneExtrasStore, hasAddition } from '../stores/scene-extras-store'
+import { useCharactersStore } from '../stores/characters-store'
 import { useResolutionsStore } from '../stores/resolutions-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -593,9 +594,27 @@ function SceneGrid(): React.JSX.Element {
     await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
   }
   async function importJson(): Promise<void> {
-    const { count } = await window.nais.invoke('scenes:importJson', { presetId: activePresetId })
+    const { count, additions } = await window.nais.invoke('scenes:importJson', {
+      presetId: activePresetId
+    })
     if (count > 0) {
-      toast(`씬 ${count}개 가져옴`, 'success')
+      // 캐릭터탭 포함 파일 (커스텀): 만들어진 카드를 "씬별 캐릭터 추가"로 연결
+      if (additions.length > 0) {
+        const extras = useSceneExtrasStore.getState()
+        await extras.load()
+        for (const a of additions) {
+          useSceneExtrasStore.getState().updateAddition(activePresetId, a.sceneId, {
+            characterIds: a.characterIds,
+            charRefIds: [],
+            vibeIds: []
+          })
+        }
+        useSceneExtrasStore.getState().setAdditionsEnabled(true)
+        await useCharactersStore.getState().load()
+        toast(`씬 ${count}개 가져옴 — 캐릭터탭 ${additions.length}개 씬에 연결됨`, 'success')
+      } else {
+        toast(`씬 ${count}개 가져옴`, 'success')
+      }
       void useScenesStore.getState().load()
     } else {
       toast('가져올 씬이 없습니다', 'info')
