@@ -4,7 +4,8 @@ import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/
 import {
   appendPrompt,
   mergeSceneIntoPromptParts,
-  prioritizeSceneCharacterIds
+  prioritizeSceneCharacterIds,
+  roleTagsFor
 } from '@shared/scene-request'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore } from './generation-store'
@@ -162,13 +163,10 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   const charIds = new Set(orderedCharIds)
   // 위치(좌표): 씬별 추가 > 큐 항목 > 카드 기본 순으로 오버라이드 (커스텀)
   const charactersById = new Map(useCharactersStore.getState().items.map((c) => [c.id, c]))
-  // 행위 역할 (커스텀): 역할이 지정된 캐릭터는 씬의 하는쪽/당하는쪽 태그를 프롬프트 뒤에 합친다
-  const roleTags = (id: number): string => {
-    const role = add?.roles?.[id] ?? entry?.roles?.[id]
-    if (role === 'source') return scene.sourceTags ?? ''
-    if (role === 'target') return scene.targetTags ?? ''
-    return ''
-  }
+  // 행위 역할 (커스텀): 역할이 지정된 캐릭터는 씬의 하는쪽/당하는쪽 태그를 프롬프트 뒤에 합친다.
+  // bare 상호작용 태그(sex, fellatio 등)는 roleTagsFor가 source#/target#을 자동으로 붙인다
+  const roleTags = (id: number): string =>
+    roleTagsFor(add?.roles?.[id] ?? entry?.roles?.[id], scene)
   const characterPrompts = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
@@ -790,13 +788,20 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     if (pending.length === 0) return
     await ensureExtrasData()
     const byId = new Map(get().scenes.map((s) => [s.id, s]))
+    // 큐 반복 항목은 스냅샷 대신 현재 편집본으로 재구성 (역할·캐릭터 변경이 대기 항목에도 반영).
+    // 항목이 삭제됐으면 스냅샷으로 폴백해 원래 조합을 유지한다 (커스텀)
+    const liveEntries = new Map(
+      useSceneExtrasStore.getState().entries.map((e) => [e.id, e] as const)
+    )
     const updates: { id: string; request: GenerationRequest }[] = []
     for (const item of pending) {
       const scene = byId.get(item.request.sceneId!)
       if (!scene) continue // 현재 프리셋에 없는 씬(다른 프리셋 대기 항목)은 그대로 둔다
+      const snap = item.request.sceneSequenceEntry ?? null
+      const entry = snap ? (liveEntries.get(snap.id) ?? snap) : null
       // 시드·i2i 소스는 원래 항목 것을 유지하고, 프롬프트/캐릭터/레퍼런스만 최신으로 재구성
       const rebuilt: GenerationRequest = {
-        ...buildSceneRequest(scene, item.request.sceneSequenceEntry ?? null),
+        ...buildSceneRequest(scene, entry),
         seed: item.request.seed,
         source: item.request.source
       }

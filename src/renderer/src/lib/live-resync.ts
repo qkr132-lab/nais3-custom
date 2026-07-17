@@ -39,9 +39,15 @@ export function initLiveResync(): void {
   useCharactersStore.subscribe((s, p) => {
     if (s.items !== p.items) schedule()
   })
-  // 씬별 추가 / 큐 반복 선택
+  // 씬별 추가 / 큐 반복 선택 (항목 편집·역할 변경 포함)
   useSceneExtrasStore.subscribe((s, p) => {
-    if (s.additions !== p.additions || s.additionsEnabled !== p.additionsEnabled) schedule()
+    if (
+      s.additions !== p.additions ||
+      s.additionsEnabled !== p.additionsEnabled ||
+      s.entries !== p.entries ||
+      s.sequenceEnabled !== p.sequenceEnabled
+    )
+      schedule()
   })
   // 바이브 / 캐릭레퍼 (enabled·강도·타입 등)
   useVibesStore.subscribe((s, p) => {

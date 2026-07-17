@@ -938,8 +938,8 @@ function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Elemen
         <Split size={13} className="text-muted" />
         <span className="text-[12px] font-medium text-muted">씬 행위 태그</span>
         <span className="text-[11px] text-faint">
-          역할이 지정된 캐릭터 프롬프트 뒤에 자동으로 합쳐지는 태그 (예: source#sex,
-          source#doggystyle)
+          역할이 지정된 캐릭터 프롬프트 뒤에 자동으로 합쳐짐. sex, fellatio처럼 그냥 쓰면
+          source#/target#이 자동으로 붙어요 (포즈·표정 태그는 그대로)
         </span>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
