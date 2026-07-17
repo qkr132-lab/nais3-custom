@@ -14,7 +14,7 @@ import {
   Users,
   Waves
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CharRefItem, CharacterCard, ListFolder, VibeItem } from '@shared/types'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
@@ -945,35 +945,149 @@ function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Elemen
       <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="space-y-1">
           <span className="text-[11px] font-medium text-muted">하는쪽 태그</span>
-          <textarea
+          <RoleTagTextarea
             key={`src-${scene.id}`}
-            defaultValue={scene.sourceTags}
-            rows={3}
-            spellCheck={false}
+            initial={scene.sourceTags}
             placeholder="source#sex, source#missionary, on top, smirk …"
-            className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
-            onBlur={(e) => {
-              if (e.target.value !== scene.sourceTags)
-                void update(scene.id, { sourceTags: e.target.value })
+            onCommit={(v) => {
+              if (v !== scene.sourceTags) void update(scene.id, { sourceTags: v })
             }}
           />
         </label>
         <label className="space-y-1">
           <span className="text-[11px] font-medium text-muted">당하는쪽 태그</span>
-          <textarea
+          <RoleTagTextarea
             key={`tgt-${scene.id}`}
-            defaultValue={scene.targetTags}
-            rows={3}
-            spellCheck={false}
+            initial={scene.targetTags}
             placeholder="target#sex, target#missionary, lying, on back …"
-            className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
-            onBlur={(e) => {
-              if (e.target.value !== scene.targetTags)
-                void update(scene.id, { targetTags: e.target.value })
+            onCommit={(v) => {
+              if (v !== scene.targetTags) void update(scene.id, { targetTags: v })
             }}
           />
         </label>
       </div>
+    </div>
+  )
+}
+
+/** 행위 태그 입력 (커스텀) — 쉼표 단위 현재 토큰으로 단보루 태그 자동완성 (한글 검색 포함).
+ *  source#/target# 접두사는 검색어에서 떼고, 선택하면 접두사를 그대로 유지한 채 완성한다.
+ *  ↑↓ 이동 · Enter/Tab 선택 · Esc 닫기. 입력을 벗어나면 저장(기존과 동일) */
+function RoleTagTextarea({
+  initial,
+  placeholder,
+  onCommit
+}: {
+  initial: string
+  placeholder: string
+  onCommit: (value: string) => void
+}): React.JSX.Element {
+  const [value, setValue] = useState(initial)
+  const [items, setItems] = useState<{ tag: string; count: number; ko?: string }[]>([])
+  const [sel, setSel] = useState(0)
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const tokenRef = useRef<{ start: number; end: number; prefix: string }>({
+    start: 0,
+    end: 0,
+    prefix: ''
+  })
+
+  const queryAt = (text: string, caret: number): void => {
+    // 커서 앞의 현재 토큰 (쉼표/줄바꿈 기준)
+    const m = /[^,\n]*$/.exec(text.slice(0, caret))
+    let token = m?.[0] ?? ''
+    const lead = token.length - token.replace(/^\s+/, '').length
+    token = token.slice(lead)
+    const start = caret - token.length
+    const prefix = /^(source#|target#)/i.exec(token)?.[0] ?? ''
+    const q = token.slice(prefix.length).trim()
+    tokenRef.current = { start, end: caret, prefix }
+    clearTimeout(timer.current)
+    if (q.length < 1) {
+      setOpen(false)
+      return
+    }
+    timer.current = setTimeout(() => {
+      void window.nais.invoke('tags:search', { query: q, limit: 8 }).then(({ items }) => {
+        setItems(items)
+        setSel(0)
+        setOpen(items.length > 0)
+      })
+    }, 120)
+  }
+
+  const accept = (tag: string): void => {
+    const { start, end, prefix } = tokenRef.current
+    const next = `${value.slice(0, start)}${prefix}${tag}, ${value.slice(end)}`
+    setValue(next)
+    setOpen(false)
+    const caret = start + prefix.length + tag.length + 2
+    requestAnimationFrame(() => {
+      ref.current?.focus()
+      ref.current?.setSelectionRange(caret, caret)
+    })
+  }
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        value={value}
+        rows={3}
+        spellCheck={false}
+        placeholder={placeholder}
+        className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
+        onChange={(e) => {
+          setValue(e.target.value)
+          queryAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
+        }}
+        onKeyDown={(e) => {
+          if (!open) return
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setSel((s) => Math.min(s + 1, items.length - 1))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setSel((s) => Math.max(s - 1, 0))
+          } else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault()
+            if (items[sel]) accept(items[sel].tag)
+          } else if (e.key === 'Escape') {
+            setOpen(false)
+          }
+        }}
+        onBlur={() => {
+          setOpen(false)
+          onCommit(value)
+        }}
+      />
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-0.5 overflow-hidden rounded-md border border-line bg-paper shadow-xl"
+          // 클릭으로 포커스를 뺏지 않아야 blur 저장보다 선택이 먼저 처리된다
+          onPointerDown={(e) => e.preventDefault()}
+        >
+          {items.map((it, i) => (
+            <button
+              key={it.tag}
+              className={cn(
+                'flex w-full items-center gap-2 px-2 py-1 text-left text-[12px]',
+                i === sel ? 'bg-accent/15 text-accent' : 'hover:bg-surface-2'
+              )}
+              onClick={() => accept(it.tag)}
+              onMouseEnter={() => setSel(i)}
+            >
+              <span className="min-w-0 flex-1 truncate">{it.tag}</span>
+              {it.ko && <span className="shrink-0 text-[11px] text-muted">{it.ko}</span>}
+              <span className="shrink-0 font-mono text-[10px] text-faint">
+                {it.count >= 1000 ? `${Math.round(it.count / 1000)}k` : it.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
