@@ -141,6 +141,32 @@ export function CharacterOverlay(): React.JSX.Element {
       >
         {char.name || char.prompt.slice(0, 40) || <span className="text-faint">빈 캐릭터</span>}
       </button>
+      {/* 기본 행위 역할 (커스텀) — 클릭 순환: 없음 → 하는쪽 → 당하는쪽. 씬별 추가/큐
+          항목에서 따로 지정하지 않으면 이 값이 적용된다 */}
+      <button
+        title={
+          char.role === 'source'
+            ? '하는쪽 (클릭: 당하는쪽으로)'
+            : char.role === 'target'
+              ? '당하는쪽 (클릭: 없음으로)'
+              : '행위 역할 없음 (클릭: 하는쪽으로) — 씬의 하는쪽/당하는쪽 태그가 자동으로 합쳐짐'
+        }
+        onClick={() =>
+          updateCard(char.id, {
+            role: char.role === 'source' ? 'target' : char.role === 'target' ? null : 'source'
+          })
+        }
+        className={cn(
+          'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors',
+          char.role === 'source'
+            ? 'bg-accent text-white'
+            : char.role === 'target'
+              ? 'bg-violet-500 text-white'
+              : 'text-faint hover:bg-surface-2 hover:text-muted'
+        )}
+      >
+        {char.role === 'source' ? '하' : char.role === 'target' ? '당' : '역할'}
+      </button>
       {/* 연결된 캐릭레퍼 표시 (커스텀) — 이 캐릭터가 포함되면 레퍼런스도 자동 적용 */}
       <LinkedRefBadge charRefId={char.charRefId} onHover={showPreview} onLeave={() => setHoverPreview(null)} />
       {useCoords && char.enabled && (

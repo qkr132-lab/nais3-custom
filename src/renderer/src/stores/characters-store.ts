@@ -59,7 +59,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
       enabled: true,
       center: { x: 0.5, y: 0.5 },
       folderId,
-      charRefId: null
+      charRefId: null,
+      role: null
     }
     const { folders, items } = get()
     const next = canonicalize(folders, [...items, card])
@@ -161,7 +162,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
         enabled: true,
         center: ch.center ?? { x: 0.5, y: 0.5 },
         folderId: null,
-        charRefId: null
+        charRefId: null,
+      role: null
       }
       set({ items: canonicalize(get().folders, [...get().items, card]) })
       get().updateCard(id, {

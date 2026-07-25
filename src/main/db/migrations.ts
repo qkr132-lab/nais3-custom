@@ -329,6 +329,12 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE gen_scenes ADD COLUMN source_tags TEXT NOT NULL DEFAULT '';
       ALTER TABLE gen_scenes ADD COLUMN target_tags TEXT NOT NULL DEFAULT '';
     `)
+  },
+
+  // v19 (커스텀): 캐릭터 카드 기본 행위 역할 — 씬별 추가/큐 항목에 지정이 없으면 이 값 사용.
+  // 'source' | 'target' | NULL(없음)
+  (db) => {
+    db.exec(`ALTER TABLE character_prompts ADD COLUMN role TEXT;`)
   }
 ]
 
@@ -362,6 +368,7 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('images', 'queue_label', 'queue_label TEXT')
   ensureColumn('gen_scenes', 'source_tags', "source_tags TEXT NOT NULL DEFAULT ''")
   ensureColumn('gen_scenes', 'target_tags', "target_tags TEXT NOT NULL DEFAULT ''")
+  ensureColumn('character_prompts', 'role', 'role TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

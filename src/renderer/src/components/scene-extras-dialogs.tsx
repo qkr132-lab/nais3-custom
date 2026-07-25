@@ -512,7 +512,11 @@ function RolePanel({
   }
 
   const OPTIONS: { value: CharRole | null; label: string; title: string }[] = [
-    { value: null, label: '없음', title: '카드 프롬프트 그대로 사용' },
+    {
+      value: null,
+      label: '기본',
+      title: '캐릭터 카드의 기본 역할을 따름 (카드에도 없으면 역할 없음)'
+    },
     { value: 'source', label: '하는쪽', title: '씬의 하는쪽 태그를 프롬프트 뒤에 합침' },
     { value: 'target', label: '당하는쪽', title: '씬의 당하는쪽 태그를 프롬프트 뒤에 합침' }
   ]

@@ -188,6 +188,8 @@ export interface CharacterCard {
   folderId: number | null
   /** 연결된 캐릭레퍼 id (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */
   charRefId: number | null
+  /** 기본 행위 역할 (커스텀) — 씬별 추가/큐 항목에서 따로 지정하지 않으면 이 값을 따른다 */
+  role: CharRole | null
 }
 
 /** 폴더 행 (캐릭터/조각 공용 리스트 모델) */
@@ -213,7 +215,10 @@ export const FOLDER_COLORS = [
 ] as const
 
 export type CharacterCardPatch = Partial<
-  Pick<CharacterCard, 'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId'>
+  Pick<
+    CharacterCard,
+    'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId' | 'role'
+  >
 >
 
 /** 리스트 전체 순서 (폴더 행 + 카드 행). 카드의 폴더 소속은 이 순서에서 파생된다 */

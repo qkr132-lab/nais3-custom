@@ -164,9 +164,13 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   // 위치(좌표): 씬별 추가 > 큐 항목 > 카드 기본 순으로 오버라이드 (커스텀)
   const charactersById = new Map(useCharactersStore.getState().items.map((c) => [c.id, c]))
   // 행위 역할 (커스텀): 역할이 지정된 캐릭터는 씬의 하는쪽/당하는쪽 태그를 프롬프트 뒤에 합친다.
+  // 우선순위: 씬별 추가 > 큐 항목 > 캐릭터 카드 기본 역할 (캐릭터탭에서 지정).
   // bare 상호작용 태그(sex, fellatio 등)는 roleTagsFor가 source#/target#을 자동으로 붙인다
   const roleTags = (id: number): string =>
-    roleTagsFor(add?.roles?.[id] ?? entry?.roles?.[id], scene)
+    roleTagsFor(
+      add?.roles?.[id] ?? entry?.roles?.[id] ?? charactersById.get(id)?.role ?? undefined,
+      scene
+    )
   const characterPrompts = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)

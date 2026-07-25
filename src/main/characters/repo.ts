@@ -20,6 +20,7 @@ interface CharRow {
   center_y: number
   folder_id: number | null
   char_ref_id: number | null
+  role: string | null
 }
 
 export function listCharacters(): { folders: CharacterFolder[]; items: CharacterCard[] } {
@@ -38,7 +39,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
   const items = (
     db
       .prepare(
-        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id
+        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id, role
          FROM character_prompts ORDER BY sort_order, id`
       )
       .all() as CharRow[]
@@ -51,7 +52,10 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
     enabled: r.enabled === 1,
     center: { x: r.center_x, y: r.center_y },
     folderId: r.folder_id,
-    charRefId: r.char_ref_id
+    charRefId: r.char_ref_id,
+    role: (r.role === 'source' || r.role === 'target'
+      ? r.role
+      : null) as CharacterCard['role']
   }))
 
   return { folders, items }
@@ -98,6 +102,10 @@ export function updateCharacter(id: number, patch: CharacterCardPatch): void {
     sets.push('char_ref_id = ?')
     values.push(patch.charRefId)
   }
+  if (patch.role !== undefined) {
+    sets.push('role = ?')
+    values.push(patch.role)
+  }
   if (sets.length === 0) return
   sets.push(`updated_at = datetime('now')`)
   getDb()
@@ -120,8 +128,8 @@ export function duplicateCharacter(id: number): number {
   const info = db
     .prepare(
       `INSERT INTO character_prompts
-         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, sort_order)
-       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, ?
+         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, role, sort_order)
+       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, role, ?
        FROM character_prompts WHERE id = ?`
     )
     .run(max + 1, id)
