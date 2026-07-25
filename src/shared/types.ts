@@ -358,6 +358,10 @@ export interface Scene {
   sourceTags: string
   /** 당하는쪽 행위 태그 (커스텀) — 역할이 '당하는쪽'인 캐릭터 프롬프트 뒤에 합쳐짐 */
   targetTags: string
+  /** 이 씬에서 하는쪽 역할의 배치 좌표 (커스텀) — 캐릭터가 누구든 역할 기준으로 적용. null=지정 안 함 */
+  sourcePos: { x: number; y: number } | null
+  /** 이 씬에서 당하는쪽 역할의 배치 좌표 (커스텀) */
+  targetPos: { x: number; y: number } | null
   /** 내보내기 번호 (커스텀) — 지정 시 내보내는 파일명이 "01" 등 번호가 됨. null = 씬 이름 사용 */
   exportNo: number | null
   /** 목록 카드용: 최신 생성 이미지 썸네일 (없으면 '') */
@@ -591,6 +595,8 @@ export interface IpcInvokeMap {
           | 'varietyPlus'
           | 'sourceTags'
           | 'targetTags'
+          | 'sourcePos'
+          | 'targetPos'
           | 'exportNo'
         >
       >

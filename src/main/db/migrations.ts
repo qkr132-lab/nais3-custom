@@ -335,6 +335,15 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 'source' | 'target' | NULL(없음)
   (db) => {
     db.exec(`ALTER TABLE character_prompts ADD COLUMN role TEXT;`)
+  },
+
+  // v20 (커스텀): 씬별 역할 위치 — 이 씬에서 하는쪽/당하는쪽 캐릭터의 배치 좌표를
+  // 역할 기준으로 미리 지정 (JSON "{x,y}"). 큐 항목 위치는 전체 공통이라 씬 단위 오버라이드용
+  (db) => {
+    db.exec(`
+      ALTER TABLE gen_scenes ADD COLUMN source_pos TEXT;
+      ALTER TABLE gen_scenes ADD COLUMN target_pos TEXT;
+    `)
   }
 ]
 
@@ -369,6 +378,8 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('gen_scenes', 'source_tags', "source_tags TEXT NOT NULL DEFAULT ''")
   ensureColumn('gen_scenes', 'target_tags', "target_tags TEXT NOT NULL DEFAULT ''")
   ensureColumn('character_prompts', 'role', 'role TEXT')
+  ensureColumn('gen_scenes', 'source_pos', 'source_pos TEXT')
+  ensureColumn('gen_scenes', 'target_pos', 'target_pos TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

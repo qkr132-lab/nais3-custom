@@ -166,23 +166,32 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   // 행위 역할 (커스텀): 역할이 지정된 캐릭터는 씬의 하는쪽/당하는쪽 태그를 프롬프트 뒤에 합친다.
   // 우선순위: 씬별 추가 > 큐 항목 > 캐릭터 카드 기본 역할 (캐릭터탭에서 지정).
   // bare 상호작용 태그(sex, fellatio 등)는 roleTagsFor가 source#/target#을 자동으로 붙인다
-  const roleTags = (id: number): string =>
-    roleTagsFor(
-      add?.roles?.[id] ?? entry?.roles?.[id] ?? charactersById.get(id)?.role ?? undefined,
-      scene
-    )
+  const roleOf = (id: number): 'source' | 'target' | undefined =>
+    add?.roles?.[id] ?? entry?.roles?.[id] ?? charactersById.get(id)?.role ?? undefined
+  const roleTags = (id: number): string => roleTagsFor(roleOf(id), scene)
+  // 씬별 역할 위치 (커스텀): 이 씬에서 하는쪽/당하는쪽이 "누구든" 역할 기준 좌표로 배치.
+  // 큐 항목 위치는 전체 씬 공통이므로, 특정 씬만 다르게 두는 이 좌표가 그보다 우선한다.
+  const rolePos = (id: number): { x: number; y: number } | undefined => {
+    const r = roleOf(id)
+    return (r === 'source' ? scene.sourcePos : r === 'target' ? scene.targetPos : null) ?? undefined
+  }
+  let rolePosApplied = false
   const characterPrompts = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
       return character?.prompt.trim() ? [character] : []
     })
     .slice(0, 6)
-    .map((c) => ({
-      prompt: appendPrompt(c.prompt, roleTags(c.id)),
-      negativePrompt: c.negativePrompt,
-      center: add?.positions?.[c.id] ?? entry?.positions?.[c.id] ?? c.center,
-      enabled: true as const
-    }))
+    .map((c) => {
+      const rp = add?.positions?.[c.id] == null ? rolePos(c.id) : undefined
+      if (rp) rolePosApplied = true
+      return {
+        prompt: appendPrompt(c.prompt, roleTags(c.id)),
+        negativePrompt: c.negativePrompt,
+        center: add?.positions?.[c.id] ?? rp ?? entry?.positions?.[c.id] ?? c.center,
+        enabled: true as const
+      }
+    })
   // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 메인 설정(전역 useCoords) 순 (커스텀)
   const useCoordsOverride = add?.useCoords ?? entry?.useCoords
   // 포함된 캐릭터에 연결된 캐릭레퍼는 자동 적용 (커스텀)
@@ -223,8 +232,8 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     height: src ? src.height : scene.height,
     // 씬별 variety+ 오버라이드 (커스텀) — 켜져 있으면 강제 on, 아니면 메인 설정 따름
     variety: scene.varietyPlus ? true : base.variety,
-    // 위치 적용 오버라이드 (커스텀) — 큐/씬별 설정이 있으면 그걸, 없으면 메인 설정
-    useCoords: useCoordsOverride ?? base.useCoords,
+    // 위치 적용 오버라이드 (커스텀) — 큐/씬별 설정 > 씬 역할 위치가 잡혔으면 자동 on > 메인 설정
+    useCoords: useCoordsOverride ?? (rolePosApplied ? true : base.useCoords),
     characterPrompts,
     vibeIds,
     charRefIds,

@@ -30,7 +30,21 @@ interface Row {
   variety_plus: number
   source_tags: string
   target_tags: string
+  source_pos: string | null
+  target_pos: string | null
   export_no: number | null
+}
+
+/** 역할 위치 JSON("{x,y}") 파싱 — 손상값은 null (지정 안 함)로 */
+function parsePos(raw: string | null | undefined): { x: number; y: number } | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as { x?: unknown; y?: unknown }
+    if (typeof v?.x === 'number' && typeof v?.y === 'number') return { x: v.x, y: v.y }
+  } catch {
+    // 손상된 좌표는 무시
+  }
+  return null
 }
 
 function toScene(
@@ -48,6 +62,8 @@ function toScene(
     varietyPlus: r.variety_plus === 1,
     sourceTags: r.source_tags ?? '',
     targetTags: r.target_tags ?? '',
+    sourcePos: parsePos(r.source_pos),
+    targetPos: parsePos(r.target_pos),
     exportNo: r.export_no,
     thumbnail: r.thumb ? r.thumb.toString('base64') : '',
     thumbnailPath: r.thumb_path ?? '',
@@ -104,7 +120,7 @@ export function deletePreset(id: number): void {
 export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.export_no,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
@@ -122,7 +138,7 @@ export function listScenes(presetId: number): Scene[] {
 export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: string })[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.export_no,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
@@ -212,7 +228,7 @@ export function getPresetName(id: number): string | null {
 export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
-      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, export_no,
+      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no,
               (SELECT COUNT(*) FROM images WHERE scene_id = ? AND deleted_at IS NULL) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
@@ -253,8 +269,8 @@ export function duplicateScene(id: number): number {
     return Number(
       db
         .prepare(
-          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
         )
         .run(
           s.preset_id,
@@ -266,7 +282,9 @@ export function duplicateScene(id: number): number {
           s.sort_order + 1,
           s.variety_plus ?? 0,
           s.source_tags ?? '',
-          s.target_tags ?? ''
+          s.target_tags ?? '',
+          s.source_pos ?? null,
+          s.target_pos ?? null
         ).lastInsertRowid
     )
   })()
@@ -293,13 +311,13 @@ export function duplicatePreset(id: number): number {
     )
     const scenes = db
       .prepare(
-        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, export_no
+        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no
          FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all(id) as Record<string, unknown>[]
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, export_no)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
     )
     for (const s of scenes) {
       ins.run(
@@ -313,6 +331,8 @@ export function duplicatePreset(id: number): number {
         s.variety_plus ?? 0,
         s.source_tags ?? '',
         s.target_tags ?? '',
+        s.source_pos ?? null,
+        s.target_pos ?? null,
         s.export_no ?? null
       )
     }
@@ -334,8 +354,8 @@ export function bulkCopyScenes(ids: number[], presetId: number): number[] {
         .get(presetId) as { m: number }
     ).m
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, export_no)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
     )
     for (const id of ids) {
       const s = db.prepare('SELECT * FROM gen_scenes WHERE id = ?').get(id) as Row | undefined
@@ -351,6 +371,8 @@ export function bulkCopyScenes(ids: number[], presetId: number): number[] {
         s.variety_plus ?? 0,
         s.source_tags ?? '',
         s.target_tags ?? '',
+        s.source_pos ?? null,
+        s.target_pos ?? null,
         s.export_no ?? null
       )
       newIds.push(Number(r.lastInsertRowid))
@@ -369,6 +391,8 @@ const FIELDS: Record<string, string> = {
   varietyPlus: 'variety_plus',
   sourceTags: 'source_tags',
   targetTags: 'target_tags',
+  sourcePos: 'source_pos',
+  targetPos: 'target_pos',
   exportNo: 'export_no'
 }
 
@@ -379,7 +403,10 @@ export function updateScene(id: number, patch: Record<string, unknown>): void {
     if (patch[key] === undefined) continue
     sets.push(`${col} = ?`)
     const v = patch[key]
-    values.push(typeof v === 'boolean' ? (v ? 1 : 0) : v)
+    // 역할 위치({x,y}) 등 객체 값은 JSON으로 저장, null은 그대로(지정 해제)
+    values.push(
+      typeof v === 'boolean' ? (v ? 1 : 0) : typeof v === 'object' && v !== null ? JSON.stringify(v) : v
+    )
   }
   if (sets.length === 0) return
   sets.push(`updated_at = datetime('now')`)

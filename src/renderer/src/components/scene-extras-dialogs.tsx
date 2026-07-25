@@ -970,7 +970,63 @@ function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Elemen
           />
         </label>
       </div>
+      {/* 씬별 역할 위치 (커스텀) — 캐릭터가 누구든 이 씬에서 역할 기준으로 배치.
+          큐 항목 위치는 모든 씬 공통이라, 이 씬만 다르게 두고 싶을 때 여기서 지정 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium text-muted">역할 위치</span>
+        <RolePosButton
+          label="하는쪽"
+          pos={scene.sourcePos}
+          onChange={(p) => void update(scene.id, { sourcePos: p })}
+        />
+        <RolePosButton
+          label="당하는쪽"
+          pos={scene.targetPos}
+          onChange={(p) => void update(scene.id, { targetPos: p })}
+        />
+        <span className="text-[11px] text-faint">
+          지정하면 이 씬에서만 적용 — 큐 항목의 위치보다 우선하고, 좌표 적용도 자동으로 켜져요
+        </span>
+      </div>
     </div>
+  )
+}
+
+/** 역할 위치 버튼 (커스텀) — 팝오버에서 5×5 격자로 좌표를 고르고, 해제도 가능 */
+function RolePosButton({
+  label,
+  pos,
+  onChange
+}: {
+  label: string
+  pos: { x: number; y: number } | null
+  onChange: (pos: { x: number; y: number } | null) => void
+}): React.JSX.Element {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className={cn(
+            'flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px] transition-colors',
+            pos
+              ? 'border-accent/60 text-accent'
+              : 'border-line text-faint hover:border-muted hover:text-muted'
+          )}
+          title={`${label} 역할 캐릭터의 배치 좌표${pos ? '' : ' (지정 안 함)'}`}
+        >
+          <Crosshair size={11} />
+          {label} {pos ? `${pos.x},${pos.y}` : '없음'}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto">
+        <PositionPicker center={pos ?? { x: 0.5, y: 0.5 }} onPick={(c) => onChange(c)} />
+        {pos && (
+          <Button size="sm" variant="ghost" className="mt-1.5 w-full" onClick={() => onChange(null)}>
+            지정 해제
+          </Button>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }
 
