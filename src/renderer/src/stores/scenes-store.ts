@@ -435,7 +435,11 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         reserveCount: patch.reserveCount,
         varietyPlus: patch.varietyPlus,
         sourceTags: patch.sourceTags,
-        targetTags: patch.targetTags
+        targetTags: patch.targetTags,
+        // 씬별 역할 위치 (커스텀) — 여기 빠지면 낙관적 갱신만 되고 저장이 안 돼
+        // 다음 load()에서 초기화된다 (v1.6.19 버그)
+        sourcePos: patch.sourcePos,
+        targetPos: patch.targetPos
       }
     })
   },
