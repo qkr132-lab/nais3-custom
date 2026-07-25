@@ -176,24 +176,55 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     return (r === 'source' ? scene.sourcePos : r === 'target' ? scene.targetPos : null) ?? undefined
   }
   let rolePosApplied = false
-  const characterPrompts = orderedCharIds
+  const built = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
       return character?.prompt.trim() ? [character] : []
     })
     .slice(0, 6)
     .map((c) => {
-      const rp = add?.positions?.[c.id] == null ? rolePos(c.id) : undefined
+      const addPos = add?.positions?.[c.id]
+      const rp = addPos == null ? rolePos(c.id) : undefined
       if (rp) rolePosApplied = true
+      const explicit = addPos ?? rp ?? entry?.positions?.[c.id]
       return {
         prompt: appendPrompt(c.prompt, roleTags(c.id)),
         negativePrompt: c.negativePrompt,
-        center: add?.positions?.[c.id] ?? rp ?? entry?.positions?.[c.id] ?? c.center,
+        center: explicit ?? c.center,
+        // 명시 위치(씬별/역할/큐)가 있었는지 — 아래 겹침 분산에서 이 캐릭터는 건드리지 않는다
+        positioned: explicit != null,
         enabled: true as const
       }
     })
   // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 메인 설정(전역 useCoords) 순 (커스텀)
   const useCoordsOverride = add?.useCoords ?? entry?.useCoords
+  const finalUseCoords = useCoordsOverride ?? (rolePosApplied ? true : base.useCoords)
+  // 좌표 모드에서 위치를 안 준 캐릭터들이 같은 칸(카드 기본 0.5,0.5)에 겹치면 NAI가
+  // 한 명으로 합쳐 그린다 — 역할 위치 때문에 좌표가 켜졌을 때 특히 잘 남. 미지정
+  // 캐릭터끼리(또는 지정 캐릭터와) 칸이 겹치면 같은 줄의 빈 칸으로 자동 분산 (커스텀)
+  if (finalUseCoords && built.length >= 2) {
+    const key = (p: { x: number; y: number }): string => `${p.x},${p.y}`
+    const used = new Set(built.filter((b) => b.positioned).map((b) => key(b.center)))
+    const slots = [0.5, 0.3, 0.7, 0.1, 0.9]
+    for (const b of built) {
+      if (b.positioned) continue
+      if (!used.has(key(b.center))) {
+        used.add(key(b.center))
+        continue
+      }
+      const free = slots.find((x) => !used.has(`${x},${b.center.y}`))
+      if (free != null) {
+        b.center = { x: free, y: b.center.y }
+        used.add(key(b.center))
+      }
+    }
+  }
+  const characterPrompts = built.map((b) => ({
+    prompt: b.prompt,
+    negativePrompt: b.negativePrompt,
+    center: b.center,
+    enabled: b.enabled
+  }))
   // 포함된 캐릭터에 연결된 캐릭레퍼는 자동 적용 (커스텀)
   const linked = linkedCharRefIds(charIds)
 
@@ -233,7 +264,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     // 씬별 variety+ 오버라이드 (커스텀) — 켜져 있으면 강제 on, 아니면 메인 설정 따름
     variety: scene.varietyPlus ? true : base.variety,
     // 위치 적용 오버라이드 (커스텀) — 큐/씬별 설정 > 씬 역할 위치가 잡혔으면 자동 on > 메인 설정
-    useCoords: useCoordsOverride ?? (rolePosApplied ? true : base.useCoords),
+    useCoords: finalUseCoords,
     characterPrompts,
     vibeIds,
     charRefIds,
