@@ -600,6 +600,8 @@ function SceneGrid(): React.JSX.Element {
       if (additions.length > 0) {
         const extras = useSceneExtrasStore.getState()
         await extras.load()
+        // 하이드레이션 전에 쓰면 기존 씬별 설정을 빈 값으로 덮어쓸 수 있다 — 먼저 로드 보장
+        await useSceneExtrasStore.getState().load()
         for (const a of additions) {
           useSceneExtrasStore.getState().updateAddition(activePresetId, a.sceneId, {
             characterIds: a.characterIds,

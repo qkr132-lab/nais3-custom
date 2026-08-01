@@ -54,6 +54,9 @@ const SETTINGS_KEY = 'scene_extras'
 
 function persist(): void {
   const s = useSceneExtrasStore.getState()
+  // 하이드레이션 전에 저장하면 빈 상태가 디스크의 설정 전체(씬별 캐릭터·역할·큐 항목)를
+  // 덮어써 날려버린다 — 재부팅 직후 토글이 설정을 지우던 버그의 원인. 로드 전엔 쓰지 않는다.
+  if (!s.loaded) return
   void window.nais.invoke('settings:set', {
     key: SETTINGS_KEY,
     value: JSON.stringify({
