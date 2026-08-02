@@ -104,6 +104,11 @@ export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: strin
   }
 }
 
+/** 3분할을 전송 프롬프트 한 줄로 (고정, 가변, 디테일 순 — 빈 칸은 건너뜀) */
+export function mergePromptParts(parts: PromptParts): string {
+  return [parts.base, parts.additional, parts.detail].filter((p) => p.trim()).join(', ')
+}
+
 /** 씬에서 고른 순서를 우선하고, 나머지 기본 캐릭터를 뒤에 중복 없이 붙인다. */
 export function prioritizeSceneCharacterIds(sceneIds: number[], baseIds: number[]): number[] {
   return [...new Set([...sceneIds, ...baseIds])]
@@ -119,16 +124,25 @@ export function refreshScenePrompts(
 ): GenerationRequest {
   if (request.sceneId == null || request.sceneBasePrompt == null) return request
 
+  const negativePrompt = appendPrompt(
+    request.sceneBaseNegativePrompt ?? '',
+    latestScene.negativePrompt
+  )
+
+  // 분할 사용 시: 씬 프롬프트를 가변 뒤·디테일 앞에 끼워 전송 프롬프트를 파츠에서 재조립.
+  // (전체 병합문 끝에 붙이면 디테일 뒤 꼬리가 되어 긴 디테일에 묻힌다 — 적용 약해지던 버그)
+  if (request.promptParts && request.sceneBaseAdditionalPrompt != null) {
+    const parts = mergeSceneIntoPromptParts(
+      { ...request.promptParts, additional: request.sceneBaseAdditionalPrompt },
+      latestScene.prompt
+    )
+    return { ...request, prompt: mergePromptParts(parts), negativePrompt, promptParts: parts }
+  }
+
   return {
     ...request,
     prompt: appendPrompt(request.sceneBasePrompt, latestScene.prompt),
-    negativePrompt: appendPrompt(request.sceneBaseNegativePrompt ?? '', latestScene.negativePrompt),
-    promptParts:
-      request.promptParts && request.sceneBaseAdditionalPrompt != null
-        ? mergeSceneIntoPromptParts(
-            { ...request.promptParts, additional: request.sceneBaseAdditionalPrompt },
-            latestScene.prompt
-          )
-        : request.promptParts
+    negativePrompt,
+    promptParts: request.promptParts
   }
 }

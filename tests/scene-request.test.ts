@@ -68,7 +68,9 @@ describe('대기 씬 요청 최신화', () => {
       negativePrompt: 'new negative'
     })
 
-    expect(refreshed.prompt).toBe('base, 6::new tag::')
+    // 분할 사용 시 전송 프롬프트는 파츠에서 재조립 — 씬 태그가 가변 뒤·디테일 앞에 온다
+    // (전체 병합문 끝에 붙이면 긴 디테일 뒤 꼬리가 되어 적용이 약해지던 버그의 회귀 방지)
+    expect(refreshed.prompt).toBe('base, variable, 6::new tag::, base detail')
     expect(refreshed.negativePrompt).toBe('base negative, new negative')
     expect(refreshed.promptParts?.additional).toBe('variable, 6::new tag::')
     expect(refreshed.promptParts?.detail).toBe('base detail')

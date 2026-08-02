@@ -3,6 +3,7 @@ import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import {
   appendPrompt,
+  mergePromptParts,
   mergeSceneIntoPromptParts,
   prioritizeSceneCharacterIds,
   roleTagsFor
@@ -252,12 +253,14 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     }
   }
 
+  // 분할 사용 시 씬 프롬프트는 가변 뒤·디테일 앞 (전체 끝에 붙이면 디테일에 묻힘 — 커스텀 수정)
+  const mergedParts = base.promptParts
+    ? mergeSceneIntoPromptParts(base.promptParts, scene.prompt)
+    : undefined
   return {
     ...base,
-    prompt: appendPrompt(base.prompt, scene.prompt),
-    promptParts: base.promptParts
-      ? mergeSceneIntoPromptParts(base.promptParts, scene.prompt)
-      : undefined,
+    prompt: mergedParts ? mergePromptParts(mergedParts) : appendPrompt(base.prompt, scene.prompt),
+    promptParts: mergedParts,
     negativePrompt: appendPrompt(base.negativePrompt, scene.negativePrompt),
     width: src ? src.width : scene.width,
     height: src ? src.height : scene.height,
