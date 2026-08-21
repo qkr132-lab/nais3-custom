@@ -728,10 +728,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
         seed: 0,
         kind: 'upscale'
       })
-      void fetchAnlasBalance(token).then(({ anlas }) => {
+      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
         if (anlas !== null) {
           logBalance(anlas)
-          broadcast('anlas:balance', { anlas })
+          broadcast('anlas:balance', { anlas, opusUsage })
         }
       })
       return { filePath: saved.filePath, base64: png.toString('base64') }
@@ -761,10 +761,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
         kind: method // 툴별 kind (bg-removal 등) → 히스토리 뱃지 구분
       })
       // 잔액 갱신 (디렉터 툴도 Anlas 소모, Opus는 소형 무료)
-      void fetchAnlasBalance(token).then(({ anlas }) => {
+      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
         if (anlas !== null) {
           logBalance(anlas)
-          broadcast('anlas:balance', { anlas })
+          broadcast('anlas:balance', { anlas, opusUsage })
         }
       })
       return { filePath: saved.filePath, base64: png.toString('base64') }

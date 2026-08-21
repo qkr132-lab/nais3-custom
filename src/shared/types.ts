@@ -819,7 +819,7 @@ export interface R2UploadStatus {
 export interface IpcEventMap {
   'queue:changed': QueueStatusLite
   /** 생성 완료 등으로 잔액이 갱신될 때 */
-  'anlas:balance': { anlas: number }
+  'anlas:balance': { anlas: number; opusUsage: OpusUsage | null }
   'generation:progress': {
     id: string
     stepIx: number

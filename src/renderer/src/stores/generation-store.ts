@@ -435,9 +435,17 @@ export function bindGenerationEvents(): () => void {
       ...(e.previewPng ? { previewPng: e.previewPng } : {})
     })
   })
-  const offAnlas = window.nais.on('anlas:balance', ({ anlas }) => {
-    useGenerationStore.setState({ anlasBalance: anlas })
+  const offAnlas = window.nais.on('anlas:balance', ({ anlas, opusUsage }) => {
+    useGenerationStore.setState({ anlasBalance: anlas, opusUsage })
   })
+  // Opus 생성 한도는 시간이 지나면 저절로 회복된다 — 생성이 없어도 주기적으로 갱신.
+  // 창이 숨어 있을 땐 건너뛰고, 다시 보이는 순간 즉시 한 번 갱신한다.
+  const refreshIfVisible = (): void => {
+    if (document.visibilityState === 'visible') void useGenerationStore.getState().refreshAnlas()
+  }
+  const usageTimer = window.setInterval(refreshIfVisible, 5 * 60 * 1000)
+  document.addEventListener('visibilitychange', refreshIfVisible)
+  window.addEventListener('focus', refreshIfVisible)
   // 바이브 인코딩 완료 시 목록 재로드 → 카드의 인코딩 표시 갱신
   const offVibes = window.nais.on('vibes:encoded', () => {
     void useVibesStore.getState().load()
@@ -447,5 +455,8 @@ export function bindGenerationEvents(): () => void {
     offProgress()
     offAnlas()
     offVibes()
+    window.clearInterval(usageTimer)
+    document.removeEventListener('visibilitychange', refreshIfVisible)
+    window.removeEventListener('focus', refreshIfVisible)
   }
 }
