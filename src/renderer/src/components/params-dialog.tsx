@@ -1,5 +1,6 @@
 import { Dice5, Lock, LockOpen } from 'lucide-react'
 import type { UcPresetIndex } from '@shared/types'
+import { MODEL_OPTIONS, modelCaps } from '@shared/nai-models'
 import { NOISE_SCHEDULES, SAMPLERS, UC_PRESET_OPTIONS } from '../lib/constants'
 import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
@@ -30,12 +31,28 @@ export function ParamsDialog({
   const patch = useGenerationStore((s) => s.patchRequest)
   const seedLocked = useGenerationStore((s) => s.seedLocked)
   const setSeedLocked = useGenerationStore((s) => s.setSeedLocked)
+  const caps = modelCaps(request.model)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[420px] p-5">
         <DialogTitle className="mb-4">생성 파라미터</DialogTitle>
         <div className="grid gap-4">
+          <Row label="모델">
+            <Select value={request.model} onValueChange={(v) => patch({ model: v })}>
+              <SelectTrigger className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_OPTIONS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
+
           <Row label="해상도">
             <ResolutionPicker
               className="w-52"
@@ -118,20 +135,26 @@ export function ParamsDialog({
             </Select>
           </Row>
 
-          <Row label="노이즈 스케줄">
-            <Select value={request.noiseSchedule} onValueChange={(v) => patch({ noiseSchedule: v })}>
-              <SelectTrigger className="w-52">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {NOISE_SCHEDULES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Row>
+          {/* V5는 노이즈 스케줄 선택이 없다 (웹 기능표 noiseSchedule=false) */}
+          {caps.noiseSchedule && (
+            <Row label="노이즈 스케줄">
+              <Select
+                value={request.noiseSchedule}
+                onValueChange={(v) => patch({ noiseSchedule: v })}
+              >
+                <SelectTrigger className="w-52">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {NOISE_SCHEDULES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Row>
+          )}
 
           <Row label="UC 프리셋">
             <Select
@@ -158,9 +181,12 @@ export function ParamsDialog({
             />
           </Row>
 
-          <Row label="Variety+">
-            <Switch checked={request.variety} onCheckedChange={(v) => patch({ variety: v })} />
-          </Row>
+          {/* V5는 Variety+가 없다 (웹 기능표 cfgDelay=false) */}
+          {caps.variety && (
+            <Row label="Variety+">
+              <Switch checked={request.variety} onCheckedChange={(v) => patch({ variety: v })} />
+            </Row>
+          )}
         </div>
       </DialogContent>
     </Dialog>

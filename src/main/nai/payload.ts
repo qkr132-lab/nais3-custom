@@ -30,6 +30,7 @@ export {
   removeComments
 } from '../../shared/nai-presets'
 import { mergeQualityTags, mergeUcPreset, removeComments } from '../../shared/nai-presets'
+import { effectiveNoiseSchedule, isV5, modelCaps } from '../../shared/nai-models'
 
 /**
  * Variety+(skip_cfg_above_sigma) 값.
@@ -48,7 +49,10 @@ export function varietySigma(opts: {
   height: number
 }): number | null {
   if (!opts.variety) return null
-  const coef = opts.model.includes('nai-diffusion-4-5') ? 58 : 19
+  // V5는 웹 기능표에서 cfgDelay=false — UI 자체가 없으므로 켜져 있어도 보내지 않는다
+  const caps = modelCaps(opts.model)
+  if (!caps.variety) return null
+  const coef = opts.model.includes('nai-diffusion-4-5') ? caps.varietySigma : 19
   const pixelRatio = (opts.width * opts.height) / (832 * 1216)
   return coef * Math.sqrt(pixelRatio)
 }
@@ -141,6 +145,8 @@ export function buildGenerateImagePayload(
   const center = (c: (typeof activeChars)[number]): { x: number; y: number } =>
     req.useCoords ? (c.center ?? { x: 0.5, y: 0.5 }) : { x: 0.5, y: 0.5 }
 
+  const caps = modelCaps(req.model)
+
   return {
     action: opts.i2i ? (opts.i2i.maskBase64 ? 'infill' : 'img2img') : 'generate',
     input: prompt,
@@ -185,7 +191,7 @@ export function buildGenerateImagePayload(
       // 인페인트는 add_original_image=true: 서버가 마스크 밖을 원본으로 합성
       add_original_image: true,
       cfg_rescale: req.cfgRescale,
-      noise_schedule: req.noiseSchedule,
+      noise_schedule: effectiveNoiseSchedule(req.model, req.noiseSchedule),
       legacy_v3_extend: false,
       skip_cfg_above_sigma: varietySigma({
         model: req.model,
@@ -224,7 +230,8 @@ export function buildGenerateImagePayload(
         center: center(c),
         enabled: true
       })),
-      ...(opts.characterReferences?.length
+      // V5는 캐릭터 레퍼런스 미지원 (웹 기능표 characterReferences=false) — 보내면 서버가 거부한다
+      ...(caps.characterReferences && opts.characterReferences?.length
         ? {
             director_reference_descriptions: opts.characterReferences.map((r) => ({
               caption: { base_caption: r.referenceType, char_captions: [] },
@@ -251,7 +258,8 @@ export function buildGenerateImagePayload(
               : {})
           }
         : {}),
-      ...(opts.vibes?.length
+      // V5는 바이브 트랜스퍼 미지원 (웹 기능표 vibetransfer=false)
+      ...(caps.vibeTransfer && opts.vibes?.length
         ? {
             reference_strength_multiple: opts.vibes.map((v) => v.strength),
             ...(opts.vibes.some((v) => v.cached)
@@ -274,6 +282,15 @@ export function buildGenerateImagePayload(
           }
         : {}),
       negative_prompt: negative,
+      // V5 신규: 프리셋 인덱스를 별도 필드로도 받는다 (생성물 메타데이터에서 확인).
+      // 기존 ucPreset/qualityToggle과 병행 전송 — TODO(fixture): V5 요청 실캡처로 확정할 것
+      ...(isV5(req.model)
+        ? {
+            tag_hint_qt: req.qualityToggle ? 1 : 0,
+            tag_hint_uc_preset: req.ucPreset,
+            tag_hint_transparent_background: null
+          }
+        : {}),
       deliberate_euler_ancestral_bug: false,
       prefer_brownian: true,
       image_format: opts.imageFormat ?? 'png',

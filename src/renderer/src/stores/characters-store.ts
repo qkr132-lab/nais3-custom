@@ -70,10 +70,10 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   },
 
   updateCard: (id, patch) => {
-    // NAI는 캐릭터 동시 6명 초과 시 실패 — 6명 넘겨 켜는 것을 막는다
+    // NAI는 모델별 캐릭터 상한 초과 시 실패 — 넘겨 켜는 것을 막는다 (V4.5=6, V5=32)
     if (patch.enabled === true) {
       const enabledCount = get().items.filter((c) => c.enabled && c.id !== id).length
-      if (enabledCount >= MAX_CHARACTERS) return // 무시 (토글 안 됨)
+      if (enabledCount >= getMaxCharacters()) return // 무시 (토글 안 됨)
     }
     set({ items: get().items.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
     void window.nais.invoke('chars:update', { id, patch })
@@ -185,8 +185,22 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
 }))
 
 /** 생성에 포함될 캐릭터 (정규 순서 = v4 use_order 순서) */
-/** NAI 동시 캐릭터 상한 (초과 시 API 실패) */
-export const MAX_CHARACTERS = 6
+/**
+ * NAI 동시 캐릭터 상한 (초과 시 API 실패). 모델 의존 — V4.5=6, V5=32.
+ *
+ * 스토어끼리 순환 참조가 생기지 않게(generation-store가 이미 이 파일을 읽는다)
+ * 모델이 바뀔 때 generation-store가 이 값을 밀어 넣는다. 화면 표시는 컴포넌트가
+ * modelCaps(model)로 직접 계산하므로 여기 값은 토글 차단 판정에만 쓴다.
+ */
+let maxCharacters = 6
+
+export function setMaxCharacters(n: number): void {
+  maxCharacters = n
+}
+
+export function getMaxCharacters(): number {
+  return maxCharacters
+}
 
 export function enabledCharacters(): CharacterCard[] {
   return useCharactersStore.getState().items.filter((c) => c.enabled && c.prompt.trim())

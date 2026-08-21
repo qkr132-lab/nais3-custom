@@ -17,9 +17,10 @@ import { createPortal } from 'react-dom'
 import type { CharacterCard } from '@shared/types'
 import { cn } from '../lib/utils'
 import { buildDisplayRows } from '../lib/folder-list'
-import { useCharactersStore, MAX_CHARACTERS } from '../stores/characters-store'
+import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
+import { modelCaps } from '@shared/nai-models'
 import { askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
@@ -89,6 +90,8 @@ export function CharacterOverlay(): React.JSX.Element {
   }, [folders, items, searching, search])
 
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
+  // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
+  const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
 
   // 기본 프롬프트 + 캐릭터 프롬프트가 512 토큰을 합산 공유 (공홈 실측)
   const basePrompt = useGenerationStore((s) => s.request.prompt)
@@ -264,13 +267,13 @@ export function CharacterOverlay(): React.JSX.Element {
           <span
             className={cn(
               'rounded-full px-1.5 font-mono text-[10.5px]',
-              enabledCount >= MAX_CHARACTERS
+              enabledCount >= maxCharacters
                 ? 'bg-danger/15 text-danger'
                 : 'bg-accent-soft text-accent'
             )}
-            title={`활성 캐릭터 ${enabledCount}/${MAX_CHARACTERS} (NAI는 6명까지)`}
+            title={`활성 캐릭터 ${enabledCount}/${maxCharacters} (이 모델의 상한)`}
           >
-            {enabledCount}/{MAX_CHARACTERS}
+            {enabledCount}/{maxCharacters}
           </span>
         )}
         {enabledCount > 0 && (

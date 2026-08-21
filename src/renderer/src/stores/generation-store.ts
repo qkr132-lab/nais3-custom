@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { GenerationRequest, HistoryItem, PromptParts, QueueStatusLite } from '@shared/types'
-import { enabledCharacters, linkedCharRefIds } from './characters-store'
+import { modelCaps } from '@shared/nai-models'
+import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 
@@ -13,7 +14,7 @@ import { toast } from './toast-store'
 export const DEFAULT_REQUEST: GenerationRequest = {
   prompt: '',
   negativePrompt: '',
-  model: 'nai-diffusion-4-5-full',
+  model: 'nai-diffusion-5-full',
   width: 832,
   height: 1216,
   steps: 28,
@@ -27,6 +28,11 @@ export const DEFAULT_REQUEST: GenerationRequest = {
   ucPreset: 0,
   characterPrompts: [],
   useCoords: false
+}
+
+/** 모델이 바뀔 때 모델 의존 상한을 다른 스토어에 반영 (순환 참조 방지 — 단방향 주입) */
+function syncModelLimits(model: string): void {
+  setMaxCharacters(modelCaps(model).maxCharacters)
 }
 
 export function mergePromptParts(parts: PromptParts): string {
@@ -127,6 +133,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   patchRequest: (patch) => {
     const request = withoutTransientSource({ ...get().request, ...patch })
     set({ request })
+    if (patch.model) syncModelLimits(request.model)
     // 편집도 즉시 영속(디바운스) — 생성 안 하고 재시작해도 롤백되지 않게
     persistParams(request)
   },
@@ -180,6 +187,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         // 손상된 저장값은 기본값으로
       }
     }
+    syncModelLimits(get().request.model)
     const queue = await window.nais.invoke('queue:status', undefined)
     set({ queue, ...deriveQueue(queue) })
     await get().refreshHistory()
