@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../lib/utils'
 import { caretCoords } from '../lib/caret'
@@ -50,6 +50,7 @@ export function PromptEditor({
   placeholder,
   className,
   negative = false,
+  autoGrow = false,
   tokensOverride
 }: {
   value: string
@@ -57,6 +58,8 @@ export function PromptEditor({
   placeholder?: string
   className?: string
   negative?: boolean
+  /** 내용만큼 세로로 늘어난다 (className의 min-h/max-h 안에서). 긴 자연어 프롬프트용 */
+  autoGrow?: boolean
   /** 외부에서 합산한 토큰 수 (기본+캐릭터 합산 등). undefined면 자체 카운트, null이면 숨김 */
   tokensOverride?: number | null
 }): React.JSX.Element {
@@ -72,6 +75,20 @@ export function PromptEditor({
   const [popupPos, setPopupPos] = useState<{ left: number; top: number } | null>(null)
 
   const ranges = useMemo(() => highlightRanges(value), [value])
+
+  // 내용 높이 측정 — textarea를 잠깐 0으로 눌러 scrollHeight를 읽는다.
+  // 최소·최대는 className의 min-h/max-h가 잡으므로 여기서는 순수 내용 높이만 준다.
+  const [contentHeight, setContentHeight] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!autoGrow) return
+    const ta = textareaRef.current
+    if (!ta) return
+    const prev = ta.style.height
+    ta.style.height = '0px'
+    const next = ta.scrollHeight
+    ta.style.height = prev
+    setContentHeight((h) => (h === next ? h : next))
+  }, [autoGrow, value])
 
   // 토큰 카운트 (V4.5 = T5, 한도 512 — NAI 웹과 동일: 원문 기준, 가중치 문법 제거 후)
   const [ownTokens, setOwnTokens] = useState<number | null>(null)
@@ -177,12 +194,14 @@ export function PromptEditor({
     }
     setTokenStart(start)
     debounceRef.current = setTimeout(() => {
-      void window.nais.invoke('tags:search', { query: token.trim(), limit: 8 }).then(({ items }) => {
-        if (searchSeqRef.current !== seq) return // 스테일 — 그 사이 입력이 바뀜
-        setSuggestions(items.map((t) => ({ kind: 'tag' as const, ...t })))
-        setSelected(0)
-        if (items.length > 0) placePopup(items.length)
-      })
+      void window.nais
+        .invoke('tags:search', { query: token.trim(), limit: 8 })
+        .then(({ items }) => {
+          if (searchSeqRef.current !== seq) return // 스테일 — 그 사이 입력이 바뀜
+          setSuggestions(items.map((t) => ({ kind: 'tag' as const, ...t })))
+          setSelected(0)
+          if (items.length > 0) placePopup(items.length)
+        })
     }, 90)
   }
 
@@ -208,13 +227,18 @@ export function PromptEditor({
       className={cn(
         'relative overflow-hidden rounded-md border border-line bg-paper transition-colors',
         negative && 'border-danger/25',
+        autoGrow && 'overflow-y-auto',
         className
       )}
+      style={autoGrow && contentHeight !== null ? { height: contentHeight } : undefined}
     >
       <div
         ref={mirrorRef}
         aria-hidden
-        className={cn(TYPO, 'pointer-events-none absolute inset-0 overflow-hidden text-transparent')}
+        className={cn(
+          TYPO,
+          'pointer-events-none absolute inset-0 overflow-hidden text-transparent'
+        )}
       >
         {ranges.map((r) =>
           r.bg ? (
@@ -312,8 +336,12 @@ export function PromptEditor({
                 ) : (
                   <>
                     <span className="flex w-full items-center gap-2">
-                      <span className={cn('min-w-0 flex-1 truncate', TYPE_COLORS[s.type])}>{s.tag}</span>
-                      <span className="shrink-0 text-[10.5px] text-faint">{formatCount(s.count)}</span>
+                      <span className={cn('min-w-0 flex-1 truncate', TYPE_COLORS[s.type])}>
+                        {s.tag}
+                      </span>
+                      <span className="shrink-0 text-[10.5px] text-faint">
+                        {formatCount(s.count)}
+                      </span>
                     </span>
                     {/* 한글 뜻 (커스텀 사전) */}
                     {s.ko && (

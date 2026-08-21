@@ -4,6 +4,7 @@ import {
   FolderPlus,
   ImageOff,
   ImagePlus,
+  LayoutGrid,
   Link2,
   Pencil,
   Plus,
@@ -24,6 +25,7 @@ import { modelCaps } from '@shared/nai-models'
 import { askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
+import { CompositionDialog } from './composition-dialog'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -40,6 +42,7 @@ export function CharacterOverlay(): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
   const createCard = useCharactersStore((s) => s.createCard)
   const updateCard = useCharactersStore((s) => s.updateCard)
+  const setCenterLive = useCharactersStore((s) => s.setCenterLive)
   const disableAll = useCharactersStore((s) => s.disableAll)
   const removeCard = useCharactersStore((s) => s.removeCard)
   const duplicateCard = useCharactersStore((s) => s.duplicateCard)
@@ -90,6 +93,7 @@ export function CharacterOverlay(): React.JSX.Element {
   }, [folders, items, searching, search])
 
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
+  const [compositionOpen, setCompositionOpen] = useState(false)
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
   const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
 
@@ -181,14 +185,14 @@ export function CharacterOverlay(): React.JSX.Element {
           <PopoverTrigger asChild>
             <Button size="sm" variant="ghost" className="h-7 gap-1 px-1.5 font-mono text-[11px]">
               <Crosshair size={13} />
-              {char.center.x},{char.center.y}
+              {/* 자릿수가 바뀌어도 폭이 흔들리지 않게 고정폭 (V5 좌표는 0.776처럼 3자리) */}
+              <span className="inline-block w-[62px] text-left tabular-nums">
+                {char.center.x.toFixed(2)},{char.center.y.toFixed(2)}
+              </span>
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto">
-            <PositionPicker
-              center={char.center}
-              onPick={(c) => updateCard(char.id, { center: c })}
-            />
+            <PositionPicker center={char.center} onPick={(c) => setCenterLive(char.id, c)} />
           </PopoverContent>
         </Popover>
       )}
@@ -235,16 +239,18 @@ export function CharacterOverlay(): React.JSX.Element {
           <Trash2 size={14} />
         </Button>
       </div>
-      {/* resize-y: 우하단 핸들로 세로 크기 조절. 초기 크기 상향 (F11) */}
+      {/* 내용만큼 늘어난다 (min~max 안에서). 자연어 문장을 길게 쓰는 V5 워크플로 대응 */}
       <PromptEditor
-        className="h-40 max-h-[520px] min-h-20 resize-y bg-surface-2"
+        autoGrow
+        className="max-h-[520px] min-h-[96px] bg-surface-2"
         value={char.prompt}
         placeholder="girl, ..."
         onValueChange={(v) => updateCard(char.id, { prompt: v })}
       />
       <PromptEditor
         negative
-        className="h-24 max-h-96 min-h-14 resize-y bg-surface-2"
+        autoGrow
+        className="max-h-96 min-h-14 bg-surface-2"
         value={char.negativePrompt}
         placeholder="캐릭터 네거티브"
         onValueChange={(v) => updateCard(char.id, { negativePrompt: v })}
@@ -279,6 +285,17 @@ export function CharacterOverlay(): React.JSX.Element {
           >
             {enabledCount}/{maxCharacters}
           </span>
+        )}
+        {enabledCount > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 px-2 text-[11px]"
+            title="활성 캐릭터를 한 화면에 놓고 끌어서 배치"
+            onClick={() => setCompositionOpen(true)}
+          >
+            <LayoutGrid size={13} /> 배치
+          </Button>
         )}
         {enabledCount > 0 && (
           <Button
@@ -389,6 +406,8 @@ export function CharacterOverlay(): React.JSX.Element {
           />,
           document.body
         )}
+
+      <CompositionDialog open={compositionOpen} onOpenChange={setCompositionOpen} />
 
       {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
       <CharRefLinkDialog

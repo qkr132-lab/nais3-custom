@@ -17,6 +17,8 @@ interface CharactersState {
   load: () => Promise<void>
   createCard: (folderId: number | null) => Promise<void>
   updateCard: (id: number, patch: CharacterCardPatch) => void
+  /** 드래그로 좌표를 바꿀 때 — 화면은 즉시, 저장은 묶어서 (IPC 폭주 방지) */
+  setCenterLive: (id: number, center: { x: number; y: number }) => void
   /** 활성 캐릭터 전체 해제 */
   disableAll: () => void
   removeCard: (id: number) => void
@@ -34,6 +36,9 @@ interface CharactersState {
     chars: { prompt: string; negativePrompt: string; center?: { x: number; y: number } }[]
   ) => Promise<void>
 }
+
+/** 캐릭터별 좌표 저장 디바운스 타이머 */
+const centerSaveTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
 export const useCharactersStore = create<CharactersState>((set, get) => ({
   folders: [],
@@ -77,6 +82,19 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
     }
     set({ items: get().items.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
     void window.nais.invoke('chars:update', { id, patch })
+  },
+
+  setCenterLive: (id, center) => {
+    set({ items: get().items.map((c) => (c.id === id ? { ...c, center } : c)) })
+    const timers = centerSaveTimers
+    clearTimeout(timers.get(id))
+    timers.set(
+      id,
+      setTimeout(() => {
+        timers.delete(id)
+        void window.nais.invoke('chars:update', { id, patch: { center } })
+      }, 250)
+    )
   },
 
   disableAll: () => {
