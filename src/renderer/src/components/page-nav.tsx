@@ -1,4 +1,13 @@
-import { CloudUpload, Globe, Image, Images, LayoutGrid, Wand2, type LucideIcon } from 'lucide-react'
+import {
+  CloudUpload,
+  Crosshair,
+  Globe,
+  Image,
+  Images,
+  LayoutGrid,
+  Wand2,
+  type LucideIcon
+} from 'lucide-react'
 import { motion } from 'motion/react'
 import { cn } from '../lib/utils'
 import { useLayoutStore, type CenterMode } from '../stores/layout-store'
@@ -6,6 +15,7 @@ import { useLayoutStore, type CenterMode } from '../stores/layout-store'
 const PAGES: { id: CenterMode; label: string; icon: LucideIcon }[] = [
   { id: 'main', label: '메인', icon: Image },
   { id: 'scene', label: '씬', icon: LayoutGrid },
+  { id: 'composition', label: '배치', icon: Crosshair },
   { id: 'director', label: '디렉터', icon: Wand2 },
   { id: 'library', label: '라이브러리', icon: Images },
   { id: 'web', label: '웹', icon: Globe },

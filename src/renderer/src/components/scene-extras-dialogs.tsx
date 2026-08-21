@@ -6,6 +6,7 @@ import {
   EyeOff,
   ImageOff,
   Link2,
+  Maximize2,
   Plus,
   RotateCcw,
   Split,
@@ -32,6 +33,7 @@ import { toast } from '../stores/toast-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
+import { ScenePlacementDialog } from './scene-placement-dialog'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
@@ -594,6 +596,8 @@ function PositionPanel({
     .map((id) => items.find((c) => c.id === id))
     .filter((c): c is CharacterCard => !!c)
 
+  const [boardOpen, setBoardOpen] = useState(false)
+
   const setPos = (id: number, c: { x: number; y: number }): void =>
     onPatch({ positions: { ...(positions ?? {}), [id]: c } })
   const resetPos = (id: number): void => {
@@ -609,8 +613,25 @@ function PositionPanel({
         <span className="text-[12px] font-medium text-muted">위치 적용</span>
         <span className="text-[11px] text-faint">캐릭터 배치 좌표 (NAI 다중 캐릭터)</span>
         <div className="flex-1" />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px]"
+          title="이 씬의 캐릭터를 한 화면에 놓고 끌어서 배치"
+          onClick={() => setBoardOpen(true)}
+        >
+          <Maximize2 size={12} /> 넓게 배치
+        </Button>
         <Switch checked={!!useCoords} onCheckedChange={(v) => onPatch({ useCoords: v })} />
       </div>
+      <ScenePlacementDialog
+        open={boardOpen}
+        onOpenChange={setBoardOpen}
+        characterIds={characterIds}
+        positions={positions}
+        useCoords={useCoords}
+        onPatch={onPatch}
+      />
       {useCoords &&
         (chars.length === 0 ? (
           <p className="mt-2 text-[11.5px] text-faint">
@@ -1021,7 +1042,12 @@ function RolePosButton({
       <PopoverContent className="w-auto">
         <PositionPicker center={pos ?? { x: 0.5, y: 0.5 }} onPick={(c) => onChange(c)} />
         {pos && (
-          <Button size="sm" variant="ghost" className="mt-1.5 w-full" onClick={() => onChange(null)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mt-1.5 w-full"
+            onClick={() => onChange(null)}
+          >
             지정 해제
           </Button>
         )}

@@ -11,6 +11,7 @@ import { MetadataDialog } from './components/metadata-dialog'
 import { R2SyncHost } from './components/r2-sync-dialog'
 import { PromptPanel } from './components/prompt-panel'
 import { SceneMode } from './components/scene-mode'
+import { CompositionMode } from './components/composition-mode'
 import { LibraryMode } from './components/library-mode'
 import { UploadMode } from './components/upload-mode'
 import { WebMode } from './components/web-mode'
@@ -185,6 +186,8 @@ export default function App(): React.JSX.Element {
           </AnimatePresence>
           {centerMode === 'scene' ? (
             <SceneMode />
+          ) : centerMode === 'composition' ? (
+            <CompositionMode />
           ) : centerMode === 'director' ? (
             <DirectorMode />
           ) : centerMode === 'library' ? (

@@ -21,11 +21,11 @@ import { buildDisplayRows } from '../lib/folder-list'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
+import { useLayoutStore } from '../stores/layout-store'
 import { modelCaps } from '@shared/nai-models'
 import { askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
-import { CompositionDialog } from './composition-dialog'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -93,7 +93,7 @@ export function CharacterOverlay(): React.JSX.Element {
   }, [folders, items, searching, search])
 
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
-  const [compositionOpen, setCompositionOpen] = useState(false)
+  const setCenterMode = useLayoutStore((s) => s.setCenterMode)
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
   const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
 
@@ -125,7 +125,11 @@ export function CharacterOverlay(): React.JSX.Element {
   const renderHeader = (char: CharacterCard): React.ReactNode => (
     <div
       data-char-card
-      className={cn('flex h-10 items-center gap-2 px-2', !char.enabled && 'opacity-55')}
+      className={cn(
+        // 좁은 폭에서 좌표 버튼이 잘려 사라지던 문제 — 줄바꿈 허용(높이는 최소 h-10)
+        'flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1',
+        !char.enabled && 'opacity-55'
+      )}
     >
       <Switch checked={char.enabled} onCheckedChange={(v) => updateCard(char.id, { enabled: v })} />
       {char.thumbnail ? (
@@ -183,10 +187,15 @@ export function CharacterOverlay(): React.JSX.Element {
       {useCoords && char.enabled && (
         <Popover>
           <PopoverTrigger asChild>
-            <Button size="sm" variant="ghost" className="h-7 gap-1 px-1.5 font-mono text-[11px]">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 shrink-0 gap-1 px-1.5 font-mono text-[10.5px]"
+              title="이 캐릭터 위치 지정"
+            >
               <Crosshair size={13} />
               {/* 자릿수가 바뀌어도 폭이 흔들리지 않게 고정폭 (V5 좌표는 0.776처럼 3자리) */}
-              <span className="inline-block w-[62px] text-left tabular-nums">
+              <span className="inline-block w-[52px] text-left tabular-nums">
                 {char.center.x.toFixed(2)},{char.center.y.toFixed(2)}
               </span>
             </Button>
@@ -262,7 +271,8 @@ export function CharacterOverlay(): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <div className="flex items-center gap-2">
+      {/* 좁은 폭에서 오른쪽 끝(위치 지정 스위치)이 잘리지 않게 줄바꿈 허용 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Button
           size="icon"
           variant="ghost"
@@ -291,8 +301,8 @@ export function CharacterOverlay(): React.JSX.Element {
             size="sm"
             variant="ghost"
             className="h-6 gap-1 px-2 text-[11px]"
-            title="활성 캐릭터를 한 화면에 놓고 끌어서 배치"
-            onClick={() => setCompositionOpen(true)}
+            title="배치 탭에서 전원을 한 화면에 놓고 끌어서 배치"
+            onClick={() => setCenterMode('composition')}
           >
             <LayoutGrid size={13} /> 배치
           </Button>
@@ -319,9 +329,8 @@ export function CharacterOverlay(): React.JSX.Element {
             {charTokens}/512
           </span>
         )}
-        <div className="flex-1" />
         <label
-          className="flex items-center gap-1.5 text-[11.5px] text-muted"
+          className="ml-auto flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted"
           title="끄면 AI's Choice (NAI가 위치 결정)"
         >
           위치 지정
@@ -406,8 +415,6 @@ export function CharacterOverlay(): React.JSX.Element {
           />,
           document.body
         )}
-
-      <CompositionDialog open={compositionOpen} onOpenChange={setCompositionOpen} />
 
       {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
       <CharRefLinkDialog
