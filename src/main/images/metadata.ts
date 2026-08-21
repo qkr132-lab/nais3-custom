@@ -60,6 +60,96 @@ function parsePngTextChunks(buf: Buffer): Record<string, string> {
   return out
 }
 
+/** RIFF 청크를 훑어 EXIF 청크 페이로드(TIFF 헤더로 시작)를 꺼낸다 */
+function webpExifChunk(buf: Buffer): Buffer | null {
+  if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'RIFF') return null
+  if (buf.toString('ascii', 8, 12) !== 'WEBP') return null
+  let off = 12
+  while (off + 8 <= buf.length) {
+    const type = buf.toString('ascii', off, off + 4)
+    const size = buf.readUInt32LE(off + 4)
+    if (off + 8 + size > buf.length) break
+    if (type === 'EXIF') return buf.subarray(off + 8, off + 8 + size)
+    off += 8 + size + (size % 2) // 청크는 짝수 정렬
+  }
+  return null
+}
+
+/** TIFF 타입별 바이트 크기 (1=BYTE … 12=DOUBLE) */
+const TIFF_TYPE_SIZE: Record<number, number> = {
+  1: 1,
+  2: 1,
+  3: 2,
+  4: 4,
+  5: 8,
+  6: 1,
+  7: 1,
+  8: 2,
+  9: 4,
+  10: 8,
+  11: 4,
+  12: 8
+}
+
+const TIFF_TAGS: Record<number, string> = {
+  0x010e: 'ImageDescription',
+  0x0131: 'Software',
+  0x9286: 'UserComment'
+}
+
+/** WebP EXIF에서 필요한 문자열 태그만 뽑는다 (ExifIFD 1단계까지) */
+function parseWebpExifTags(buf: Buffer): Record<string, string> | null {
+  const e = webpExifChunk(buf)
+  if (!e || e.length < 8) return null
+  const order = e.toString('ascii', 0, 2)
+  if (order !== 'II' && order !== 'MM') return null
+  const le = order === 'II'
+  const u16 = (o: number): number => (le ? e.readUInt16LE(o) : e.readUInt16BE(o))
+  const u32 = (o: number): number => (le ? e.readUInt32LE(o) : e.readUInt32BE(o))
+
+  const out: Record<string, string> = {}
+  const walk = (ifdOffset: number, depth: number): void => {
+    if (depth > 2 || ifdOffset <= 0 || ifdOffset + 2 > e.length) return
+    const count = u16(ifdOffset)
+    for (let i = 0; i < count; i++) {
+      const p = ifdOffset + 2 + i * 12
+      if (p + 12 > e.length) break
+      const tag = u16(p)
+      const type = u16(p + 2)
+      const size = (TIFF_TYPE_SIZE[type] ?? 1) * u32(p + 4)
+      // ExifIFD 포인터: 값 자리에 하위 IFD 오프셋이 들어 있다
+      if (tag === 0x8769) {
+        walk(u32(p + 8), depth + 1)
+        continue
+      }
+      const name = TIFF_TAGS[tag]
+      if (!name) continue
+      const valueOffset = size > 4 ? u32(p + 8) : p + 8
+      if (valueOffset + size > e.length) continue
+      const raw = e.subarray(valueOffset, valueOffset + size)
+      if (type === 2) {
+        out[name] = raw.toString('utf8').replace(/\0+$/, '')
+      } else if (type === 7) {
+        // UNDEFINED: 앞 8바이트가 인코딩 표기(ASCII\0\0\0 / UNICODE\0)
+        const head = raw.subarray(0, 8).toString('ascii')
+        if (head.startsWith('UNICODE')) {
+          out[name] = Buffer.from(raw.subarray(8)).swap16().toString('utf16le')
+        } else {
+          const body = head.startsWith('ASCII') ? raw.subarray(8) : raw
+          out[name] = body.toString('utf8').replace(/\0+$/, '')
+        }
+      }
+    }
+    const nextOffset = ifdOffset + 2 + count * 12
+    if (nextOffset + 4 <= e.length) {
+      const next = u32(nextOffset)
+      if (next > 0 && next < e.length) walk(next, depth + 1)
+    }
+  }
+  walk(u32(4), 0)
+  return Object.keys(out).length ? out : null
+}
+
 /** stealth 메타데이터 (알파 채널 LSB, column-major, magic + gzip JSON) */
 async function extractStealthComment(buf: Buffer): Promise<Record<string, unknown> | null> {
   try {
@@ -214,6 +304,44 @@ export function metadataFromPayloadJson(json: string): ImageMetadata | null {
   } catch {
     return null
   }
+}
+
+/**
+ * WebP 버퍼 → 정규화 메타. 없으면 null.
+ *
+ * NAI가 webp로 내보낸 이미지는 PNG의 tEXt 대신 **EXIF UserComment**(0x9286)에
+ * `{"Comment":"{...파라미터 JSON...}"}`를 넣는다. Software(0x0131)에 모델명
+ * ("NovelAI Diffusion V5 0ADF9AB7"), ImageDescription(0x010E)에 프롬프트가 들어간다.
+ * 실측: tests/fixtures/v5/ 4장 + 사용자 라이브러리 V4.5 webp (2026-08-21).
+ */
+export function metadataFromWebp(buf: Buffer): ImageMetadata | null {
+  const tags = parseWebpExifTags(buf)
+  if (!tags) return null
+  let comment: Params | null = null
+  if (tags.UserComment) {
+    try {
+      const outer = JSON.parse(tags.UserComment) as { Comment?: string }
+      comment = (
+        typeof outer.Comment === 'string' ? JSON.parse(outer.Comment) : outer
+      ) as Params
+    } catch {
+      comment = null
+    }
+  }
+  if (!comment) return null
+  const c = comment as Params & { prompt?: string; uc?: string; model_name?: string }
+  return normalize(comment, {
+    prompt: c.prompt ?? tags.ImageDescription ?? '',
+    uc: c.uc ?? '',
+    model: c.model_name ?? tags.Software,
+    software: tags.Software
+  })
+}
+
+/** 확장자와 무관하게 시그니처로 판별 (PNG / WebP) */
+export async function metadataFromImage(buf: Buffer): Promise<ImageMetadata | null> {
+  if (buf.length >= 12 && buf.toString('ascii', 8, 12) === 'WEBP') return metadataFromWebp(buf)
+  return metadataFromPng(buf)
 }
 
 /** PNG 버퍼 → 정규화 메타 (tEXt Comment → stealth 폴백). 없으면 null */

@@ -27,7 +27,7 @@ import {
   updateCharacter
 } from './characters/repo'
 import { getDbPath, getDb, backupNow, backupInfo } from './db'
-import { metadataFromPng, metadataFromPayloadJson } from './images/metadata'
+import { metadataFromImage, metadataFromPayloadJson } from './images/metadata'
 import {
   createFragment,
   createFragmentFolder,
@@ -678,7 +678,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     try {
       if (base64) {
         const buf = Buffer.from(base64.replace(/^data:[^,]+,/, ''), 'base64')
-        const meta = await metadataFromPng(buf)
+        const meta = await metadataFromImage(buf)
         return meta ? { meta } : { error: '이 이미지에서 NAI 메타데이터를 찾지 못했습니다' }
       }
       if (filePath) {
@@ -687,10 +687,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
           .prepare('SELECT payload_json FROM images WHERE file_path = ?')
           .get(filePath) as { payload_json: string } | undefined
         const fromDb = row?.payload_json ? metadataFromPayloadJson(row.payload_json) : null
-        // 1) PNG tEXt 우선. 단, 예전 저장본/포맷 변환본처럼 nais3-params 청크가 빠진 경우
-        // DB payload_json의 NAIS3 로컬 메타데이터를 합쳐 3분할·조각 스냅샷을 복원한다.
+        // 1) 이미지 자체의 메타데이터 우선 (PNG tEXt / WebP EXIF). 단, 예전 저장본이나
+        // 포맷 변환본처럼 nais3-params 청크가 빠진 경우 DB payload_json의 NAIS3 로컬
+        // 메타데이터를 합쳐 3분할·조각 스냅샷을 복원한다.
         const buf = readFileSync(filePath)
-        const fromPng = await metadataFromPng(buf)
+        const fromPng = await metadataFromImage(buf)
         if (fromPng)
           return {
             meta: {
