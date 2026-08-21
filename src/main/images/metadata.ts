@@ -321,9 +321,7 @@ export function metadataFromWebp(buf: Buffer): ImageMetadata | null {
   if (tags.UserComment) {
     try {
       const outer = JSON.parse(tags.UserComment) as { Comment?: string }
-      comment = (
-        typeof outer.Comment === 'string' ? JSON.parse(outer.Comment) : outer
-      ) as Params
+      comment = (typeof outer.Comment === 'string' ? JSON.parse(outer.Comment) : outer) as Params
     } catch {
       comment = null
     }

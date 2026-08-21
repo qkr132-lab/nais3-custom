@@ -1,6 +1,7 @@
 import {
   Coins,
   Download,
+  Infinity as InfinityIcon,
   Loader2,
   Minus,
   PanelLeft,
@@ -15,6 +16,8 @@ import { useLayoutStore } from '../stores/layout-store'
 import { useUpdateStore } from '../stores/update-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { estimateAnlas } from '@shared/anlas'
+import type { OpusUsage } from '@shared/types'
+import { refillPercentPerDay, usageImages, usageIsLow, usagePercent } from '@shared/opus-usage'
 import { PageNav } from './page-nav'
 import { ThemeToggle } from './theme-toggle'
 
@@ -89,6 +92,40 @@ function AnlasChips({
   )
 }
 
+/**
+ * Opus 무료 V5 생성 한도 게이지. Opus 구독이 아니면(usage 없음) 표시하지 않는다.
+ * 계산식은 웹과 동일 — shared/opus-usage.ts 참조.
+ */
+function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Element | null {
+  if (!usage) return null
+  const percent = usagePercent(usage)
+  const low = usageIsLow(usage)
+  const refill = refillPercentPerDay(usage)
+  const title = usage.isNegative
+    ? 'Opus 무료 생성분을 다 썼습니다 — 지금 생성하면 Anlas가 나갑니다'
+    : `Opus 무료 V5 생성 ${percent}% 남음 (약 ${usageImages(percent).toLocaleString()}장)` +
+      (refill > 0
+        ? `
+하루 ${refill}%씩 회복 (약 ${usageImages(refill).toLocaleString()}장)`
+        : '')
+  return (
+    <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden" title={title}>
+      <InfinityIcon size={15} className={low ? 'text-danger' : 'text-accent'} />
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-2">
+        <div
+          className={cn('h-full rounded-full transition-[width]', low ? 'bg-danger' : 'bg-accent')}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <span
+        className={cn('font-mono text-[12.5px] font-semibold', low ? 'text-danger' : 'text-muted')}
+      >
+        {percent}%
+      </span>
+    </div>
+  )
+}
+
 function BarButton({
   className,
   active,
@@ -113,6 +150,7 @@ export function Titlebar(): React.JSX.Element {
   const toggleRight = useLayoutStore((s) => s.toggleRight)
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
   const anlasBalance = useGenerationStore((s) => s.anlasBalance)
+  const opusUsage = useGenerationStore((s) => s.opusUsage)
 
   // 이번 생성에 소모될 Anlas 추정 (고해상도·캐릭터 레퍼런스·미인코딩 바이브 등)
   const request = useGenerationStore((s) => s.request)
@@ -155,13 +193,19 @@ export function Titlebar(): React.JSX.Element {
           <div className="no-drag mx-0.5">
             <ThemeToggle />
           </div>
+          <OpusUsageChip usage={opusUsage} />
           <AnlasChips balance={anlasBalance} cost={anlasCost} />
         </>
       )}
 
       <div className="flex-1" />
 
-      {isMac && <AnlasChips balance={anlasBalance} cost={anlasCost} />}
+      {isMac && (
+        <>
+          <OpusUsageChip usage={opusUsage} />
+          <AnlasChips balance={anlasBalance} cost={anlasCost} />
+        </>
+      )}
 
       <BarButton onClick={toggleRight} active={rightOpen} title="히스토리 패널 접기/펴기">
         <PanelRight size={15} />

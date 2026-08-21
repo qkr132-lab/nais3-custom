@@ -163,7 +163,7 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
         center: ch.center ?? { x: 0.5, y: 0.5 },
         folderId: null,
         charRefId: null,
-      role: null
+        role: null
       }
       set({ items: canonicalize(get().folders, [...get().items, card]) })
       get().updateCard(id, {
@@ -211,8 +211,7 @@ export function linkedCharRefIds(charIds?: Set<number>): number[] {
   return useCharactersStore
     .getState()
     .items.filter(
-      (c) =>
-        (charIds ? charIds.has(c.id) : c.enabled && c.prompt.trim()) && c.charRefId != null
+      (c) => (charIds ? charIds.has(c.id) : c.enabled && c.prompt.trim()) && c.charRefId != null
     )
     .map((c) => c.charRefId as number)
 }

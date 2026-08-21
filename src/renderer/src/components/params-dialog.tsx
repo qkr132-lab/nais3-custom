@@ -81,7 +81,12 @@ export function ParamsDialog({
               >
                 {seedLocked ? <Lock size={14} /> : <LockOpen size={14} />}
               </Button>
-              <Button size="icon" variant="ghost" title="랜덤 시드" onClick={() => patch({ seed: -1 })}>
+              <Button
+                size="icon"
+                variant="ghost"
+                title="랜덤 시드"
+                onClick={() => patch({ seed: -1 })}
+              >
                 <Dice5 size={14} />
               </Button>
             </div>

@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import type { GenerationRequest, SubscriptionInfo } from '../../shared/types'
 import { ENDPOINTS } from './endpoints'
+import { parseOpusUsage, type OpusUsage } from '../../shared/opus-usage'
 import { buildGenerateImagePayload, type BuildOptions } from './payload'
 import { readImageStream } from './stream'
 
@@ -69,26 +70,32 @@ export async function verifyToken(
   }
 }
 
-/** 현재 Anlas 잔액(fixed + purchased)과 구독 tier. 실패 시 둘 다 null */
+/**
+ * 현재 Anlas 잔액(fixed + purchased)·구독 tier·Opus 무료 생성 한도. 실패 시 전부 null.
+ *
+ * usage는 Opus(tier 3) 구독에만 내려온다 (웹도 tier<3이면 게이지를 그리지 않는다).
+ */
 export async function fetchAnlasBalance(
   token: string
-): Promise<{ anlas: number | null; tier: string | null }> {
+): Promise<{ anlas: number | null; tier: string | null; opusUsage: OpusUsage | null }> {
   try {
     const res = await fetch(ENDPOINTS.subscription, { headers: headers(token) })
-    if (!res.ok) return { anlas: null, tier: null }
+    if (!res.ok) return { anlas: null, tier: null, opusUsage: null }
     const data = (await res.json()) as {
       tier?: number
       trainingStepsLeft?: { fixedTrainingStepsLeft?: number; purchasedTrainingSteps?: number }
+      usage?: unknown
     }
     const tierNames = ['paper', 'tablet', 'scroll', 'opus'] as const
     return {
       anlas:
         (data.trainingStepsLeft?.fixedTrainingStepsLeft ?? 0) +
         (data.trainingStepsLeft?.purchasedTrainingSteps ?? 0),
-      tier: tierNames[data.tier ?? 0] ?? 'paper'
+      tier: tierNames[data.tier ?? 0] ?? 'paper',
+      opusUsage: (data.tier ?? 0) >= 3 ? parseOpusUsage(data.usage) : null
     }
   } catch {
-    return { anlas: null, tier: null }
+    return { anlas: null, tier: null, opusUsage: null }
   }
 }
 

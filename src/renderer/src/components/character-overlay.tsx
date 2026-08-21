@@ -171,7 +171,11 @@ export function CharacterOverlay(): React.JSX.Element {
         {char.role === 'source' ? '하' : char.role === 'target' ? '당' : '역할'}
       </button>
       {/* 연결된 캐릭레퍼 표시 (커스텀) — 이 캐릭터가 포함되면 레퍼런스도 자동 적용 */}
-      <LinkedRefBadge charRefId={char.charRefId} onHover={showPreview} onLeave={() => setHoverPreview(null)} />
+      <LinkedRefBadge
+        charRefId={char.charRefId}
+        onHover={showPreview}
+        onLeave={() => setHoverPreview(null)}
+      />
       {useCoords && char.enabled && (
         <Popover>
           <PopoverTrigger asChild>
@@ -610,7 +614,10 @@ function CharRefLinkDialog({
                 </div>
                 <div className="space-y-1">
                   <p className="text-[12px] font-medium text-muted">유형</p>
-                  <Select value={linked.refType} onValueChange={(v) => update(linked.id, { refType: v })}>
+                  <Select
+                    value={linked.refType}
+                    onValueChange={(v) => update(linked.id, { refType: v })}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>

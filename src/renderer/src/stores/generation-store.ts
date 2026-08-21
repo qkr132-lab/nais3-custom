@@ -1,5 +1,11 @@
 import { create } from 'zustand'
-import type { GenerationRequest, HistoryItem, PromptParts, QueueStatusLite } from '@shared/types'
+import type {
+  GenerationRequest,
+  HistoryItem,
+  OpusUsage,
+  PromptParts,
+  QueueStatusLite
+} from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
@@ -54,6 +60,8 @@ interface GenerationState {
   subscriptionTier: string | null
   setSubscriptionTier: (tier: string) => void
   anlasBalance: number | null
+  /** Opus 무료 V5 생성 한도 (Opus 구독이 아니면 null) */
+  opusUsage: OpusUsage | null
   refreshAnlas: () => Promise<void>
   queue: QueueStatusLite | null
   /** 씬별 대기(pending) 수 미리 집계 (커스텀 — 성능). 카드마다 전체 큐를 필터하지 않게 */
@@ -110,9 +118,9 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
   anlasBalance: null,
   refreshAnlas: async () => {
-    // 잔액과 함께 구독 tier도 갱신 (무료 판정이 최신 tier를 쓰도록)
-    const { anlas, tier } = await window.nais.invoke('nai:balance', undefined)
-    set({ anlasBalance: anlas })
+    // 잔액과 함께 구독 tier·Opus 생성 한도도 갱신 (무료 판정이 최신 tier를 쓰도록)
+    const { anlas, tier, opusUsage } = await window.nais.invoke('nai:balance', undefined)
+    set({ anlasBalance: anlas, opusUsage })
     if (tier) {
       set({ subscriptionTier: tier })
       void window.nais.invoke('settings:set', { key: 'nai_tier', value: tier })
@@ -129,6 +137,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   viewPinned: false,
   history: [],
   historyTotal: 0,
+
+  opusUsage: null,
 
   patchRequest: (patch) => {
     const request = withoutTransientSource({ ...get().request, ...patch })
@@ -212,7 +222,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       linked.length > 0
         ? [
             ...new Set([
-              ...useCharRefsStore.getState().items.filter((c) => c.enabled).map((c) => c.id),
+              ...useCharRefsStore
+                .getState()
+                .items.filter((c) => c.enabled)
+                .map((c) => c.id),
               ...linked
             ])
           ]

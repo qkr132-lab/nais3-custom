@@ -1,6 +1,10 @@
 // 메인 프로세스와 렌더러가 공유하는 타입.
 // 규칙: 렌더러는 이 타입들로만 메인과 대화한다 (IPC 계약).
 
+import type { OpusUsage } from './opus-usage'
+
+export type { OpusUsage }
+
 export interface CharacterPromptInput {
   prompt: string
   negativePrompt: string
@@ -412,7 +416,10 @@ export interface IpcInvokeMap {
   'nai:revealToken': { req: void; res: { token: string | null } }
   'nai:deleteToken': { req: void; res: void }
   /** 잔액 조회 (스냅샷 로그에도 기록) */
-  'nai:balance': { req: void; res: { anlas: number | null; tier: string | null } }
+  'nai:balance': {
+    req: void
+    res: { anlas: number | null; tier: string | null; opusUsage: OpusUsage | null }
+  }
   'nai:anlasUsage': { req: void; res: { today: number; week: number } }
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
