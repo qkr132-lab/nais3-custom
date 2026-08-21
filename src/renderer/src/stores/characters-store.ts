@@ -30,6 +30,8 @@ interface CharactersState {
   toggleCollapse: (id: number) => void
   setFolderColor: (id: number, color: string | null) => void
   removeFolder: (id: number) => void
+  /** 폴더와 그 안의 캐릭터를 통째로 삭제 (호출 전 확인은 UI 책임) */
+  removeFolderWithItems: (id: number) => void
   move: (activeKey: string, overKey: string) => void
   /** 메타데이터의 캐릭터를 라이브러리로 가져오기 (기존 enabled는 모두 해제 후 새로 추가) */
   importFromMetadata: (
@@ -159,6 +161,22 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
     const nextFolders = folders.filter((f) => f.id !== id)
     set({ folders: nextFolders, items: canonicalize(nextFolders, nextItems) })
     void window.nais.invoke('chars:folderDelete', { id })
+  },
+
+  removeFolderWithItems: (id) => {
+    const { folders, items } = get()
+    const doomed = items.filter((c) => c.folderId === id)
+    set({
+      folders: folders.filter((f) => f.id !== id),
+      items: items.filter((c) => c.folderId !== id)
+    })
+    for (const c of doomed) void window.nais.invoke('chars:delete', { id: c.id })
+    void window.nais.invoke('chars:folderDelete', { id })
+    // 씬별 추가·큐 반복에 남은 참조 정리 (removeCard와 같은 이유)
+    if (doomed.length)
+      void import('./scene-extras-store').then((m) =>
+        m.useSceneExtrasStore.getState().purgeIds({ characterIds: doomed.map((c) => c.id) })
+      )
   },
 
   importFromMetadata: async (chars) => {

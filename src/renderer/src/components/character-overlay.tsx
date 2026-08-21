@@ -23,7 +23,7 @@ import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { modelCaps } from '@shared/nai-models'
-import { askText } from '../stores/dialog-store'
+import { askConfirm, askText } from '../stores/dialog-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
 import { PromptEditor } from './prompt-editor'
@@ -53,6 +53,7 @@ export function CharacterOverlay(): React.JSX.Element {
   const toggleCollapse = useCharactersStore((s) => s.toggleCollapse)
   const setFolderColor = useCharactersStore((s) => s.setFolderColor)
   const removeFolder = useCharactersStore((s) => s.removeFolder)
+  const removeFolderWithItems = useCharactersStore((s) => s.removeFolderWithItems)
   const move = useCharactersStore((s) => s.move)
   const useCoords = useGenerationStore((s) => s.request.useCoords)
   const patch = useGenerationStore((s) => s.patchRequest)
@@ -121,6 +122,21 @@ export function CharacterOverlay(): React.JSX.Element {
     }, 300)
     return () => clearTimeout(timer)
   }, [positiveTexts])
+
+  const deleteFolderWithItems = async (folderId: number): Promise<void> => {
+    const folder = folders.find((f) => f.id === folderId)
+    const count = items.filter((c) => c.folderId === folderId).length
+    const ok = await askConfirm('폴더와 안의 캐릭터를 모두 삭제', {
+      message:
+        count > 0
+          ? `"${folder?.name ?? '폴더'}" 안의 캐릭터 ${count}개가 함께 사라집니다. 되돌릴 수 없습니다.`
+          : `"${folder?.name ?? '폴더'}"를 삭제합니다. (안에 캐릭터가 없습니다)`,
+      confirmLabel: '모두 삭제',
+      danger: true,
+      important: true
+    })
+    if (ok) removeFolderWithItems(folderId)
+  }
 
   const renderHeader = (char: CharacterCard): React.ReactNode => (
     <div
@@ -371,6 +387,7 @@ export function CharacterOverlay(): React.JSX.Element {
             toggleCollapse,
             setColor: setFolderColor,
             remove: removeFolder,
+            removeWithItems: (folderId) => void deleteFolderWithItems(folderId),
             addItem: (folderId) => void createCard(folderId)
           }}
           onMove={move}
