@@ -56,6 +56,15 @@ import {
 } from './db/settings'
 import { anlasUsage, logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance } from './nai/client'
+import { resetProbeCache } from './nai/account-switch'
+import {
+  addAccount,
+  adoptLegacyToken,
+  listAccounts,
+  removeAccount,
+  renameAccount,
+  setActiveAccount
+} from './db/accounts'
 import { listImages, getImagePayload, saveGeneratedImage } from './images/storage'
 import {
   addLibraryImages,
@@ -210,6 +219,20 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     return { anlas, tier, opusUsage }
   })
   handle('nai:anlasUsage', () => anlasUsage())
+
+  // 계정 여러 개 (커스텀) — 토큰 본문은 내보내지 않고 목록만 오간다
+  handle('accounts:list', () => {
+    adoptLegacyToken(getNaiToken())
+    return { accounts: listAccounts() }
+  })
+  handle('accounts:add', ({ label, token }) => ({ accounts: addAccount(label, token) }))
+  handle('accounts:rename', ({ id, label }) => ({ accounts: renameAccount(id, label) }))
+  handle('accounts:remove', ({ id }) => ({ accounts: removeAccount(id) }))
+  handle('accounts:setActive', ({ id }) => {
+    setActiveAccount(id)
+    resetProbeCache()
+    return { accounts: listAccounts() }
+  })
 
   handle('queue:enqueue', ({ request, count }) => ({ ids: ctx.queue.enqueue(request, count) }))
   handle('queue:enqueueMany', ({ requests }) => ({ ids: ctx.queue.enqueueMany(requests) }))

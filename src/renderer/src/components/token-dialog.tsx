@@ -21,6 +21,7 @@ import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { THEME_PRESETS } from '../lib/theme-presets'
 import { useGenerationStore } from '../stores/generation-store'
+import { AccountsSection } from './accounts-section'
 import { useThemeStore } from '../stores/theme-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useFragmentsStore } from '../stores/fragments-store'
@@ -682,6 +683,8 @@ function AccountSection(): React.JSX.Element {
       {status === 'fail' && <span className="text-[12px] text-danger">{message}</span>}
 
       <div className="flex-1" />
+
+      <AccountsSection />
 
       {/* Anlas 사용량 — 잔액 스냅샷 간 감소분 합산 */}
       <div className="rounded-lg border border-line bg-surface-2/50 p-3">

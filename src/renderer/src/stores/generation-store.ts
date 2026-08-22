@@ -464,11 +464,21 @@ export function bindGenerationEvents(): () => void {
   const offVibes = window.nais.on('vibes:encoded', () => {
     void useVibesStore.getState().load()
   })
+  // 한도 소진으로 계정을 갈아탔을 때 — 조용히 바뀌면 어느 계정으로 뽑았는지 모르게 된다
+  const offSwitched = window.nais.on('accounts:switched', ({ label }) => {
+    toast(`한도 소진 — "${label}" 계정으로 바꿔 생성합니다`, 'success')
+    void useGenerationStore.getState().refreshAnlas()
+  })
+  const offExhausted = window.nais.on('accounts:allExhausted', () => {
+    toast('등록한 계정이 모두 한도를 소진했습니다 — 이제 Anlas가 나갑니다', 'error')
+  })
   return () => {
     offQueue()
     offProgress()
     offAnlas()
     offVibes()
+    offSwitched()
+    offExhausted()
     window.clearInterval(usageTimer)
     document.removeEventListener('visibilitychange', refreshIfVisible)
     window.removeEventListener('focus', refreshIfVisible)

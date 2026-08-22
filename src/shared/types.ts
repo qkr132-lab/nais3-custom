@@ -173,6 +173,15 @@ export interface QueueStatus {
   delayMs: number
 }
 
+/** 등록된 NAI 계정 (토큰 본문은 절대 렌더러로 내보내지 않는다) */
+export interface NaiAccountInfo {
+  id: string
+  label: string
+  /** 토큰 앞 4글자 — 식별용 */
+  prefix: string
+  active: boolean
+}
+
 export interface SubscriptionInfo {
   tier: 'paper' | 'tablet' | 'scroll' | 'opus'
   anlasFixed: number
@@ -421,6 +430,12 @@ export interface IpcInvokeMap {
     res: { anlas: number | null; tier: string | null; opusUsage: OpusUsage | null }
   }
   'nai:anlasUsage': { req: void; res: { today: number; week: number } }
+  /** NAI 계정 여러 개 (커스텀) — 한도 소진 시 갈아타기용 */
+  'accounts:list': { req: void; res: { accounts: NaiAccountInfo[] } }
+  'accounts:add': { req: { label: string; token: string }; res: { accounts: NaiAccountInfo[] } }
+  'accounts:rename': { req: { id: string; label: string }; res: { accounts: NaiAccountInfo[] } }
+  'accounts:remove': { req: { id: string }; res: { accounts: NaiAccountInfo[] } }
+  'accounts:setActive': { req: { id: string }; res: { accounts: NaiAccountInfo[] } }
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
   'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
@@ -820,6 +835,10 @@ export interface IpcEventMap {
   'queue:changed': QueueStatusLite
   /** 생성 완료 등으로 잔액이 갱신될 때 */
   'anlas:balance': { anlas: number; opusUsage: OpusUsage | null }
+  /** 한도가 바닥나 다른 계정으로 갈아탔을 때 (커스텀) */
+  'accounts:switched': { label: string }
+  /** 등록한 계정이 전부 한도를 소진했을 때 — 이후 생성은 Anlas가 나간다 */
+  'accounts:allExhausted': void
   'generation:progress': {
     id: string
     stepIx: number

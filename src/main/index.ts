@@ -6,6 +6,7 @@ import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
+import { ensureQuotaAccount } from './nai/account-switch'
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
 import type { FragmentTrace } from './fragments/processor'
@@ -151,6 +152,11 @@ app.whenReady().then(async () => {
 
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
   const queue = new GenerationQueue(async (rawRequest, id, signal) => {
+    // 한도가 바닥난 계정이면 여유 있는 계정으로 갈아탄다 (커스텀 — 계정 여러 개 등록 시)
+    const swap = await ensureQuotaAccount(rawRequest.model)
+    if (swap.switched) broadcast('accounts:switched', { label: swap.label ?? '' })
+    else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
+
     const token = getNaiToken()
     if (!token) throw new Error('NAI 토큰이 설정되지 않았습니다')
 
