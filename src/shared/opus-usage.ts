@@ -43,6 +43,32 @@ export function usageImages(percent: number): number {
   return Math.round(IMAGES_PER_PERCENT * percent)
 }
 
+/**
+ * 지금 무료 생성분이 남아 있는가.
+ *
+ * 세 갈래다: 남음 / 소진 / 불확실. 게이지가 0%로 보여도 서버는 소수점 이하를
+ * 들고 있을 수 있어(하루 11% 회복 = 1%당 두 시간 남짓, 그 사이 값이 조금씩 찬다)
+ * 0%면서 초과 사용도 아닌 구간은 "장담 못 함"으로 둔다.
+ */
+export function quotaState(usage: OpusUsage | null): 'available' | 'exhausted' | 'unknown' {
+  if (!usage) return 'unknown'
+  if (usage.isNegative) return 'exhausted'
+  if (usage.percent > 0) return 'available'
+  return 'unknown'
+}
+
+/** 다음 1% 회복까지 남은 시간 (사람이 읽는 형태). 회복이 멈춰 있으면 null */
+export function refillEta(usage: OpusUsage): string | null {
+  const sec = usage.timeUntilNextPercent
+  if (!Number.isFinite(sec) || sec <= 0) return null
+  if (sec < 60) return `${Math.round(sec)}초`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}분`
+  const hour = Math.floor(min / 60)
+  const rest = min % 60
+  return rest ? `${hour}시간 ${rest}분` : `${hour}시간`
+}
+
 /** 응답의 usage 필드를 신뢰할 수 있을 때만 통과시킨다 */
 export function parseOpusUsage(value: unknown): OpusUsage | null {
   if (!value || typeof value !== 'object') return null

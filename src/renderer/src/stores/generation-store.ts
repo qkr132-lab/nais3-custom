@@ -62,6 +62,11 @@ interface GenerationState {
   anlasBalance: number | null
   /** Opus 무료 V5 생성 한도 (Opus 구독이 아니면 null) */
   opusUsage: OpusUsage | null
+  /**
+   * 직전 생성에서 실제로 빠져나간 Anlas (추정이 아니라 잔액 차이).
+   * 0이면 무료로 나갔다는 뜻. 아직 관측 전이면 null.
+   */
+  lastAnlasDelta: number | null
   refreshAnlas: () => Promise<void>
   queue: QueueStatusLite | null
   /** 씬별 대기(pending) 수 미리 집계 (커스텀 — 성능). 카드마다 전체 큐를 필터하지 않게 */
@@ -139,6 +144,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   historyTotal: 0,
 
   opusUsage: null,
+  lastAnlasDelta: null,
 
   patchRequest: (patch) => {
     const request = withoutTransientSource({ ...get().request, ...patch })
@@ -436,7 +442,15 @@ export function bindGenerationEvents(): () => void {
     })
   })
   const offAnlas = window.nais.on('anlas:balance', ({ anlas, opusUsage }) => {
-    useGenerationStore.setState({ anlasBalance: anlas, opusUsage })
+    // 잔액 차이가 곧 실제 차감액 — 무료로 나갔는지 추정 없이 확인할 수 있다.
+    // 충전·구매로 잔액이 늘어난 구간은 차감으로 보지 않는다.
+    const prev = useGenerationStore.getState().anlasBalance
+    const drop = prev !== null && anlas !== null ? prev - anlas : null
+    useGenerationStore.setState({
+      anlasBalance: anlas,
+      opusUsage,
+      ...(drop !== null && drop >= 0 ? { lastAnlasDelta: drop } : {})
+    })
   })
   // Opus 생성 한도는 시간이 지나면 저절로 회복된다 — 생성이 없어도 주기적으로 갱신.
   // 창이 숨어 있을 땐 건너뛰고, 다시 보이는 순간 즉시 한 번 갱신한다.

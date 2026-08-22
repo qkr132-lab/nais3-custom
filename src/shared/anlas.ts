@@ -14,6 +14,13 @@
  */
 
 export interface AnlasEstimateInput {
+  /** 생성 모델 — V5는 Opus 무료분이 한도제라 잔량까지 따져야 한다 */
+  model?: string
+  /**
+   * V5 무료 한도 상태 (shared/opus-usage의 quotaState 결과).
+   * 'unknown'이면 게이지가 0으로 보여도 소수점 이하가 남아 있을 수 있어 단정하지 않는다.
+   */
+  quota?: 'available' | 'exhausted' | 'unknown'
   width: number
   height: number
   steps: number
@@ -29,6 +36,11 @@ export interface AnlasEstimateInput {
 }
 
 export interface AnlasEstimate {
+  /**
+   * 무료 여부를 장담할 수 없는 상태 — V5인데 한도 게이지가 0%로 보이는 구간.
+   * 서버는 소수점 이하를 들고 있을 수 있어, 실제로는 몇 장 더 무료로 나가기도 한다.
+   */
+  uncertain: boolean
   /** 장당 생성 비용 (무료 적용 전) */
   perImage: number
   /** 생성 비용 합계 (무료 적용 후) */
@@ -73,12 +85,23 @@ export function estimateAnlas(input: AnlasEstimateInput): AnlasEstimate {
   const perImage = Math.max(Math.ceil(base * strength), 2)
 
   // 캐릭레퍼는 무료 조건을 깨지 않는다 (실측) — 대신 아래에서 별도 사용료 부과
-  const freeEligible = px <= 1048576 && input.steps <= 28 && input.isOpus
+  const sizeOk = px <= 1048576 && input.steps <= 28 && input.isOpus
+
+  // V5부터 Opus 무료분은 한도제 — 해상도·스텝 조건을 만족해도 한도가 없으면 Anlas가 나간다.
+  // V4.5 이하는 종전대로 조건만 맞으면 무제한 무료.
+  const metered = isV5Model(input.model)
+  const quota = input.quota ?? 'unknown'
+  const freeEligible = sizeOk && (!metered || quota !== 'exhausted')
+  const uncertain = sizeOk && metered && quota === 'unknown'
 
   const generation = freeEligible ? 0 : perImage * input.batchCount
   const charRef = (input.charRefCount ?? 0) * CHARREF_COST * input.batchCount
   const vibeEncoding = (input.unencodedVibes ?? 0) * VIBE_ENCODE_COST
   const total = generation + charRef + vibeEncoding
 
-  return { perImage, generation, charRef, vibeEncoding, total, free: total === 0 }
+  return { perImage, generation, charRef, vibeEncoding, total, free: total === 0, uncertain }
+}
+
+function isV5Model(model?: string): boolean {
+  return !!model && model.startsWith('nai-diffusion-5')
 }

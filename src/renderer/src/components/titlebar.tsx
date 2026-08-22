@@ -17,7 +17,14 @@ import { useUpdateStore } from '../stores/update-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { estimateAnlas } from '@shared/anlas'
 import type { OpusUsage } from '@shared/types'
-import { refillPercentPerDay, usageImages, usageIsLow, usagePercent } from '@shared/opus-usage'
+import {
+  quotaState,
+  refillEta,
+  refillPercentPerDay,
+  usageImages,
+  usageIsLow,
+  usagePercent
+} from '@shared/opus-usage'
 import { PageNav } from './page-nav'
 import { ThemeToggle } from './theme-toggle'
 
@@ -65,17 +72,28 @@ function UpdateButton(): React.JSX.Element | null {
 /** Anlas 잔액 + 예상 소모(-N). 토큰 미설정(잔액 없음)이면 표시하지 않음 */
 function AnlasChips({
   balance,
-  cost
+  cost,
+  uncertain,
+  lastDelta
 }: {
   balance: number | null
   cost: number
+  /** V5인데 한도 게이지가 0%로 보이는 구간 — 무료일 수도, 아닐 수도 */
+  uncertain?: boolean
+  /** 직전 생성에서 실제로 빠져나간 Anlas (추정 아님) */
+  lastDelta?: number | null
 }): React.JSX.Element | null {
   if (balance === null) return null
+  const lastText =
+    lastDelta === null || lastDelta === undefined
+      ? ''
+      : `
+직전 생성 실제 차감: ${lastDelta === 0 ? '0 (무료로 나감)' : `-${lastDelta}`}`
   return (
     <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden">
       <span
         className="flex items-center gap-1.5 rounded-lg bg-[#c9a34f]/15 px-2.5 py-1 font-mono text-[14px] font-semibold text-[#9a7c2e] dark:text-[#e0c169]"
-        title="Anlas 잔액 (생성할 때마다 갱신)"
+        title={`Anlas 잔액 (생성할 때마다 갱신)${lastText}`}
       >
         <Coins size={15} className="text-[#c9a34f]" />
         {balance.toLocaleString()}
@@ -83,9 +101,18 @@ function AnlasChips({
       {cost > 0 && (
         <span
           className="rounded-lg bg-danger px-2.5 py-1 font-mono text-[14px] font-bold text-white"
-          title="이번 생성에 소모될 Anlas (고해상도 · 캐릭터 레퍼런스 · 미인코딩 바이브 포함)"
+          title={`이번 생성에 소모될 Anlas (고해상도 · 캐릭터 레퍼런스 · 미인코딩 바이브 포함)${lastText}`}
         >
           -{cost}
+        </span>
+      )}
+      {cost === 0 && uncertain && (
+        <span
+          className="rounded-lg bg-[#c9a34f]/15 px-2 py-1 text-[11.5px] font-medium text-[#9a7c2e] dark:text-[#e0c169]"
+          title={`Opus 무료분이 0%로 보이지만 소수점 이하가 남아 있을 수 있습니다.
+무료로 나갈 수도, Anlas가 빠질 수도 있어 단정하지 않습니다.${lastText}`}
+        >
+          무료?
         </span>
       )}
     </div>
@@ -101,13 +128,18 @@ function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Elemen
   const percent = usagePercent(usage)
   const low = usageIsLow(usage)
   const refill = refillPercentPerDay(usage)
+  const eta = refillEta(usage)
   const title = usage.isNegative
     ? 'Opus 무료 생성분을 다 썼습니다 — 지금 생성하면 Anlas가 나갑니다'
-    : `Opus 무료 V5 생성 ${percent}% 남음 (약 ${usageImages(percent).toLocaleString()}장)` +
-      (refill > 0
-        ? `
-하루 ${refill}%씩 회복 (약 ${usageImages(refill).toLocaleString()}장)`
-        : '')
+    : [
+        `Opus 무료 V5 생성 ${percent}% 남음 (약 ${usageImages(percent).toLocaleString()}장)`,
+        refill > 0 ? `하루 ${refill}%씩 회복 (약 ${usageImages(refill).toLocaleString()}장)` : '',
+        eta ? `다음 1% 회복까지 ${eta}` : '',
+        percent === 0 ? '0%로 보여도 소수점 이하가 남아 있으면 몇 장은 무료로 나갑니다' : '',
+        'V4.5는 이 한도와 무관 — 통상 해상도·28스텝 이하면 계속 무료입니다'
+      ]
+        .filter(Boolean)
+        .join('\n')
   return (
     <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden" title={title}>
       <InfinityIcon size={15} className={low ? 'text-danger' : 'text-accent'} />
@@ -120,7 +152,7 @@ function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Elemen
       <span
         className={cn('font-mono text-[12.5px] font-semibold', low ? 'text-danger' : 'text-muted')}
       >
-        {percent}%
+        {percent < 10 ? percent.toFixed(1) : Math.round(percent)}%
       </span>
     </div>
   )
@@ -160,7 +192,10 @@ export function Titlebar(): React.JSX.Element {
   const unencodedVibes = useVibesStore(
     (s) => s.items.filter((v) => v.enabled && !v.encodedReady).length
   )
-  const anlasCost = estimateAnlas({
+  const lastAnlasDelta = useGenerationStore((s) => s.lastAnlasDelta)
+  const anlasEstimate = estimateAnlas({
+    model: request.model,
+    quota: quotaState(opusUsage),
     width: request.width,
     height: request.height,
     steps: request.steps,
@@ -169,7 +204,8 @@ export function Titlebar(): React.JSX.Element {
     isOpus: tier === 'opus',
     batchCount,
     unencodedVibes
-  }).total
+  })
+  const anlasCost = anlasEstimate.total
 
   return (
     <header
@@ -194,7 +230,12 @@ export function Titlebar(): React.JSX.Element {
             <ThemeToggle />
           </div>
           <OpusUsageChip usage={opusUsage} />
-          <AnlasChips balance={anlasBalance} cost={anlasCost} />
+          <AnlasChips
+            balance={anlasBalance}
+            cost={anlasCost}
+            uncertain={anlasEstimate.uncertain}
+            lastDelta={lastAnlasDelta}
+          />
         </>
       )}
 
@@ -203,7 +244,12 @@ export function Titlebar(): React.JSX.Element {
       {isMac && (
         <>
           <OpusUsageChip usage={opusUsage} />
-          <AnlasChips balance={anlasBalance} cost={anlasCost} />
+          <AnlasChips
+            balance={anlasBalance}
+            cost={anlasCost}
+            uncertain={anlasEstimate.uncertain}
+            lastDelta={lastAnlasDelta}
+          />
         </>
       )}
 

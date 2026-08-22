@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseOpusUsage,
+  quotaState,
+  refillEta,
   refillPercentPerDay,
   usageImages,
   usageIsLow,
@@ -64,5 +66,29 @@ describe('Opus 생성 한도', () => {
     expect(parseOpusUsage(null)).toBeNull()
     expect(parseOpusUsage({})).toBeNull()
     expect(parseOpusUsage({ percent: 'many' })).toBeNull()
+  })
+})
+
+describe('한도 상태 판정', () => {
+  it('남음 / 소진 / 불확실 세 갈래', () => {
+    expect(quotaState({ percent: 73, isNegative: false, timeUntilNextPercent: 7854 })).toBe(
+      'available'
+    )
+    expect(quotaState({ percent: 0.4, isNegative: false, timeUntilNextPercent: 7854 })).toBe(
+      'available'
+    )
+    expect(quotaState({ percent: 12, isNegative: true, timeUntilNextPercent: 0 })).toBe('exhausted')
+    // 0%인데 초과 사용도 아니면 서버가 소수점 이하를 들고 있을 수 있다 — 단정하지 않는다
+    expect(quotaState({ percent: 0, isNegative: false, timeUntilNextPercent: 7854 })).toBe('unknown')
+    expect(quotaState(null)).toBe('unknown')
+  })
+
+  it('회복 시간을 사람이 읽는 형태로', () => {
+    expect(refillEta({ percent: 0, isNegative: false, timeUntilNextPercent: 30 })).toBe('30초')
+    expect(refillEta({ percent: 0, isNegative: false, timeUntilNextPercent: 720 })).toBe('12분')
+    expect(refillEta({ percent: 0, isNegative: false, timeUntilNextPercent: 7854 })).toBe(
+      '2시간 11분'
+    )
+    expect(refillEta({ percent: 0, isNegative: false, timeUntilNextPercent: 0 })).toBeNull()
   })
 })
