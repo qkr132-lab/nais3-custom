@@ -14,17 +14,7 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
-import {
-  ChevronDown,
-  ChevronRight,
-  Download,
-  Palette,
-  Pencil,
-  Plus,
-  Trash2,
-  Upload,
-  X
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, FolderInput, FolderOutput, Palette, Pencil, Plus, Trash2, Upload, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState, type CSSProperties } from 'react'
 import { FOLDER_COLORS, type ListFolder } from '@shared/types'
@@ -35,6 +25,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger
 } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -61,6 +54,8 @@ export interface FolderActions {
   exportFolder?: (id: number) => void
   /** 이 폴더로 JSON 가져오기 */
   importToFolder?: (id: number) => void
+  /** 폴더를 다른 폴더 안으로 넣거나(부모 id) 밖으로 빼기(null) — 주면 메뉴에 뜬다 */
+  setParent?: (id: number, parentId: number | null) => void
   addItem: (folderId: number) => void
 }
 
@@ -105,23 +100,33 @@ function FolderRow({
   folder,
   actions,
   count,
-  searching
+  searching,
+  depth = 0,
+  siblings = []
 }: {
   folder: ListFolder
   actions: FolderActions
   count: number
   searching: boolean
+  /** 0 = 최상위, 1 = 하위 폴더 (들여쓰기) */
+  depth?: number
+  /** 이 폴더를 넣을 수 있는 최상위 폴더들 (자기 자신 제외) */
+  siblings?: ListFolder[]
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const sortable = useSortable({ id: `f-${folder.id}`, disabled: searching || editing })
 
   // 색이 지정되면 행 배경을 그 색으로 틴트 (surface-2 위에 얹음) + 왼쪽 색 띠로 확실히 구분
-  const tintStyle = folder.color
-    ? {
-        backgroundColor: `color-mix(in srgb, ${folder.color} 38%, var(--surface-2))`,
-        boxShadow: `inset 3px 0 0 0 ${folder.color}`
-      }
-    : undefined
+  const tintStyle = {
+    ...(folder.color
+      ? {
+          backgroundColor: `color-mix(in srgb, ${folder.color} 38%, var(--surface-2))`,
+          boxShadow: `inset 3px 0 0 0 ${folder.color}`
+        }
+      : {}),
+    // 하위 폴더는 한 칸 들여쓴다
+    ...(depth > 0 ? { marginLeft: 14 } : {})
+  }
 
   return (
     <ContextMenu>
@@ -252,6 +257,28 @@ function FolderRow({
         >
           <Pencil size={13} /> 이름 변경
         </ContextMenuItem>
+        {actions.setParent && depth === 0 && siblings.length > 0 && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <FolderInput size={13} /> 다른 폴더 안으로
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {siblings.map((target) => (
+                <ContextMenuItem
+                  key={target.id}
+                  onSelect={() => actions.setParent?.(folder.id, target.id)}
+                >
+                  {target.name || '이름 없는 폴더'}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+        {actions.setParent && depth > 0 && (
+          <ContextMenuItem onSelect={() => actions.setParent?.(folder.id, null)}>
+            <FolderOutput size={13} /> 폴더 밖으로 빼기
+          </ContextMenuItem>
+        )}
         {actions.exportFolder && (
           <ContextMenuItem onSelect={() => actions.exportFolder?.(folder.id)}>
             <Download size={13} /> 이 폴더 내보내기 (JSON)
@@ -364,10 +391,17 @@ export function FolderListView<T extends FolderListItem>({
   const [draggingFolderId, setDraggingFolderId] = useState<number | null>(null)
 
   const visible = rows.filter((r) => {
-    if (r.type === 'folder' || r.type === 'divider') return true
+    if (r.type === 'divider') return true
+    // 폴더 줄도 감출 수 있다 — 부모가 접혀 있으면 하위 폴더 줄까지 숨긴다
     if (r.hidden) return false
+    if (r.type === 'folder') return true
     return draggingFolderId === null || r.item.folderId !== draggingFolderId
   })
+  // 하위 폴더를 넣을 대상 후보 (최상위 폴더만 — 깊이 2단계 제한)
+  const topLevelFolders = rows
+    .filter((r): r is Extract<typeof r, { type: 'folder' }> => r.type === 'folder')
+    .filter((r) => r.depth === 0)
+    .map((r) => r.folder)
   const counts = new Map<number, number>()
   for (const r of rows) {
     if (r.type === 'item' && r.item.folderId != null) {
@@ -424,6 +458,8 @@ export function FolderListView<T extends FolderListItem>({
                     actions={folderActions}
                     count={counts.get(row.folder.id) ?? 0}
                     searching={searching}
+                    depth={row.depth}
+                    siblings={topLevelFolders.filter((f) => f.id !== row.folder.id)}
                   />
                 </div>
               ) : grid ? (

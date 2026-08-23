@@ -223,6 +223,11 @@ export interface ListFolder {
   collapsed: boolean
   /** 구분용 색 (hex). null = 기본 (틴트 없음) */
   color: string | null
+  /**
+   * 상위 폴더 id (커스텀 — 캐릭터 폴더만 사용). null = 최상위.
+   * 깊이는 2단계까지: 하위 폴더는 다시 하위를 가질 수 없다.
+   */
+  parentId?: number | null
 }
 export type CharacterFolder = ListFolder
 
@@ -448,6 +453,8 @@ export interface IpcInvokeMap {
   'chars:purge': { req: { ids: number[] }; res: void }
   /** 폴더 + 안의 카드 삭제. 되살리기용으로 삭제된 카드 id를 돌려준다 */
   'chars:folderDeleteWithItems': { req: { id: number }; res: { deletedIds: number[] } }
+  /** 폴더를 다른 폴더 안으로 넣거나(parentId) 밖으로 빼기(null). 2단계까지만 */
+  'chars:folderSetParent': { req: { id: number; parentId: number | null }; res: { ok: boolean } }
   /** 캐릭터 내보내기/가져오기 (커스텀) — folderId가 없으면 전체 */
   'chars:exportJson': { req: { folderId?: number | null }; res: { saved: boolean; count: number } }
   'chars:importJson': { req: { folderId?: number | null }; res: { imported: number } }

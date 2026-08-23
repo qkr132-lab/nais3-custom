@@ -58,6 +58,7 @@ export function CharacterOverlay(): React.JSX.Element {
   const setFolderColor = useCharactersStore((s) => s.setFolderColor)
   const removeFolder = useCharactersStore((s) => s.removeFolder)
   const removeFolderWithItems = useCharactersStore((s) => s.removeFolderWithItems)
+  const setFolderParent = useCharactersStore((s) => s.setFolderParent)
   const move = useCharactersStore((s) => s.move)
   const useCoords = useGenerationStore((s) => s.request.useCoords)
   const patch = useGenerationStore((s) => s.patchRequest)
@@ -440,6 +441,7 @@ export function CharacterOverlay(): React.JSX.Element {
             remove: removeFolder,
             removeWithItems: (folderId) => void deleteFolderWithItems(folderId),
             exportFolder: (folderId) => void exportCharacters(folderId),
+            setParent: (folderId, parentId) => void setFolderParent(folderId, parentId),
             importToFolder: (folderId) => void importCharacters(folderId),
             addItem: (folderId) => void createCard(folderId)
           }}

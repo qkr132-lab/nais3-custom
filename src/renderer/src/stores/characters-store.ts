@@ -31,6 +31,8 @@ interface CharactersState {
   toggleCollapse: (id: number) => void
   setFolderColor: (id: number, color: string | null) => void
   removeFolder: (id: number) => void
+  /** 폴더를 다른 폴더 안으로 넣거나(부모 id) 밖으로 빼기(null). 2단계까지 */
+  setFolderParent: (id: number, parentId: number | null) => void
   /** 폴더와 그 안의 캐릭터를 통째로 삭제 (호출 전 확인은 UI 책임) */
   removeFolderWithItems: (id: number) => void
   move: (activeKey: string, overKey: string) => void
@@ -161,6 +163,12 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   setFolderColor: (id, color) => {
     set({ folders: get().folders.map((f) => (f.id === id ? { ...f, color } : f)) })
     void window.nais.invoke('chars:folderColor', { id, color })
+  },
+
+  setFolderParent: (id, parentId) => {
+    void window.nais.invoke('chars:folderSetParent', { id, parentId }).then(({ ok }) => {
+      if (ok) void get().load()
+    })
   },
 
   removeFolder: (id) => {

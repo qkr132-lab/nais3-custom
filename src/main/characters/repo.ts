@@ -28,14 +28,23 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
   const db = getDb()
   const folders = (
     db
-      .prepare('SELECT id, name, collapsed, color FROM character_folders ORDER BY sort_order')
+      .prepare(
+        'SELECT id, name, collapsed, color, parent_id FROM character_folders ORDER BY sort_order'
+      )
       .all() as {
       id: number
       name: string
       collapsed: number
       color: string | null
+      parent_id: number | null
     }[]
-  ).map((f) => ({ id: f.id, name: f.name, collapsed: f.collapsed === 1, color: f.color }))
+  ).map((f) => ({
+    id: f.id,
+    name: f.name,
+    collapsed: f.collapsed === 1,
+    color: f.color,
+    parentId: f.parent_id
+  }))
 
   const items = (
     db
@@ -265,10 +274,45 @@ export function setFolderColor(id: number, color: string | null): void {
   getDb().prepare('UPDATE character_folders SET color = ? WHERE id = ?').run(color, id)
 }
 
+/**
+ * 폴더를 다른 폴더 안으로 넣거나(parentId) 밖으로 뺀다(null). 커스텀.
+ *
+ * 깊이는 2단계까지만 허용한다 — 하위 폴더가 다시 하위를 갖기 시작하면 순서·드래그
+ * 규칙이 급격히 복잡해지고, 실사용(분류 한 겹)에 그 이상은 필요하지 않았다.
+ * 막는 경우: 자기 자신 / 이미 하위를 가진 폴더를 남의 밑으로 / 하위 폴더 밑으로.
+ */
+export function setFolderParent(id: number, parentId: number | null): boolean {
+  const db = getDb()
+  if (parentId === null) {
+    db.prepare('UPDATE character_folders SET parent_id = NULL WHERE id = ?').run(id)
+    return true
+  }
+  if (parentId === id) return false
+
+  const parent = db.prepare('SELECT parent_id FROM character_folders WHERE id = ?').get(parentId) as
+    | { parent_id: number | null }
+    | undefined
+  if (!parent) return false
+  // 부모가 이미 남의 하위면 3단계가 된다
+  if (parent.parent_id !== null) return false
+  // 자기 밑에 하위가 있으면 옮길 수 없다 (옮기는 순간 3단계)
+  const childCount = (
+    db.prepare('SELECT COUNT(*) AS n FROM character_folders WHERE parent_id = ?').get(id) as {
+      n: number
+    }
+  ).n
+  if (childCount > 0) return false
+
+  db.prepare('UPDATE character_folders SET parent_id = ? WHERE id = ?').run(parentId, id)
+  return true
+}
+
 export function deleteFolder(id: number): void {
   const db = getDb()
   db.transaction(() => {
     db.prepare('UPDATE character_prompts SET folder_id = NULL WHERE folder_id = ?').run(id)
+    // 하위 폴더는 같이 지우지 않고 최상위로 올린다 (항목 보존이 이 함수의 취지)
+    db.prepare('UPDATE character_folders SET parent_id = NULL WHERE parent_id = ?').run(id)
     db.prepare('DELETE FROM character_folders WHERE id = ?').run(id)
   })()
 }
@@ -279,14 +323,22 @@ export function deleteFolder(id: number): void {
  */
 export function deleteFolderWithCharacters(id: number): number[] {
   const db = getDb()
+  // 하위 폴더까지 통째로 (2단계라 한 겹만 보면 된다)
+  const childIds = (
+    db.prepare('SELECT id FROM character_folders WHERE parent_id = ?').all(id) as { id: number }[]
+  ).map((r) => r.id)
+  const folderIds = [id, ...childIds]
+  const placeholders = folderIds.map(() => '?').join(',')
   const ids = (
     db
-      .prepare('SELECT id FROM character_prompts WHERE folder_id = ? AND deleted_at IS NULL')
-      .all(id) as { id: number }[]
+      .prepare(
+        `SELECT id FROM character_prompts WHERE folder_id IN (${placeholders}) AND deleted_at IS NULL`
+      )
+      .all(...folderIds) as { id: number }[]
   ).map((r) => r.id)
   db.transaction(() => {
     for (const cardId of ids) deleteCharacter(cardId)
-    db.prepare('DELETE FROM character_folders WHERE id = ?').run(id)
+    db.prepare(`DELETE FROM character_folders WHERE id IN (${placeholders})`).run(...folderIds)
   })()
   return ids
 }

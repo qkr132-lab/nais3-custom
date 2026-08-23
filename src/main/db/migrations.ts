@@ -354,6 +354,12 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE character_prompts ADD COLUMN deleted_folder TEXT;
       CREATE INDEX IF NOT EXISTS idx_character_prompts_deleted ON character_prompts(deleted_at);
     `)
+  },
+  // v22 (커스텀): 캐릭터 폴더 2단계 중첩 — 폴더 안에 하위 폴더.
+  // 순서 저장 규약(toOrderEntries: 직전 폴더로 카드 소속 파생)은 건드리지 않는다.
+  // 부모 지정은 별도 경로(chars:folderSetParent)로만 바뀌므로 순서와 서로 간섭하지 않는다.
+  (db) => {
+    db.exec(`ALTER TABLE character_folders ADD COLUMN parent_id INTEGER;`)
   }
 ]
 
@@ -392,6 +398,7 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('gen_scenes', 'target_pos', 'target_pos TEXT')
   ensureColumn('character_prompts', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('character_prompts', 'deleted_folder', 'deleted_folder TEXT')
+  ensureColumn('character_folders', 'parent_id', 'parent_id INTEGER')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

@@ -89,3 +89,86 @@ describe('폴더 리스트 이동 로직 (폴더 섹션 상단 + 미분류 구�
     expect(derived.get(13)).toBe(2)
   })
 })
+
+/**
+ * 하위 폴더 (커스텀, 2단계).
+ * 부모-자식 관계는 드래그로 바뀌지 않는다 — 순서 저장 규약이 "직전 폴더로 카드 소속 파생"이라
+ * 중첩을 드래그에 섞으면 소속이 오염된다. 여기서 지키는 건 표시 순서·접기·블록 이동·전송 규약이다.
+ */
+const nested: ListFolder[] = [
+  { id: 1, name: '포켓몬', collapsed: false, color: null, parentId: null },
+  { id: 3, name: '불속성', collapsed: false, color: null, parentId: 1 },
+  { id: 2, name: '디지몬', collapsed: false, color: null, parentId: null }
+]
+const nestedItems = [
+  { id: 10, folderId: null },
+  { id: 11, folderId: 1 },
+  { id: 12, folderId: 3 },
+  { id: 13, folderId: 2 }
+]
+
+describe('하위 폴더 (2단계 중첩)', () => {
+  it('하위 폴더는 부모 바로 뒤에 붙는다 — 목록 순서와 무관하게', () => {
+    expect(keys(nested, nestedItems)).toEqual([
+      'f-1', 'i-11', 'f-3', 'i-12', 'f-2', 'i-13', 'divider', 'i-10'
+    ])
+  })
+
+  it('하위 폴더 줄에 depth 1이 붙는다 (들여쓰기용)', () => {
+    const rows = buildDisplayRows(nested, nestedItems)
+    const depths = rows
+      .filter((r): r is Extract<typeof r, { type: 'folder' }> => r.type === 'folder')
+      .map((r) => [r.folder.id, r.depth])
+    expect(depths).toEqual([
+      [1, 0],
+      [3, 1],
+      [2, 0]
+    ])
+  })
+
+  it('부모를 접으면 하위 폴더 줄과 그 카드까지 함께 감춘다', () => {
+    const collapsed = nested.map((f) => (f.id === 1 ? { ...f, collapsed: true } : f))
+    const rows = buildDisplayRows(collapsed, nestedItems)
+    const hidden = rows.filter((r) => r.type !== 'divider' && r.hidden).map(rowKey)
+    expect(hidden).toEqual(['i-11', 'f-3', 'i-12'])
+  })
+
+  it('부모를 옮기면 하위 폴더와 그 카드가 통째로 따라간다', () => {
+    // 포켓몬(+불속성)을 디지몬 뒤로
+    const moved = moveRow(nested, nestedItems, 'f-1', 'f-2')
+    expect(keys(moved.folders, moved.items)).toEqual([
+      'f-2', 'i-13', 'f-1', 'i-11', 'f-3', 'i-12', 'divider', 'i-10'
+    ])
+    // 카드 소속은 그대로 (하위 카드가 부모로 딸려 올라가면 안 된다)
+    expect(moved.items.find((i) => i.id === 12)?.folderId).toBe(3)
+  })
+
+  it('하위 폴더를 끌면 부모 블록이 통째로 움직인다 (하위만 떼어내지 않는다)', () => {
+    const moved = moveRow(nested, nestedItems, 'f-3', 'f-2')
+    expect(moved.folders.find((f) => f.id === 3)?.parentId).toBe(1)
+    expect(keys(moved.folders, moved.items)).toEqual([
+      'f-2', 'i-13', 'f-1', 'i-11', 'f-3', 'i-12', 'divider', 'i-10'
+    ])
+  })
+
+  it('toOrderEntries: 미분류가 먼저, 각 폴더는 자기 카드와 함께 (소속 오염 방지)', () => {
+    expect(toOrderEntries(nested, nestedItems)).toEqual([
+      { type: 'char', id: 10 },
+      { type: 'folder', id: 1 },
+      { type: 'char', id: 11 },
+      { type: 'folder', id: 3 },
+      { type: 'char', id: 12 },
+      { type: 'folder', id: 2 },
+      { type: 'char', id: 13 }
+    ])
+  })
+
+  it('부모가 사라진 고아 폴더는 최상위로 취급한다', () => {
+    const orphaned: ListFolder[] = [{ id: 3, name: '불속성', collapsed: false, color: null, parentId: 99 }]
+    expect(keys(orphaned, [{ id: 12, folderId: 3 }])).toEqual(['f-3', 'i-12', 'divider'])
+  })
+
+  it('canonicalize도 부모→하위 순서를 따른다', () => {
+    expect(canonicalize(nested, nestedItems).map((i) => i.id)).toEqual([11, 12, 13, 10])
+  })
+})

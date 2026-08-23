@@ -24,6 +24,7 @@ import {
   listTrashedCharacters,
   purgeCharacters,
   restoreCharacters,
+  setFolderParent,
   pickCharacterThumbnail,
   clearCharacterThumbnail,
   renameFolder,
@@ -546,6 +547,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('chars:folderDelete', ({ id }) => {
     deleteFolder(id)
   })
+  handle('chars:folderSetParent', ({ id, parentId }) => ({ ok: setFolderParent(id, parentId) }))
   handle('chars:folderDeleteWithItems', ({ id }) => ({
     deletedIds: deleteFolderWithCharacters(id)
   }))
