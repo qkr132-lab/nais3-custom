@@ -157,6 +157,7 @@ function FolderRow({
       <ContextMenuTrigger asChild>
         <div
           ref={sortable.setNodeRef}
+          data-folder-row
           style={{ ...dndStyle(sortable, false), ...tintStyle }}
           className={cn(
             'group flex h-10 items-center gap-1.5 rounded-lg px-1.5',

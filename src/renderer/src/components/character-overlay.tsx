@@ -144,6 +144,67 @@ export function CharacterOverlay(): React.JSX.Element {
     return false
   }
 
+  // 네모 범위 선택 (커스텀) — 빈 공간에서 왼쪽 버튼을 누른 채 끌면 사각형 안의 카드를 고른다.
+  // 카드 위에서 시작한 드래그는 정렬(dnd-kit)에 양보하므로 둘이 부딪히지 않는다.
+  const listRef = useRef<HTMLDivElement>(null)
+  const [marquee, setMarquee] = useState<{
+    x1: number
+    y1: number
+    x2: number
+    y2: number
+  } | null>(null)
+  const marqueeBase = useRef<Set<number>>(new Set())
+
+  const onListPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    // 카드·버튼·입력칸 위에서 시작하면 범위 선택이 아니다
+    if (target.closest('[data-char-card],button,input,textarea,[role=button],[data-folder-row]'))
+      return
+    const box = listRef.current?.getBoundingClientRect()
+    if (!box) return
+    const x = e.clientX - box.left
+    const y = e.clientY - box.top + (listRef.current?.scrollTop ?? 0)
+    marqueeBase.current = e.ctrlKey || e.metaKey ? new Set(selectedIds) : new Set()
+    setMarquee({ x1: x, y1: y, x2: x, y2: y })
+    listRef.current?.setPointerCapture(e.pointerId)
+  }
+
+  const onListPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!marquee || !listRef.current) return
+    const box = listRef.current.getBoundingClientRect()
+    const x2 = e.clientX - box.left
+    const y2 = e.clientY - box.top + listRef.current.scrollTop
+    const next = { ...marquee, x2, y2 }
+    setMarquee(next)
+    // 사각형과 겹치는 카드를 실시간으로 선택
+    const left = Math.min(next.x1, next.x2)
+    const right = Math.max(next.x1, next.x2)
+    const top = Math.min(next.y1, next.y2)
+    const bottom = Math.max(next.y1, next.y2)
+    const picked = new Set(marqueeBase.current)
+    for (const el of listRef.current.querySelectorAll<HTMLElement>('[data-char-id]')) {
+      const r = el.getBoundingClientRect()
+      const cl = r.left - box.left
+      const cr = r.right - box.left
+      const ct = r.top - box.top + listRef.current.scrollTop
+      const cb = r.bottom - box.top + listRef.current.scrollTop
+      if (cl < right && cr > left && ct < bottom && cb > top) {
+        picked.add(Number(el.dataset.charId))
+      }
+    }
+    setSelectedIds(picked)
+  }
+
+  const onListPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!marquee) return
+    listRef.current?.releasePointerCapture(e.pointerId)
+    // 거의 안 움직였으면 빈 곳 클릭 = 선택 해제
+    const moved = Math.abs(marquee.x2 - marquee.x1) + Math.abs(marquee.y2 - marquee.y1)
+    if (moved < 4 && !(e.ctrlKey || e.metaKey)) setSelectedIds(new Set())
+    setMarquee(null)
+  }
+
   const deleteSelected = async (): Promise<void> => {
     const ids = [...selectedIds]
     if (!ids.length) return
@@ -242,6 +303,7 @@ export function CharacterOverlay(): React.JSX.Element {
   const renderHeader = (char: CharacterCard): React.ReactNode => (
     <div
       data-char-card
+      data-char-id={char.id}
       className={cn(
         // 좁은 폭에서 좌표 버튼이 잘려 사라지던 문제 — 줄바꿈 허용(높이는 최소 h-10)
         'flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1',
@@ -509,7 +571,7 @@ export function CharacterOverlay(): React.JSX.Element {
       </div>
 
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2 py-1 text-[12px]">
+        <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-[12px]">
           <span className="font-medium">{selectedIds.size}개 선택</span>
           <Button
             size="sm"
@@ -539,7 +601,25 @@ export function CharacterOverlay(): React.JSX.Element {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden no-scrollbar">
+      <div
+        ref={listRef}
+        className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden no-scrollbar"
+        onPointerDown={onListPointerDown}
+        onPointerMove={onListPointerMove}
+        onPointerUp={onListPointerUp}
+        onPointerCancel={() => setMarquee(null)}
+      >
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-20 rounded-sm border border-emerald-500 bg-emerald-500/15"
+            style={{
+              left: Math.min(marquee.x1, marquee.x2),
+              top: Math.min(marquee.y1, marquee.y2),
+              width: Math.abs(marquee.x2 - marquee.x1),
+              height: Math.abs(marquee.y2 - marquee.y1)
+            }}
+          />
+        )}
         <FolderListView
           rows={rows}
           searching={searching}
@@ -560,7 +640,9 @@ export function CharacterOverlay(): React.JSX.Element {
             cn(
               'transition-colors hover:border-muted/60', // F2: 호버 강조
               char.enabled && 'border-accent/60 bg-accent-soft', // F3: 활성 강조
-              selectedIds.has(char.id) && 'ring-2 ring-accent ring-offset-1 ring-offset-paper' // 다중 선택
+              // 다중 선택은 초록 — 활성(주황)과 한눈에 갈리게
+              selectedIds.has(char.id) &&
+                'border-emerald-500 bg-emerald-500/15 ring-1 ring-emerald-500'
             )
           }
           renderHeader={renderHeader}
