@@ -475,8 +475,15 @@ export interface IpcInvokeMap {
   'chars:trash': { req: void; res: { items: TrashedCharacter[] } }
   'chars:restore': { req: { ids: number[] }; res: void }
   'chars:purge': { req: { ids: number[] }; res: void }
-  /** 폴더 + 안의 카드 삭제. 되살리기용으로 삭제된 카드 id를 돌려준다 */
-  'chars:folderDeleteWithItems': { req: { id: number }; res: { deletedIds: number[] } }
+  /** 폴더 + 안의 카드 삭제(소프트). 되살리기용으로 폴더·카드 id를 돌려준다 */
+  'chars:folderDeleteWithItems': {
+    req: { id: number }
+    res: { folderIds: number[]; cardIds: number[] }
+  }
+  /** 폴더째 삭제를 통째로 되돌리기 — 폴더가 이름·색·순서·중첩 그대로 돌아온다 */
+  'chars:folderRestore': { req: { folderIds: number[]; cardIds: number[] }; res: void }
+  /** 여러 카드 한 번에 삭제 (다중 선택) */
+  'chars:deleteMany': { req: { ids: number[] }; res: void }
   /** 폴더를 다른 폴더 안으로 넣거나(parentId) 밖으로 빼기(null). 2단계까지만 */
   'chars:folderSetParent': { req: { id: number; parentId: number | null }; res: { ok: boolean } }
   /** 캐릭터 내보내기/가져오기 (커스텀) — folderId가 없으면 전체 */

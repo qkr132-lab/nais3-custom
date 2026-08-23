@@ -7,12 +7,15 @@ import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
 import { ensureQuotaAccount } from './nai/account-switch'
-import { purgeOldTrashedCharacters } from './characters/repo'
+import { purgeOldTrashedCharacters, purgeOldTrashedFolders } from './characters/repo'
 
 /** 씬 휴지통과 같은 보관 기간 설정(trash_retention_days, 0=무제한)을 따른다 */
 function purgeOldTrashedCharactersIfDue(): void {
   const days = Number(getSetting('trash_retention_days') ?? '30')
-  if (Number.isFinite(days) && days > 0) purgeOldTrashedCharacters(days)
+  if (Number.isFinite(days) && days > 0) {
+    purgeOldTrashedCharacters(days)
+    purgeOldTrashedFolders(days)
+  }
 }
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'

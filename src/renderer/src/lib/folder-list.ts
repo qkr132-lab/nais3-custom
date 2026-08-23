@@ -43,7 +43,11 @@ export function orderedFolders(folders: ListFolder[]): { folder: ListFolder; dep
   }
   // 부모가 사라진 고아 폴더는 최상위로 취급 (데이터 꼬임 방지)
   for (const f of folders) {
-    if (f.parentId != null && !parents.some((p) => p.id === f.parentId) && !out.some((o) => o.folder.id === f.id)) {
+    if (
+      f.parentId != null &&
+      !parents.some((p) => p.id === f.parentId) &&
+      !out.some((o) => o.folder.id === f.id)
+    ) {
       out.push({ folder: f, depth: 0 })
     }
   }
@@ -223,4 +227,40 @@ export function toOrderEntries<T extends FolderListItem>(
     }
   }
   return order
+}
+
+export type DropIntent = 'reorder' | 'nest'
+
+/**
+ * 폴더를 폴더 위로 끌었을 때 "안에 넣기"인지 "순서 바꾸기"인지 판정 (커스텀).
+ *
+ * 대상 행의 가운데쯤(25~75%)에 놓으면 안에 넣기, 위아래 가장자리면 순서 바꾸기다.
+ * 파일 탐색기들이 쓰는 방식이고, 순서 변경을 잃지 않으면서 중첩을 드래그로 열 수 있다.
+ *
+ * 안에 넣기는 아래를 모두 만족할 때만 (깊이 2단계 제한):
+ * - 끄는 것도 받는 것도 폴더
+ * - 끄는 폴더에 하위가 없다 (있으면 3단계가 된다)
+ * - 받는 폴더가 최상위다 (하위 폴더는 하위를 못 받는다)
+ */
+export function dropIntent(opts: {
+  activeKey: string
+  overKey: string
+  folders: ListFolder[]
+  /** 끄는 행의 세로 중심이 받는 행의 어디쯤인지 (0=위 끝, 1=아래 끝) */
+  overlapRatio: number
+}): DropIntent {
+  const { activeKey, overKey, folders, overlapRatio } = opts
+  if (!activeKey.startsWith('f-') || !overKey.startsWith('f-')) return 'reorder'
+  if (activeKey === overKey) return 'reorder'
+  if (overlapRatio < 0.25 || overlapRatio > 0.75) return 'reorder'
+
+  const activeId = Number(activeKey.slice(2))
+  const overId = Number(overKey.slice(2))
+  const active = folders.find((f) => f.id === activeId)
+  const over = folders.find((f) => f.id === overId)
+  if (!active || !over) return 'reorder'
+  if (over.parentId != null) return 'reorder' // 하위 폴더는 하위를 못 받는다
+  if (active.parentId === overId) return 'reorder' // 이미 그 안에 있다
+  if (folders.some((f) => f.parentId === activeId)) return 'reorder' // 하위를 가진 폴더는 못 들어간다
+  return 'nest'
 }

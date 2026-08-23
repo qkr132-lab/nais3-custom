@@ -360,6 +360,11 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 부모 지정은 별도 경로(chars:folderSetParent)로만 바뀌므로 순서와 서로 간섭하지 않는다.
   (db) => {
     db.exec(`ALTER TABLE character_folders ADD COLUMN parent_id INTEGER;`)
+  },
+  // v23 (커스텀): 캐릭터 폴더 소프트삭제 — 폴더째 지운 걸 Ctrl+Z로 되살릴 때
+  // 이름·색·순서·중첩까지 원래 자리로 돌아오게. 카드 휴지통(v21)과 짝.
+  (db) => {
+    db.exec(`ALTER TABLE character_folders ADD COLUMN deleted_at TEXT;`)
   }
 ]
 
@@ -399,6 +404,7 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('character_prompts', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('character_prompts', 'deleted_folder', 'deleted_folder TEXT')
   ensureColumn('character_folders', 'parent_id', 'parent_id INTEGER')
+  ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

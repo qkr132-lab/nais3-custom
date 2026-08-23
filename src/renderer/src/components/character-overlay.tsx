@@ -15,7 +15,7 @@ import {
   UserRound,
   X
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CharacterBackupPreview, CharacterCard } from '@shared/types'
 import { cn } from '../lib/utils'
@@ -102,6 +102,60 @@ export function CharacterOverlay(): React.JSX.Element {
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
   const setCenterMode = useLayoutStore((s) => s.setCenterMode)
   const [trashOpen, setTrashOpen] = useState(false)
+  // 다중 선택 (커스텀) — Ctrl+클릭 토글, Shift+클릭 범위. 삭제는 한 묶음으로 되돌릴 수 있다
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const lastClickedRef = useRef<number | null>(null)
+  const removeCards = useCharactersStore((s) => s.removeCards)
+
+  const visibleIds = useMemo(
+    () =>
+      rows
+        .filter((r) => r.type === 'item' && !r.hidden)
+        .map((r) => (r as { item: CharacterCard }).item.id),
+    [rows]
+  )
+
+  const clickHeader = (e: React.MouseEvent, id: number): boolean => {
+    if (e.shiftKey && lastClickedRef.current != null) {
+      // 화면에 보이는 순서 기준 범위 선택
+      const a = visibleIds.indexOf(lastClickedRef.current)
+      const b = visibleIds.indexOf(id)
+      if (a >= 0 && b >= 0) {
+        const [from, to] = a < b ? [a, b] : [b, a]
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          for (const vid of visibleIds.slice(from, to + 1)) next.add(vid)
+          return next
+        })
+      }
+      return true
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+      lastClickedRef.current = id
+      return true
+    }
+    lastClickedRef.current = id
+    return false
+  }
+
+  const deleteSelected = async (): Promise<void> => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    const ok = await askConfirm(`캐릭터 ${ids.length}개 삭제`, {
+      message: '휴지통으로 가므로 Ctrl+Z나 휴지통에서 되살릴 수 있습니다.',
+      confirmLabel: '삭제',
+      danger: true
+    })
+    if (!ok) return
+    removeCards(ids)
+    setSelectedIds(new Set())
+  }
   const [backupPreview, setBackupPreview] = useState<CharacterBackupPreview | null>(null)
   const load = useCharactersStore((s) => s.load)
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
@@ -210,8 +264,11 @@ export function CharacterOverlay(): React.JSX.Element {
       )}
       <button
         className="min-w-0 flex-1 truncate text-left text-[13px] text-ink"
-        title="눌러서 수정"
-        onClick={() => setExpandedId(expandedId === char.id ? null : char.id)}
+        title="눌러서 수정 · Ctrl+클릭 선택 · Shift+클릭 범위 선택"
+        onClick={(e) => {
+          if (clickHeader(e, char.id)) return
+          setExpandedId(expandedId === char.id ? null : char.id)
+        }}
       >
         {char.name || char.prompt.slice(0, 40) || <span className="text-faint">빈 캐릭터</span>}
       </button>
@@ -451,6 +508,37 @@ export function CharacterOverlay(): React.JSX.Element {
         </Button>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2 py-1 text-[12px]">
+          <span className="font-medium">{selectedIds.size}개 선택</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => setSelectedIds(new Set(visibleIds))}
+          >
+            전체 선택
+          </Button>
+          <div className="flex-1" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 px-2 text-[11px] text-danger"
+            onClick={() => void deleteSelected()}
+          >
+            <Trash2 size={12} /> 삭제
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            해제
+          </Button>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden no-scrollbar">
         <FolderListView
           rows={rows}
@@ -471,7 +559,8 @@ export function CharacterOverlay(): React.JSX.Element {
           itemClassName={(char) =>
             cn(
               'transition-colors hover:border-muted/60', // F2: 호버 강조
-              char.enabled && 'border-accent/60 bg-accent-soft' // F3: 활성 강조
+              char.enabled && 'border-accent/60 bg-accent-soft', // F3: 활성 강조
+              selectedIds.has(char.id) && 'ring-2 ring-accent ring-offset-1 ring-offset-paper' // 다중 선택
             )
           }
           renderHeader={renderHeader}

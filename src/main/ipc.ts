@@ -24,6 +24,7 @@ import {
   listTrashedCharacters,
   purgeCharacters,
   restoreCharacters,
+  restoreFolderWithCharacters,
   setFolderParent,
   pickCharacterThumbnail,
   clearCharacterThumbnail,
@@ -553,9 +554,13 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     deleteFolder(id)
   })
   handle('chars:folderSetParent', ({ id, parentId }) => ({ ok: setFolderParent(id, parentId) }))
-  handle('chars:folderDeleteWithItems', ({ id }) => ({
-    deletedIds: deleteFolderWithCharacters(id)
-  }))
+  handle('chars:folderDeleteWithItems', ({ id }) => deleteFolderWithCharacters(id))
+  handle('chars:folderRestore', ({ folderIds, cardIds }) => {
+    restoreFolderWithCharacters(folderIds, cardIds)
+  })
+  handle('chars:deleteMany', ({ ids }) => {
+    for (const id of ids) deleteCharacter(id)
+  })
 
   // 캐릭터 휴지통 (커스텀) — 폴더째 지워도 되살릴 수 있게
   handle('chars:trash', () => ({ items: listTrashedCharacters() }))

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDisplayRows,
   canonicalize,
+  dropIntent,
   moveRow,
   rowKey,
   toOrderEntries
@@ -25,9 +26,7 @@ function keys(f: ListFolder[], i: { id: number; folderId: number | null }[]): st
 
 describe('폴더 리스트 이동 로직 (폴더 섹션 상단 + 미분류 구분선)', () => {
   it('정규 순서: 폴더1(아이템) → 폴더2(아이템) → 구분선 → 미분류', () => {
-    expect(keys(folders, items)).toEqual([
-      'f-1', 'i-11', 'i-12', 'f-2', 'i-13', 'divider', 'i-10'
-    ])
+    expect(keys(folders, items)).toEqual(['f-1', 'i-11', 'i-12', 'f-2', 'i-13', 'divider', 'i-10'])
   })
 
   it('폴더가 없으면 구분선도 없다', () => {
@@ -38,7 +37,13 @@ describe('폴더 리스트 이동 로직 (폴더 섹션 상단 + 미분류 구�
     const r = moveRow(folders, items, 'i-11', 'i-13')
     expect(r.items.find((i) => i.id === 11)?.folderId).toBe(2)
     expect(keys(r.folders, canonicalize(r.folders, r.items))).toEqual([
-      'f-1', 'i-12', 'f-2', 'i-13', 'i-11', 'divider', 'i-10'
+      'f-1',
+      'i-12',
+      'f-2',
+      'i-13',
+      'i-11',
+      'divider',
+      'i-10'
     ])
   })
 
@@ -55,7 +60,13 @@ describe('폴더 리스트 이동 로직 (폴더 섹션 상단 + 미분류 구�
   it('폴더 이동 시 소속 아이템이 블록째 따라간다', () => {
     const r = moveRow(folders, items, 'f-1', 'f-2')
     expect(keys(r.folders, r.items)).toEqual([
-      'f-2', 'i-13', 'f-1', 'i-11', 'i-12', 'divider', 'i-10'
+      'f-2',
+      'i-13',
+      'f-1',
+      'i-11',
+      'i-12',
+      'divider',
+      'i-10'
     ])
   })
 
@@ -63,7 +74,13 @@ describe('폴더 리스트 이동 로직 (폴더 섹션 상단 + 미분류 구�
     const r = moveRow(folders, items, 'f-1', 'i-10')
     expect(r.folders.map((f) => f.id)).toEqual([2, 1])
     expect(keys(r.folders, r.items)).toEqual([
-      'f-2', 'i-13', 'f-1', 'i-11', 'i-12', 'divider', 'i-10'
+      'f-2',
+      'i-13',
+      'f-1',
+      'i-11',
+      'i-12',
+      'divider',
+      'i-10'
     ])
   })
 
@@ -110,7 +127,14 @@ const nestedItems = [
 describe('하위 폴더 (2단계 중첩)', () => {
   it('하위 폴더는 부모 바로 뒤에 붙는다 — 목록 순서와 무관하게', () => {
     expect(keys(nested, nestedItems)).toEqual([
-      'f-1', 'i-11', 'f-3', 'i-12', 'f-2', 'i-13', 'divider', 'i-10'
+      'f-1',
+      'i-11',
+      'f-3',
+      'i-12',
+      'f-2',
+      'i-13',
+      'divider',
+      'i-10'
     ])
   })
 
@@ -137,7 +161,14 @@ describe('하위 폴더 (2단계 중첩)', () => {
     // 포켓몬(+불속성)을 디지몬 뒤로
     const moved = moveRow(nested, nestedItems, 'f-1', 'f-2')
     expect(keys(moved.folders, moved.items)).toEqual([
-      'f-2', 'i-13', 'f-1', 'i-11', 'f-3', 'i-12', 'divider', 'i-10'
+      'f-2',
+      'i-13',
+      'f-1',
+      'i-11',
+      'f-3',
+      'i-12',
+      'divider',
+      'i-10'
     ])
     // 카드 소속은 그대로 (하위 카드가 부모로 딸려 올라가면 안 된다)
     expect(moved.items.find((i) => i.id === 12)?.folderId).toBe(3)
@@ -147,7 +178,14 @@ describe('하위 폴더 (2단계 중첩)', () => {
     const moved = moveRow(nested, nestedItems, 'f-3', 'f-2')
     expect(moved.folders.find((f) => f.id === 3)?.parentId).toBe(1)
     expect(keys(moved.folders, moved.items)).toEqual([
-      'f-2', 'i-13', 'f-1', 'i-11', 'f-3', 'i-12', 'divider', 'i-10'
+      'f-2',
+      'i-13',
+      'f-1',
+      'i-11',
+      'f-3',
+      'i-12',
+      'divider',
+      'i-10'
     ])
   })
 
@@ -164,11 +202,43 @@ describe('하위 폴더 (2단계 중첩)', () => {
   })
 
   it('부모가 사라진 고아 폴더는 최상위로 취급한다', () => {
-    const orphaned: ListFolder[] = [{ id: 3, name: '불속성', collapsed: false, color: null, parentId: 99 }]
+    const orphaned: ListFolder[] = [
+      { id: 3, name: '불속성', collapsed: false, color: null, parentId: 99 }
+    ]
     expect(keys(orphaned, [{ id: 12, folderId: 3 }])).toEqual(['f-3', 'i-12', 'divider'])
   })
 
   it('canonicalize도 부모→하위 순서를 따른다', () => {
     expect(canonicalize(nested, nestedItems).map((i) => i.id)).toEqual([11, 12, 13, 10])
+  })
+})
+
+describe('드래그로 폴더 안에 넣기 (깊이 2단계 제한)', () => {
+  const base = { activeKey: 'f-2', overKey: 'f-1', folders: nested, overlapRatio: 0.5 }
+
+  it('대상 폴더 가운데에 놓으면 안에 넣기', () => {
+    expect(dropIntent(base)).toBe('nest')
+  })
+
+  it('위아래 가장자리는 순서 바꾸기 — 중첩만 되고 정렬을 잃으면 안 되니까', () => {
+    expect(dropIntent({ ...base, overlapRatio: 0.1 })).toBe('reorder')
+    expect(dropIntent({ ...base, overlapRatio: 0.9 })).toBe('reorder')
+  })
+
+  it('하위 폴더는 하위를 받지 못한다 (3단계 금지)', () => {
+    expect(dropIntent({ ...base, overKey: 'f-3' })).toBe('reorder')
+  })
+
+  it('하위를 가진 폴더는 남의 밑으로 못 들어간다 (3단계 금지)', () => {
+    expect(dropIntent({ ...base, activeKey: 'f-1', overKey: 'f-2' })).toBe('reorder')
+  })
+
+  it('이미 그 폴더 안에 있으면 순서 바꾸기로 본다', () => {
+    expect(dropIntent({ ...base, activeKey: 'f-3', overKey: 'f-1' })).toBe('reorder')
+  })
+
+  it('카드는 중첩 대상이 아니다', () => {
+    expect(dropIntent({ ...base, activeKey: 'i-11' })).toBe('reorder')
+    expect(dropIntent({ ...base, overKey: 'i-11' })).toBe('reorder')
   })
 })

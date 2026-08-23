@@ -23,6 +23,8 @@ interface CharactersState {
   /** 활성 캐릭터 전체 해제 */
   disableAll: () => void
   removeCard: (id: number) => void
+  /** 여러 카드 한 번에 삭제 — 되돌리기도 한 묶음 */
+  removeCards: (ids: number[]) => void
   duplicateCard: (id: number) => Promise<void>
   pickThumbnail: (id: number) => Promise<void>
   clearThumbnail: (id: number) => Promise<void>
@@ -126,6 +128,20 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
     )
   },
 
+  removeCards: (ids) => {
+    if (!ids.length) return
+    const set_ = new Set(ids)
+    set({ items: get().items.filter((c) => !set_.has(c.id)) })
+    void window.nais.invoke('chars:deleteMany', { ids })
+    pushUndo(`캐릭터 ${ids.length}개 삭제`, async () => {
+      await window.nais.invoke('chars:restore', { ids })
+      await get().load()
+    })
+    void import('./scene-extras-store').then((m) =>
+      m.useSceneExtrasStore.getState().purgeIds({ characterIds: ids })
+    )
+  },
+
   duplicateCard: async (id) => {
     await window.nais.invoke('chars:duplicate', { id })
     await get().load()
@@ -186,15 +202,16 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
       folders: folders.filter((f) => f.id !== id),
       items: items.filter((c) => c.folderId !== id)
     })
-    void window.nais.invoke('chars:folderDeleteWithItems', { id }).then(({ deletedIds }) => {
-      // 카드는 소프트삭제라 휴지통에서, 또는 Ctrl+Z로 되살릴 수 있다.
-      // 폴더 자체는 복구 대상이 아니라 되살린 카드는 미분류로 돌아온다.
-      if (!deletedIds.length) return
-      pushUndo(`폴더 삭제: ${folder?.name ?? '폴더'} (${deletedIds.length}개)`, async () => {
-        await window.nais.invoke('chars:restore', { ids: deletedIds })
-        await get().load()
+    void window.nais
+      .invoke('chars:folderDeleteWithItems', { id })
+      .then(({ folderIds, cardIds }) => {
+        // 폴더·카드 모두 소프트삭제 — Ctrl+Z 한 번에 폴더가 이름·색·순서·중첩 그대로
+        // 돌아오고 카드도 그 안에 다시 들어간다.
+        pushUndo(`폴더 삭제: ${folder?.name ?? '폴더'} (${cardIds.length}개)`, async () => {
+          await window.nais.invoke('chars:folderRestore', { folderIds, cardIds })
+          await get().load()
+        })
       })
-    })
   },
 
   importFromMetadata: async (chars) => {

@@ -5,6 +5,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
@@ -14,12 +15,30 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
-import { ChevronDown, ChevronRight, Download, FolderInput, FolderOutput, Palette, Pencil, Plus, Trash2, Upload, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  FolderInput,
+  FolderOutput,
+  Palette,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState, type CSSProperties } from 'react'
 import { FOLDER_COLORS, type ListFolder } from '@shared/types'
 import { cn } from '../lib/utils'
-import { DIVIDER_KEY, rowKey, type DisplayRow, type FolderListItem } from '../lib/folder-list'
+import {
+  DIVIDER_KEY,
+  dropIntent,
+  rowKey,
+  type DisplayRow,
+  type FolderListItem
+} from '../lib/folder-list'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -102,7 +121,8 @@ function FolderRow({
   count,
   searching,
   depth = 0,
-  siblings = []
+  siblings = [],
+  nestTarget = false
 }: {
   folder: ListFolder
   actions: FolderActions
@@ -112,6 +132,8 @@ function FolderRow({
   depth?: number
   /** 이 폴더를 넣을 수 있는 최상위 폴더들 (자기 자신 제외) */
   siblings?: ListFolder[]
+  /** 드래그 중인 폴더가 이 폴더 안으로 들어가려는 중 — 테두리 강조 */
+  nestTarget?: boolean
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const sortable = useSortable({ id: `f-${folder.id}`, disabled: searching || editing })
@@ -125,7 +147,9 @@ function FolderRow({
         }
       : {}),
     // 하위 폴더는 한 칸 들여쓴다
-    ...(depth > 0 ? { marginLeft: 14 } : {})
+    ...(depth > 0 ? { marginLeft: 14 } : {}),
+    // 드래그로 안에 넣으려는 중이면 테두리로 "여기 들어갑니다" 표시
+    ...(nestTarget ? { outline: '2px solid var(--accent)', outlineOffset: -2 } : {})
   }
 
   return (
@@ -389,6 +413,11 @@ export function FolderListView<T extends FolderListItem>({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   // 폴더 드래그 중엔 소속 카드를 임시로 접는다 — "따라오는지 애매한" UX 제거
   const [draggingFolderId, setDraggingFolderId] = useState<number | null>(null)
+  /** 지금 "안에 넣기"로 판정된 대상 폴더 행 키 (드래그 중에만) */
+  const [nestTargetId, setNestTargetId] = useState<string | null>(null)
+  const folderList = rows
+    .filter((r): r is Extract<typeof r, { type: 'folder' }> => r.type === 'folder')
+    .map((r) => r.folder)
 
   const visible = rows.filter((r) => {
     if (r.type === 'divider') return true
@@ -416,9 +445,35 @@ export function FolderListView<T extends FolderListItem>({
 
   function handleDragEnd(e: DragEndEvent): void {
     setDraggingFolderId(null)
+    setNestTargetId(null)
     const { active, over } = e
     if (!over || active.id === over.id) return
+    // 폴더를 폴더 가운데에 놓으면 안에 넣기 (깊이 2단계 제한은 dropIntent가 판정)
+    if (folderActions.setParent && nestTargetId === String(over.id)) {
+      const activeKey = String(active.id)
+      folderActions.setParent(Number(activeKey.slice(2)), Number(String(over.id).slice(2)))
+      return
+    }
     onMove(String(active.id), String(over.id))
+  }
+
+  /** 드래그 중 위치로 "안에 넣기" 대상을 미리 계산 — 행 강조 + 드롭 판정에 쓴다 */
+  function handleDragMove(e: DragMoveEvent): void {
+    const { active, over } = e
+    if (!over || !folderActions.setParent || !active.rect.current.translated) {
+      setNestTargetId(null)
+      return
+    }
+    const a = active.rect.current.translated
+    const o = over.rect
+    const ratio = o.height > 0 ? (a.top + a.height / 2 - o.top) / o.height : 0.5
+    const intent = dropIntent({
+      activeKey: String(active.id),
+      overKey: String(over.id),
+      folders: folderList,
+      overlapRatio: ratio
+    })
+    setNestTargetId(intent === 'nest' ? String(over.id) : null)
   }
 
   if (visible.length === 0) {
@@ -432,7 +487,11 @@ export function FolderListView<T extends FolderListItem>({
       // 그리드는 x·y 자유 이동, 리스트는 세로축 고정
       modifiers={grid ? [] : [restrictToVerticalAxis]}
       onDragStart={handleDragStart}
-      onDragCancel={() => setDraggingFolderId(null)}
+      onDragMove={handleDragMove}
+      onDragCancel={() => {
+        setDraggingFolderId(null)
+        setNestTargetId(null)
+      }}
       onDragEnd={handleDragEnd}
     >
       <SortableContext
@@ -460,6 +519,7 @@ export function FolderListView<T extends FolderListItem>({
                     searching={searching}
                     depth={row.depth}
                     siblings={topLevelFolders.filter((f) => f.id !== row.folder.id)}
+                    nestTarget={nestTargetId === rowKey(row)}
                   />
                 </div>
               ) : grid ? (

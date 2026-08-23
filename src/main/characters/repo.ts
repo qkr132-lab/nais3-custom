@@ -29,7 +29,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
   const folders = (
     db
       .prepare(
-        'SELECT id, name, collapsed, color, parent_id FROM character_folders ORDER BY sort_order'
+        'SELECT id, name, collapsed, color, parent_id FROM character_folders WHERE deleted_at IS NULL ORDER BY sort_order'
       )
       .all() as {
       id: number
@@ -173,7 +173,7 @@ export function restoreCharacters(ids: number[]): void {
       `UPDATE character_prompts SET folder_id = NULL
        WHERE id IN (${placeholders})
          AND folder_id IS NOT NULL
-         AND folder_id NOT IN (SELECT id FROM character_folders)`
+         AND folder_id NOT IN (SELECT id FROM character_folders WHERE deleted_at IS NULL)`
     ).run(...ids)
     db.prepare(
       `UPDATE character_prompts SET deleted_at = NULL, deleted_folder = NULL WHERE id IN (${placeholders})`
@@ -289,9 +289,9 @@ export function setFolderParent(id: number, parentId: number | null): boolean {
   }
   if (parentId === id) return false
 
-  const parent = db.prepare('SELECT parent_id FROM character_folders WHERE id = ?').get(parentId) as
-    | { parent_id: number | null }
-    | undefined
+  const parent = db
+    .prepare('SELECT parent_id FROM character_folders WHERE id = ?')
+    .get(parentId) as { parent_id: number | null } | undefined
   if (!parent) return false
   // 부모가 이미 남의 하위면 3단계가 된다
   if (parent.parent_id !== null) return false
@@ -321,15 +321,21 @@ export function deleteFolder(id: number): void {
  * 폴더와 그 안의 카드를 함께 삭제 (커스텀). 카드는 소프트삭제라 휴지통에서 되살릴 수 있다.
  * 되살린 카드는 폴더가 이미 없으므로 미분류로 돌아온다 — 삭제 당시 폴더 이름은 휴지통에 남는다.
  */
-export function deleteFolderWithCharacters(id: number): number[] {
+/**
+ * 폴더와 그 안의 카드를 함께 삭제 (커스텀). 폴더·카드 모두 소프트삭제라 통째로 되살릴 수 있다.
+ * 되살리면 폴더가 이름·색·순서·중첩 그대로 돌아오고 카드도 그 안에 다시 들어간다.
+ */
+export function deleteFolderWithCharacters(id: number): { folderIds: number[]; cardIds: number[] } {
   const db = getDb()
   // 하위 폴더까지 통째로 (2단계라 한 겹만 보면 된다)
   const childIds = (
-    db.prepare('SELECT id FROM character_folders WHERE parent_id = ?').all(id) as { id: number }[]
+    db
+      .prepare('SELECT id FROM character_folders WHERE parent_id = ? AND deleted_at IS NULL')
+      .all(id) as { id: number }[]
   ).map((r) => r.id)
   const folderIds = [id, ...childIds]
   const placeholders = folderIds.map(() => '?').join(',')
-  const ids = (
+  const cardIds = (
     db
       .prepare(
         `SELECT id FROM character_prompts WHERE folder_id IN (${placeholders}) AND deleted_at IS NULL`
@@ -337,10 +343,37 @@ export function deleteFolderWithCharacters(id: number): number[] {
       .all(...folderIds) as { id: number }[]
   ).map((r) => r.id)
   db.transaction(() => {
-    for (const cardId of ids) deleteCharacter(cardId)
-    db.prepare(`DELETE FROM character_folders WHERE id IN (${placeholders})`).run(...folderIds)
+    for (const cardId of cardIds) deleteCharacter(cardId)
+    db.prepare(
+      `UPDATE character_folders SET deleted_at = datetime('now') WHERE id IN (${placeholders})`
+    ).run(...folderIds)
   })()
-  return ids
+  return { folderIds, cardIds }
+}
+
+/** 폴더째 삭제를 통째로 되돌린다 — 폴더 먼저 살려야 카드가 제자리를 찾는다 */
+export function restoreFolderWithCharacters(folderIds: number[], cardIds: number[]): void {
+  const db = getDb()
+  db.transaction(() => {
+    if (folderIds.length) {
+      const ph = folderIds.map(() => '?').join(',')
+      db.prepare(`UPDATE character_folders SET deleted_at = NULL WHERE id IN (${ph})`).run(
+        ...folderIds
+      )
+    }
+    restoreCharacters(cardIds)
+  })()
+}
+
+/** 보관 기간이 지난 휴지통 폴더 정리 (카드 정리와 같은 주기) */
+export function purgeOldTrashedFolders(days: number): void {
+  if (!days || days <= 0) return
+  getDb()
+    .prepare(
+      `DELETE FROM character_folders
+       WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
+    )
+    .run(`-${Math.floor(days)} days`)
 }
 
 /** 파일 선택 → 192px webp 썸네일로 저장. 취소하면 null */
