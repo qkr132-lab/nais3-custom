@@ -116,6 +116,7 @@ export function CharacterOverlay(): React.JSX.Element {
   )
 
   const clickHeader = (e: React.MouseEvent, id: number): boolean => {
+    if (e.button !== 0) return false // 우클릭·가운데 클릭은 선택과 무관
     if (e.shiftKey && lastClickedRef.current != null) {
       // 화면에 보이는 순서 기준 범위 선택
       const a = visibleIds.indexOf(lastClickedRef.current)
@@ -160,8 +161,13 @@ export function CharacterOverlay(): React.JSX.Element {
   const onListPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
-    // 카드·버튼·입력칸 위에서 시작하면 범위 선택이 아니다
-    if (target.closest('[data-char-card],button,input,textarea,[role=button],[data-folder-row]'))
+    // 카드(테두리 여백 포함)·폴더 줄·버튼·입력칸 위에서 시작하면 범위 선택이 아니다.
+    // 카드 바깥 패딩을 빈 공간으로 오인해 우클릭 메뉴 직후 선택 모드로 빠지던 문제 방지
+    if (
+      target.closest(
+        '[data-list-item],[data-char-card],[data-folder-row],button,input,textarea,[role=button],[role=menu],[role=menuitem]'
+      )
+    )
       return
     const box = listRef.current?.getBoundingClientRect()
     if (!box) return
@@ -669,6 +675,7 @@ export function CharacterOverlay(): React.JSX.Element {
             <>
               <ContextMenuItem
                 onSelect={async () => {
+                  setSelectedIds(new Set()) // 편집하려는 의도 — 선택 모드 해제
                   const name = await askText('이름 변경', char.name)
                   if (name != null) updateCard(char.id, { name })
                 }}
