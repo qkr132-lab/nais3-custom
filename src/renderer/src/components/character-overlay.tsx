@@ -130,7 +130,8 @@ export function CharacterOverlay(): React.JSX.Element {
       }
       return true
     }
-    if (e.ctrlKey || e.metaKey) {
+    // 선택 모드(고른 게 하나라도 있을 때)에선 Ctrl 없이도 클릭 한 번이 토글
+    if (e.ctrlKey || e.metaKey || selectedIds.size > 0) {
       setSelectedIds((prev) => {
         const next = new Set(prev)
         if (next.has(id)) next.delete(id)
@@ -154,6 +155,7 @@ export function CharacterOverlay(): React.JSX.Element {
     y2: number
   } | null>(null)
   const marqueeBase = useRef<Set<number>>(new Set())
+  const marqueeAdditive = useRef(false)
 
   const onListPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return
@@ -165,7 +167,8 @@ export function CharacterOverlay(): React.JSX.Element {
     if (!box) return
     const x = e.clientX - box.left
     const y = e.clientY - box.top + (listRef.current?.scrollTop ?? 0)
-    marqueeBase.current = e.ctrlKey || e.metaKey ? new Set(selectedIds) : new Set()
+    marqueeBase.current = new Set(selectedIds)
+    marqueeAdditive.current = e.ctrlKey || e.metaKey
     setMarquee({ x1: x, y1: y, x2: x, y2: y })
     listRef.current?.setPointerCapture(e.pointerId)
   }
@@ -182,6 +185,8 @@ export function CharacterOverlay(): React.JSX.Element {
     const right = Math.max(next.x1, next.x2)
     const top = Math.min(next.y1, next.y2)
     const bottom = Math.max(next.y1, next.y2)
+    // 박스 안에 든 카드: 이미 골라져 있던 건 빠지고, 아니던 건 들어온다 (다시 감싸면 해제).
+    // Ctrl을 누른 채면 더하기만 한다.
     const picked = new Set(marqueeBase.current)
     for (const el of listRef.current.querySelectorAll<HTMLElement>('[data-char-id]')) {
       const r = el.getBoundingClientRect()
@@ -190,7 +195,9 @@ export function CharacterOverlay(): React.JSX.Element {
       const ct = r.top - box.top + listRef.current.scrollTop
       const cb = r.bottom - box.top + listRef.current.scrollTop
       if (cl < right && cr > left && ct < bottom && cb > top) {
-        picked.add(Number(el.dataset.charId))
+        const id = Number(el.dataset.charId)
+        if (!marqueeAdditive.current && marqueeBase.current.has(id)) picked.delete(id)
+        else picked.add(id)
       }
     }
     setSelectedIds(picked)
@@ -204,6 +211,16 @@ export function CharacterOverlay(): React.JSX.Element {
     if (moved < 4 && !(e.ctrlKey || e.metaKey)) setSelectedIds(new Set())
     setMarquee(null)
   }
+
+  // Esc로 선택 모드 빠져나가기 — 선택 중엔 클릭이 토글이라 편집하려면 먼저 풀어야 한다
+  useEffect(() => {
+    if (!selectedIds.size) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setSelectedIds(new Set())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedIds.size])
 
   const deleteSelected = async (): Promise<void> => {
     const ids = [...selectedIds]
@@ -326,7 +343,7 @@ export function CharacterOverlay(): React.JSX.Element {
       )}
       <button
         className="min-w-0 flex-1 truncate text-left text-[13px] text-ink"
-        title="눌러서 수정 · Ctrl+클릭 선택 · Shift+클릭 범위 선택"
+        title="눌러서 수정 · Ctrl+클릭 선택 · Shift+클릭 범위 · 선택 중엔 클릭으로 넣고 빼기"
         onClick={(e) => {
           if (clickHeader(e, char.id)) return
           setExpandedId(expandedId === char.id ? null : char.id)
@@ -573,6 +590,7 @@ export function CharacterOverlay(): React.JSX.Element {
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-[12px]">
           <span className="font-medium">{selectedIds.size}개 선택</span>
+          <span className="text-[11px] text-muted">클릭으로 넣고 빼기 · Esc로 해제</span>
           <Button
             size="sm"
             variant="ghost"
