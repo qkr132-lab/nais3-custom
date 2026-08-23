@@ -14,7 +14,17 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
-import { ChevronDown, ChevronRight, Palette, Pencil, Plus, Trash2, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Palette,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState, type CSSProperties } from 'react'
 import { FOLDER_COLORS, type ListFolder } from '@shared/types'
@@ -45,8 +55,12 @@ export interface FolderActions {
   toggleCollapse: (id: number) => void
   setColor: (id: number, color: string | null) => void
   remove: (id: number) => void
-  /** 폴더와 안의 항목까지 삭제 — 주면 우클릭 메뉴에 뜬다 */
+  /** 폴더와 안의 항목까지 삭제 — 주면 휴지통 버튼과 우클릭 메뉴가 이쪽을 쓴다 */
   removeWithItems?: (id: number) => void
+  /** 폴더 단위 JSON 내보내기 — 주면 우클릭 메뉴에 뜬다 */
+  exportFolder?: (id: number) => void
+  /** 이 폴더로 JSON 가져오기 */
+  importToFolder?: (id: number) => void
   addItem: (folderId: number) => void
 }
 
@@ -210,8 +224,16 @@ function FolderRow({
               size="sm"
               variant="ghost"
               className="h-7 w-7 p-0 hover:text-danger"
-              title="폴더 삭제 (항목은 미분류로)"
-              onClick={() => actions.remove(folder.id)}
+              title={
+                actions.removeWithItems
+                  ? '폴더 삭제 (안의 항목까지 — 휴지통에서 되살릴 수 있음)'
+                  : '폴더 삭제 (항목은 미분류로)'
+              }
+              onClick={() =>
+                actions.removeWithItems
+                  ? actions.removeWithItems(folder.id)
+                  : actions.remove(folder.id)
+              }
             >
               <Trash2 size={13} />
             </Button>
@@ -230,6 +252,16 @@ function FolderRow({
         >
           <Pencil size={13} /> 이름 변경
         </ContextMenuItem>
+        {actions.exportFolder && (
+          <ContextMenuItem onSelect={() => actions.exportFolder?.(folder.id)}>
+            <Download size={13} /> 이 폴더 내보내기 (JSON)
+          </ContextMenuItem>
+        )}
+        {actions.importToFolder && (
+          <ContextMenuItem onSelect={() => actions.importToFolder?.(folder.id)}>
+            <Upload size={13} /> 이 폴더로 가져오기
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem danger onSelect={() => actions.remove(folder.id)}>
           <Trash2 size={13} /> 폴더 삭제 (항목은 미분류로)

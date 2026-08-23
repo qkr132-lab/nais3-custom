@@ -344,6 +344,16 @@ export const migrations: ((db: Database.Database) => void)[] = [
       ALTER TABLE gen_scenes ADD COLUMN source_pos TEXT;
       ALTER TABLE gen_scenes ADD COLUMN target_pos TEXT;
     `)
+  },
+  // v21 (커스텀): 캐릭터 카드 소프트삭제 — 폴더를 통째로 지울 때 안의 카드까지 사라지므로
+  // 되돌릴 길이 필요하다. 씬 휴지통(v14)·이미지 휴지통(v16)과 같은 방식.
+  // deleted_folder는 삭제 당시 폴더 이름 — 폴더째 지운 걸 복원할 때 어디 있었는지 보여준다.
+  (db) => {
+    db.exec(`
+      ALTER TABLE character_prompts ADD COLUMN deleted_at TEXT;
+      ALTER TABLE character_prompts ADD COLUMN deleted_folder TEXT;
+      CREATE INDEX IF NOT EXISTS idx_character_prompts_deleted ON character_prompts(deleted_at);
+    `)
   }
 ]
 
@@ -380,9 +390,14 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('character_prompts', 'role', 'role TEXT')
   ensureColumn('gen_scenes', 'source_pos', 'source_pos TEXT')
   ensureColumn('gen_scenes', 'target_pos', 'target_pos TEXT')
+  ensureColumn('character_prompts', 'deleted_at', 'deleted_at TEXT')
+  ensureColumn('character_prompts', 'deleted_folder', 'deleted_folder TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_character_prompts_deleted ON character_prompts(deleted_at)'
+    )
   } catch {
     // 인덱스는 없어도 기능엔 지장 없음 (조회만 느려질 뿐)
   }

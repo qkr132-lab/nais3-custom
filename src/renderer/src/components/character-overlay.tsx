@@ -3,6 +3,7 @@ import {
   Crosshair,
   FolderPlus,
   ImageOff,
+  Download,
   ImagePlus,
   LayoutGrid,
   Link2,
@@ -10,6 +11,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Upload,
   UserRound,
   X
 } from 'lucide-react'
@@ -24,8 +26,10 @@ import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { modelCaps } from '@shared/nai-models'
 import { askConfirm, askText } from '../stores/dialog-store'
+import { toast } from '../stores/toast-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
+import { CharacterTrashDialog } from './character-trash-dialog'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -95,6 +99,8 @@ export function CharacterOverlay(): React.JSX.Element {
 
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
   const setCenterMode = useLayoutStore((s) => s.setCenterMode)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const load = useCharactersStore((s) => s.load)
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
   const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
 
@@ -123,13 +129,26 @@ export function CharacterOverlay(): React.JSX.Element {
     return () => clearTimeout(timer)
   }, [positiveTexts])
 
+  const exportCharacters = async (folderId?: number | null): Promise<void> => {
+    const { saved, count } = await window.nais.invoke('chars:exportJson', { folderId })
+    if (saved) toast(`캐릭터 ${count}개를 내보냈습니다`, 'success')
+  }
+
+  const importCharacters = async (folderId?: number | null): Promise<void> => {
+    const { imported } = await window.nais.invoke('chars:importJson', { folderId })
+    if (!imported) return
+    await load()
+    toast(`캐릭터 ${imported}개를 가져왔습니다 (전부 꺼진 상태)`, 'success')
+  }
+
   const deleteFolderWithItems = async (folderId: number): Promise<void> => {
     const folder = folders.find((f) => f.id === folderId)
     const count = items.filter((c) => c.folderId === folderId).length
     const ok = await askConfirm('폴더와 안의 캐릭터를 모두 삭제', {
       message:
         count > 0
-          ? `"${folder?.name ?? '폴더'}" 안의 캐릭터 ${count}개가 함께 사라집니다. 되돌릴 수 없습니다.`
+          ? `"${folder?.name ?? '폴더'}" 안의 캐릭터 ${count}개가 함께 사라집니다.
+휴지통으로 가므로 Ctrl+Z나 휴지통에서 되살릴 수 있습니다.`
           : `"${folder?.name ?? '폴더'}"를 삭제합니다. (안에 캐릭터가 없습니다)`,
       confirmLabel: '모두 삭제',
       danger: true,
@@ -323,6 +342,33 @@ export function CharacterOverlay(): React.JSX.Element {
             <LayoutGrid size={13} /> 배치
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px]"
+          title="캐릭터 전체를 JSON으로 내보내기 (폴더별로 내보내려면 폴더 우클릭)"
+          onClick={() => void exportCharacters()}
+        >
+          <Download size={13} /> 내보내기
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px]"
+          title="JSON에서 캐릭터 가져오기"
+          onClick={() => void importCharacters()}
+        >
+          <Upload size={13} /> 가져오기
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px]"
+          title="휴지통 — 삭제한 캐릭터 되살리기"
+          onClick={() => setTrashOpen(true)}
+        >
+          <Trash2 size={13} /> 휴지통
+        </Button>
         {enabledCount > 0 && (
           <Button
             size="sm"
@@ -388,6 +434,8 @@ export function CharacterOverlay(): React.JSX.Element {
             setColor: setFolderColor,
             remove: removeFolder,
             removeWithItems: (folderId) => void deleteFolderWithItems(folderId),
+            exportFolder: (folderId) => void exportCharacters(folderId),
+            importToFolder: (folderId) => void importCharacters(folderId),
             addItem: (folderId) => void createCard(folderId)
           }}
           onMove={move}
@@ -432,6 +480,8 @@ export function CharacterOverlay(): React.JSX.Element {
           />,
           document.body
         )}
+
+      <CharacterTrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
 
       {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
       <CharRefLinkDialog

@@ -7,6 +7,13 @@ import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
 import { ensureQuotaAccount } from './nai/account-switch'
+import { purgeOldTrashedCharacters } from './characters/repo'
+
+/** 씬 휴지통과 같은 보관 기간 설정(trash_retention_days, 0=무제한)을 따른다 */
+function purgeOldTrashedCharactersIfDue(): void {
+  const days = Number(getSetting('trash_retention_days') ?? '30')
+  if (Number.isFinite(days) && days > 0) purgeOldTrashedCharacters(days)
+}
 import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
 import type { FragmentTrace } from './fragments/processor'
@@ -149,6 +156,9 @@ app.whenReady().then(async () => {
   // 유예시간 지난 소프트삭제 이미지 정리 (앱 시작 + 5분마다 — 켜둔 채로도 시각 계산). 커스텀
   void purgeOldDeletedImages()
   setInterval(() => void purgeOldDeletedImages(), 5 * 60 * 1000)
+  // 캐릭터 휴지통도 같은 보관 기간 설정을 따른다 (커스텀)
+  purgeOldTrashedCharactersIfDue()
+  setInterval(purgeOldTrashedCharactersIfDue, 60 * 60 * 1000)
 
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
   const queue = new GenerationQueue(async (rawRequest, id, signal) => {

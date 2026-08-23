@@ -173,6 +173,17 @@ export interface QueueStatus {
   delayMs: number
 }
 
+/** 휴지통에 든 캐릭터 카드 (커스텀) */
+export interface TrashedCharacter {
+  id: number
+  name: string
+  prompt: string
+  /** 삭제 시각 (UTC 'YYYY-MM-DD HH:MM:SS') */
+  deletedAt: string
+  /** 삭제 당시 속해 있던 폴더 이름 — 폴더째 지운 경우 어디 있었는지 알려준다 */
+  folderName: string | null
+}
+
 /** 등록된 NAI 계정 (토큰 본문은 절대 렌더러로 내보내지 않는다) */
 export interface NaiAccountInfo {
   id: string
@@ -431,6 +442,15 @@ export interface IpcInvokeMap {
   }
   'nai:anlasUsage': { req: void; res: { today: number; week: number } }
   /** NAI 계정 여러 개 (커스텀) — 한도 소진 시 갈아타기용 */
+  /** 캐릭터 휴지통 (커스텀) — 폴더째 삭제해도 되살릴 수 있게 */
+  'chars:trash': { req: void; res: { items: TrashedCharacter[] } }
+  'chars:restore': { req: { ids: number[] }; res: void }
+  'chars:purge': { req: { ids: number[] }; res: void }
+  /** 폴더 + 안의 카드 삭제. 되살리기용으로 삭제된 카드 id를 돌려준다 */
+  'chars:folderDeleteWithItems': { req: { id: number }; res: { deletedIds: number[] } }
+  /** 캐릭터 내보내기/가져오기 (커스텀) — folderId가 없으면 전체 */
+  'chars:exportJson': { req: { folderId?: number | null }; res: { saved: boolean; count: number } }
+  'chars:importJson': { req: { folderId?: number | null }; res: { imported: number } }
   'accounts:list': { req: void; res: { accounts: NaiAccountInfo[] } }
   'accounts:add': { req: { label: string; token: string }; res: { accounts: NaiAccountInfo[] } }
   'accounts:rename': { req: { id: string; label: string }; res: { accounts: NaiAccountInfo[] } }

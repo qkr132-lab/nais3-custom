@@ -17,7 +17,13 @@ import {
   deleteCharacter,
   duplicateCharacter,
   deleteFolder,
+  deleteFolderWithCharacters,
+  exportCharactersJson,
+  importCharactersJson,
   listCharacters,
+  listTrashedCharacters,
+  purgeCharacters,
+  restoreCharacters,
   pickCharacterThumbnail,
   clearCharacterThumbnail,
   renameFolder,
@@ -540,6 +546,20 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('chars:folderDelete', ({ id }) => {
     deleteFolder(id)
   })
+  handle('chars:folderDeleteWithItems', ({ id }) => ({
+    deletedIds: deleteFolderWithCharacters(id)
+  }))
+
+  // 캐릭터 휴지통 (커스텀) — 폴더째 지워도 되살릴 수 있게
+  handle('chars:trash', () => ({ items: listTrashedCharacters() }))
+  handle('chars:restore', ({ ids }) => {
+    restoreCharacters(ids)
+  })
+  handle('chars:purge', ({ ids }) => {
+    purgeCharacters(ids)
+  })
+  handle('chars:exportJson', ({ folderId }) => exportCharactersJson(folderId))
+  handle('chars:importJson', ({ folderId }) => importCharactersJson(folderId))
 
   handle('frags:list', () => listFragments())
   handle('frags:create', ({ name, folderId }) => ({ id: createFragment(name, folderId) }))

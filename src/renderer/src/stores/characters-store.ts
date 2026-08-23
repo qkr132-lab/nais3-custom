@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CharacterCard, CharacterCardPatch, ListFolder } from '@shared/types'
 import { canonicalize, moveRow, toOrderEntries } from '../lib/folder-list'
+import { pushUndo } from './undo-store'
 
 /**
  * 캐릭터 단일 리스트 모델 (공용 폴더 리스트 로직 사용):
@@ -108,8 +109,15 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   },
 
   removeCard: (id) => {
+    const card = get().items.find((c) => c.id === id)
     set({ items: get().items.filter((c) => c.id !== id) })
     void window.nais.invoke('chars:delete', { id })
+    // 소프트삭제라 되살릴 수 있다 — Ctrl+Z 한 번으로 원위치 (커스텀)
+    if (card)
+      pushUndo(`캐릭터 삭제: ${card.name || card.prompt.slice(0, 20)}`, async () => {
+        await window.nais.invoke('chars:restore', { ids: [id] })
+        await get().load()
+      })
     // 씬별 추가·큐 반복에 남은 이 캐릭터 참조 정리 (커스텀 — 정합성)
     void import('./scene-extras-store').then((m) =>
       m.useSceneExtrasStore.getState().purgeIds({ characterIds: [id] })
@@ -165,18 +173,20 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
 
   removeFolderWithItems: (id) => {
     const { folders, items } = get()
-    const doomed = items.filter((c) => c.folderId === id)
+    const folder = folders.find((f) => f.id === id)
     set({
       folders: folders.filter((f) => f.id !== id),
       items: items.filter((c) => c.folderId !== id)
     })
-    for (const c of doomed) void window.nais.invoke('chars:delete', { id: c.id })
-    void window.nais.invoke('chars:folderDelete', { id })
-    // 씬별 추가·큐 반복에 남은 참조 정리 (removeCard와 같은 이유)
-    if (doomed.length)
-      void import('./scene-extras-store').then((m) =>
-        m.useSceneExtrasStore.getState().purgeIds({ characterIds: doomed.map((c) => c.id) })
-      )
+    void window.nais.invoke('chars:folderDeleteWithItems', { id }).then(({ deletedIds }) => {
+      // 카드는 소프트삭제라 휴지통에서, 또는 Ctrl+Z로 되살릴 수 있다.
+      // 폴더 자체는 복구 대상이 아니라 되살린 카드는 미분류로 돌아온다.
+      if (!deletedIds.length) return
+      pushUndo(`폴더 삭제: ${folder?.name ?? '폴더'} (${deletedIds.length}개)`, async () => {
+        await window.nais.invoke('chars:restore', { ids: deletedIds })
+        await get().load()
+      })
+    })
   },
 
   importFromMetadata: async (chars) => {

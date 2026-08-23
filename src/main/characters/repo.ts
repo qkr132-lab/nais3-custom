@@ -1,11 +1,12 @@
 import { BrowserWindow, dialog } from 'electron'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import sharp from 'sharp'
 import type {
   CharacterCard,
   CharacterCardPatch,
   CharacterFolder,
-  CharacterOrderEntry
+  CharacterOrderEntry,
+  TrashedCharacter
 } from '../../shared/types'
 import { getDb } from '../db'
 
@@ -40,7 +41,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
     db
       .prepare(
         `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id, role
-         FROM character_prompts ORDER BY sort_order, id`
+         FROM character_prompts WHERE deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all() as CharRow[]
   ).map((r) => ({
@@ -53,9 +54,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
     center: { x: r.center_x, y: r.center_y },
     folderId: r.folder_id,
     charRefId: r.char_ref_id,
-    role: (r.role === 'source' || r.role === 'target'
-      ? r.role
-      : null) as CharacterCard['role']
+    role: (r.role === 'source' || r.role === 'target' ? r.role : null) as CharacterCard['role']
   }))
 
   return { folders, items }
@@ -113,8 +112,87 @@ export function updateCharacter(id: number, patch: CharacterCardPatch): void {
     .run(...values, id)
 }
 
+/**
+ * 캐릭터 삭제 — 실제로 지우지 않고 유예시간 동안 휴지통에 둔다 (커스텀).
+ * 폴더를 통째로 지울 때 안의 카드가 함께 사라지므로 되돌릴 길이 반드시 필요하다.
+ */
 export function deleteCharacter(id: number): void {
-  getDb().prepare('DELETE FROM character_prompts WHERE id = ?').run(id)
+  const db = getDb()
+  const folderName = db
+    .prepare(
+      `SELECT f.name AS name FROM character_prompts c
+       LEFT JOIN character_folders f ON f.id = c.folder_id WHERE c.id = ?`
+    )
+    .get(id) as { name: string | null } | undefined
+  db.prepare(
+    "UPDATE character_prompts SET deleted_at = datetime('now'), deleted_folder = ?, enabled = 0 WHERE id = ?"
+  ).run(folderName?.name ?? null, id)
+}
+
+/** 휴지통 목록 — 최근에 지운 것부터 */
+export function listTrashedCharacters(): TrashedCharacter[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT id, name, prompt, deleted_at, deleted_folder
+         FROM character_prompts WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC`
+      )
+      .all() as {
+      id: number
+      name: string
+      prompt: string
+      deleted_at: string
+      deleted_folder: string | null
+    }[]
+  ).map((r) => ({
+    id: r.id,
+    name: r.name,
+    prompt: r.prompt,
+    deletedAt: r.deleted_at,
+    folderName: r.deleted_folder
+  }))
+}
+
+/** 되살리기. 원래 폴더가 이미 없으면 미분류로 돌아온다 (folder_id는 그대로 두되 참조가 끊긴 상태) */
+export function restoreCharacters(ids: number[]): void {
+  if (!ids.length) return
+  const db = getDb()
+  const placeholders = ids.map(() => '?').join(',')
+  db.transaction(() => {
+    // 없어진 폴더를 가리키는 카드는 미분류로
+    db.prepare(
+      `UPDATE character_prompts SET folder_id = NULL
+       WHERE id IN (${placeholders})
+         AND folder_id IS NOT NULL
+         AND folder_id NOT IN (SELECT id FROM character_folders)`
+    ).run(...ids)
+    db.prepare(
+      `UPDATE character_prompts SET deleted_at = NULL, deleted_folder = NULL WHERE id IN (${placeholders})`
+    ).run(...ids)
+  })()
+}
+
+/** 휴지통에서 영구 삭제 */
+export function purgeCharacters(ids: number[]): void {
+  if (!ids.length) return
+  const placeholders = ids.map(() => '?').join(',')
+  getDb()
+    .prepare(
+      `DELETE FROM character_prompts WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`
+    )
+    .run(...ids)
+}
+
+/** 보관 기간이 지난 휴지통 카드 정리. 0이면 무제한 보관 */
+export function purgeOldTrashedCharacters(days: number): number {
+  if (!days || days <= 0) return 0
+  const result = getDb()
+    .prepare(
+      `DELETE FROM character_prompts
+       WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
+    )
+    .run(`-${Math.floor(days)} days`)
+  return result.changes
 }
 
 /** 카드 복제 — 썸네일 포함, enabled는 꺼서 (실수로 6명 초과 방지) */
@@ -195,6 +273,24 @@ export function deleteFolder(id: number): void {
   })()
 }
 
+/**
+ * 폴더와 그 안의 카드를 함께 삭제 (커스텀). 카드는 소프트삭제라 휴지통에서 되살릴 수 있다.
+ * 되살린 카드는 폴더가 이미 없으므로 미분류로 돌아온다 — 삭제 당시 폴더 이름은 휴지통에 남는다.
+ */
+export function deleteFolderWithCharacters(id: number): number[] {
+  const db = getDb()
+  const ids = (
+    db
+      .prepare('SELECT id FROM character_prompts WHERE folder_id = ? AND deleted_at IS NULL')
+      .all(id) as { id: number }[]
+  ).map((r) => r.id)
+  db.transaction(() => {
+    for (const cardId of ids) deleteCharacter(cardId)
+    db.prepare('DELETE FROM character_folders WHERE id = ?').run(id)
+  })()
+  return ids
+}
+
 /** 파일 선택 → 192px webp 썸네일로 저장. 취소하면 null */
 export async function pickCharacterThumbnail(id: number): Promise<string | null> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -225,4 +321,115 @@ export function clearCharacterThumbnail(id: number): void {
       `UPDATE character_prompts SET thumbnail = NULL, updated_at = datetime('now') WHERE id = ?`
     )
     .run(id)
+}
+
+/**
+ * 캐릭터 JSON 내보내기 (커스텀). folderId를 주면 그 폴더만, null이면 미분류, 생략하면 전체.
+ * 씬 JSON(scenes/repo.ts)과 같은 결의 단순 포맷 — 썸네일은 용량이 커서 싣지 않는다.
+ */
+export async function exportCharactersJson(folderId?: number | null): Promise<{
+  saved: boolean
+  count: number
+}> {
+  const db = getDb()
+  const where =
+    folderId === undefined
+      ? 'deleted_at IS NULL'
+      : folderId === null
+        ? 'deleted_at IS NULL AND folder_id IS NULL'
+        : 'deleted_at IS NULL AND folder_id = ?'
+  const params = folderId === undefined || folderId === null ? [] : [folderId]
+  const rows = db
+    .prepare(
+      `SELECT name, prompt, negative_prompt, center_x, center_y, role FROM character_prompts
+       WHERE ${where} ORDER BY sort_order, id`
+    )
+    .all(...params) as {
+    name: string
+    prompt: string
+    negative_prompt: string
+    center_x: number
+    center_y: number
+    role: string | null
+  }[]
+
+  const folderName =
+    typeof folderId === 'number'
+      ? (
+          db.prepare('SELECT name FROM character_folders WHERE id = ?').get(folderId) as
+            { name: string } | undefined
+        )?.name
+      : undefined
+
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const result = await dialog.showSaveDialog(win, {
+    title: '캐릭터 내보내기',
+    defaultPath: `nais3-characters${folderName ? `-${folderName}` : ''}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePath) return { saved: false, count: 0 }
+
+  const characters = rows.map((r) => ({
+    name: r.name,
+    prompt: r.prompt,
+    negativePrompt: r.negative_prompt,
+    center: { x: r.center_x, y: r.center_y },
+    ...(r.role ? { role: r.role } : {})
+  }))
+  writeFileSync(
+    result.filePath,
+    JSON.stringify({ version: 1, folder: folderName ?? null, characters }, null, 2),
+    'utf-8'
+  )
+  return { saved: true, count: characters.length }
+}
+
+interface ImportedCharacter {
+  name?: string
+  prompt?: string
+  negativePrompt?: string
+  center?: { x?: number; y?: number }
+  role?: string
+}
+
+/** 캐릭터 JSON 가져오기 — folderId를 주면 그 폴더로 들어간다. 켜진 상태로 들어오지 않는다 */
+export async function importCharactersJson(
+  folderId?: number | null
+): Promise<{ imported: number }> {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const result = await dialog.showOpenDialog(win, {
+    title: '캐릭터 가져오기',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
+  })
+  if (result.canceled || !result.filePaths[0]) return { imported: 0 }
+
+  let parsed: { characters?: ImportedCharacter[] } | ImportedCharacter[]
+  try {
+    parsed = JSON.parse(readFileSync(result.filePaths[0], 'utf-8'))
+  } catch {
+    return { imported: 0 }
+  }
+  const list = Array.isArray(parsed) ? parsed : (parsed.characters ?? [])
+  const db = getDb()
+  let imported = 0
+  db.transaction(() => {
+    for (const c of list) {
+      if (!c || typeof c.prompt !== 'string' || !c.prompt.trim()) continue
+      const id = createCharacter(c.name?.trim() || '', folderId ?? null)
+      updateCharacter(id, {
+        prompt: c.prompt,
+        negativePrompt: typeof c.negativePrompt === 'string' ? c.negativePrompt : '',
+        // 가져오자마자 생성에 끼어들지 않게 꺼서 들여온다
+        enabled: false,
+        center: {
+          x: typeof c.center?.x === 'number' ? c.center.x : 0.5,
+          y: typeof c.center?.y === 'number' ? c.center.y : 0.5
+        },
+        role: c.role === 'source' || c.role === 'target' ? c.role : null
+      })
+      imported++
+    }
+  })()
+  return { imported }
 }
