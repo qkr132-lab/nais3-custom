@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { CharacterCard } from '@shared/types'
+import type { CharacterBackupPreview, CharacterCard } from '@shared/types'
 import { cn } from '../lib/utils'
 import { buildDisplayRows } from '../lib/folder-list'
 import { useCharactersStore } from '../stores/characters-store'
@@ -30,6 +30,7 @@ import { toast } from '../stores/toast-store'
 import { FolderListView } from './folder-list-view'
 import { PositionPicker } from './position-picker'
 import { CharacterTrashDialog } from './character-trash-dialog'
+import { CharacterBackupDialog } from './character-backup-dialog'
 import { PromptEditor } from './prompt-editor'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
@@ -101,6 +102,7 @@ export function CharacterOverlay(): React.JSX.Element {
   const enabledCount = items.filter((c) => c.enabled && c.prompt.trim()).length
   const setCenterMode = useLayoutStore((s) => s.setCenterMode)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [backupPreview, setBackupPreview] = useState<CharacterBackupPreview | null>(null)
   const load = useCharactersStore((s) => s.load)
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
   const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
@@ -129,6 +131,26 @@ export function CharacterOverlay(): React.JSX.Element {
     }, 300)
     return () => clearTimeout(timer)
   }, [positiveTexts])
+
+  const exportBackup = async (): Promise<void> => {
+    const withThumbs = await askConfirm('썸네일도 함께 넣을까요?', {
+      message: '넣으면 그림까지 그대로 복원되지만 파일이 훨씬 커집니다.',
+      confirmLabel: '넣기'
+    })
+    const { saved, count } = await window.nais.invoke('chars:exportBackup', {
+      includeThumbnails: withThumbs
+    })
+    if (saved) toast(`캐릭터 ${count}개를 통째로 백업했습니다`, 'success')
+  }
+
+  const openBackup = async (): Promise<void> => {
+    const preview = await window.nais.invoke('chars:pickBackup', undefined)
+    if (!preview.ok) {
+      toast('완전 백업 파일이 아닙니다 (예전 내보내기 파일은 폴더 우클릭 → 가져오기)', 'error')
+      return
+    }
+    setBackupPreview(preview)
+  }
 
   const exportCharacters = async (folderId?: number | null): Promise<void> => {
     const { saved, count } = await window.nais.invoke('chars:exportJson', { folderId })
@@ -352,19 +374,19 @@ export function CharacterOverlay(): React.JSX.Element {
           size="sm"
           variant="ghost"
           className="h-6 gap-1 px-2 text-[11px]"
-          title="캐릭터 전체를 JSON으로 내보내기 (폴더별로 내보내려면 폴더 우클릭)"
-          onClick={() => void exportCharacters()}
+          title="완전 백업 — 폴더·역할·좌표·레퍼런스 연결·씬별 추가·큐 반복까지 통째로"
+          onClick={() => void exportBackup()}
         >
-          <Download size={13} /> 내보내기
+          <Download size={13} /> 완전 백업
         </Button>
         <Button
           size="sm"
           variant="ghost"
           className="h-6 gap-1 px-2 text-[11px]"
-          title="JSON에서 캐릭터 가져오기"
-          onClick={() => void importCharacters()}
+          title="백업 파일에서 복원 (무엇이 들어오는지 먼저 보여줍니다)"
+          onClick={() => void openBackup()}
         >
-          <Upload size={13} /> 가져오기
+          <Upload size={13} /> 복원
         </Button>
         <Button
           size="sm"
@@ -489,6 +511,7 @@ export function CharacterOverlay(): React.JSX.Element {
         )}
 
       <CharacterTrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
+      <CharacterBackupDialog preview={backupPreview} onClose={() => setBackupPreview(null)} />
 
       {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
       <CharRefLinkDialog

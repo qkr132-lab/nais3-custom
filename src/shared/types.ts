@@ -173,6 +173,30 @@ export interface QueueStatus {
   delayMs: number
 }
 
+/** 캐릭터 완전 백업 파일을 열었을 때의 미리보기 (커스텀) */
+export interface CharacterBackupPreview {
+  ok: boolean
+  filePath?: string
+  characters: number
+  folders: number
+  sceneLinks: number
+  queueEntries: number
+  /** 기존과 완전히 같아 건너뛸 카드 수 */
+  identical: number
+  hasThumbnails: boolean
+}
+
+/** 완전 백업 복원 결과 (커스텀) */
+export interface CharacterImportResult {
+  created: number
+  skipped: number
+  removed: number
+  sceneLinks: number
+  queueEntries: number
+  /** 이름이 맞는 씬·프리셋을 못 찾아 버린 연결 */
+  droppedLinks: number
+}
+
 /** 휴지통에 든 캐릭터 카드 (커스텀) */
 export interface TrashedCharacter {
   id: number
@@ -457,6 +481,17 @@ export interface IpcInvokeMap {
   'chars:folderSetParent': { req: { id: number; parentId: number | null }; res: { ok: boolean } }
   /** 캐릭터 내보내기/가져오기 (커스텀) — folderId가 없으면 전체 */
   'chars:exportJson': { req: { folderId?: number | null }; res: { saved: boolean; count: number } }
+  /** 완전 백업 (커스텀) — 폴더·역할·좌표·레퍼런스 연결·씬별 추가·큐 반복까지 */
+  'chars:exportBackup': {
+    req: { includeThumbnails?: boolean }
+    res: { saved: boolean; count: number }
+  }
+  /** 백업 파일을 골라 무엇이 들어올지 미리 보여준다 (실제 반영 전) */
+  'chars:pickBackup': { req: void; res: CharacterBackupPreview }
+  'chars:importBackup': {
+    req: { filePath: string; mode: 'skip-identical' | 'always-copy' | 'replace-all' }
+    res: CharacterImportResult
+  }
   'chars:importJson': { req: { folderId?: number | null }; res: { imported: number } }
   'accounts:list': { req: void; res: { accounts: NaiAccountInfo[] } }
   'accounts:add': { req: { label: string; token: string }; res: { accounts: NaiAccountInfo[] } }

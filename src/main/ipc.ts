@@ -33,6 +33,11 @@ import {
   setFolderColor,
   updateCharacter
 } from './characters/repo'
+import {
+  exportCharacterBackup,
+  importCharacterBackup,
+  pickCharacterBackup
+} from './characters/backup'
 import { getDbPath, getDb, backupNow, backupInfo } from './db'
 import { metadataFromImage, metadataFromPayloadJson } from './images/metadata'
 import {
@@ -562,6 +567,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('chars:exportJson', ({ folderId }) => exportCharactersJson(folderId))
   handle('chars:importJson', ({ folderId }) => importCharactersJson(folderId))
+  handle('chars:exportBackup', ({ includeThumbnails }) =>
+    exportCharacterBackup(includeThumbnails ?? false)
+  )
+  handle('chars:pickBackup', () => pickCharacterBackup())
+  handle('chars:importBackup', ({ filePath, mode }) => importCharacterBackup(filePath, mode))
 
   handle('frags:list', () => listFragments())
   handle('frags:create', ({ name, folderId }) => ({ id: createFragment(name, folderId) }))
