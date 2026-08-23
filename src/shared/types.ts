@@ -566,9 +566,22 @@ export interface IpcInvokeMap {
   'frags:folderDelete': { req: { id: number }; res: void }
   'tags:search': {
     req: { query: string; limit?: number }
-    res: { items: { tag: string; count: number; type: string; ko?: string }[] }
+    res: {
+      items: {
+        tag: string
+        count: number
+        type: string
+        ko?: string
+        /** 단보루 위키 영어 설명 (커스텀) */
+        desc?: string
+        /** 사용자가 직접 단 한글 뜻 */
+        userKo?: boolean
+      }[]
+    }
   }
-  /** 태그 탐색기: 태그명 목록 → 정보 (미존재 태그는 제외됨) */
+  /** 사용자 한글 뜻 달기 (커스텀) — 빈 문자열이면 지운다 */
+  'tags:setKo': { req: { tag: string; ko: string }; res: void }
+  'tags:listUserKo': { req: void; res: { entries: Record<string, string> } }
   'tags:lookup': {
     req: { tags: string[] }
     res: { items: { tag: string; count: number; type: string; ko?: string }[] }

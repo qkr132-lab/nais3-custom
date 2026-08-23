@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { englishKey, hangulKey, keySimilarity } from './tags-fuzzy'
+import { getSetting, setSetting } from './db/settings'
 
 /**
  * 단부루 태그 자동완성 데이터 (resources/tags.json, ~30만 개).
@@ -18,6 +19,10 @@ export interface TagEntry {
   type: string
   /** 한글 뜻 (사전에 있을 때만) */
   ko?: string
+  /** 영어 설명 — 단보루 위키 첫 문단 (커스텀, resources/tag-wiki.json) */
+  desc?: string
+  /** 사용자가 직접 단 한글 뜻이면 true — 화면에서 구분 표시·수정 가능 */
+  userKo?: boolean
 }
 
 let tags: TagEntry[] | null = null
@@ -45,12 +50,81 @@ function loadKo(): { map: Record<string, string>; entries: { entry: TagEntry; ko
   } catch {
     koMap = {} // 사전 없이도 영어 검색은 동작
   }
-  // 인기순(전체 태그 정렬 순서)으로 한글 사전 항목 목록 구성
+  // 인기순(전체 태그 정렬 순서)으로 한글 색인 구성 — 기본 사전 + 위키 별칭 + 사용자 사전
   const map = koMap
+  const w = loadWiki()
+  const u = loadUserKo()
   koEntries = load()
-    .filter((t) => map[t.tag])
-    .map((t) => ({ entry: t, ko: map[t.tag] }))
+    .map((t) => {
+      const parts = [u[t.tag], map[t.tag], ...(w[t.tag]?.ko ?? [])].filter(Boolean)
+      return parts.length ? { entry: t, ko: parts.join('/') } : null
+    })
+    .filter((x): x is { entry: TagEntry; ko: string } => x !== null)
   return { map: koMap, entries: koEntries }
+}
+
+/**
+ * 단보루 위키 (커스텀): resources/tag-wiki.json — 영어 설명 + 위키에 적힌 한글 별칭.
+ * 출처 isek-ai/danbooru-wiki-2024 (CC BY-SA 4.0). scripts/build-tag-wiki.py로 갱신.
+ */
+let wiki: Record<string, { en?: string; ko?: string[] }> | null = null
+function loadWiki(): Record<string, { en?: string; ko?: string[] }> {
+  if (wiki) return wiki
+  try {
+    wiki = JSON.parse(
+      readFileSync(join(app.getAppPath(), 'resources', 'tag-wiki.json'), 'utf-8')
+    ) as Record<string, { en?: string; ko?: string[] }>
+  } catch {
+    wiki = {}
+  }
+  return wiki
+}
+
+/** 사용자가 직접 단 한글 뜻 (커스텀) — DB settings 'tag_ko_user' JSON. 기본 사전보다 우선 */
+let userKo: Record<string, string> | null = null
+function loadUserKo(): Record<string, string> {
+  if (userKo) return userKo
+  try {
+    userKo = JSON.parse(getSetting('tag_ko_user') ?? '{}') as Record<string, string>
+  } catch {
+    userKo = {}
+  }
+  return userKo
+}
+
+export function setUserTagKo(tag: string, ko: string): void {
+  const map = loadUserKo()
+  const key = tag.trim().toLowerCase().replace(/_/g, ' ')
+  if (ko.trim()) map[key] = ko.trim()
+  else delete map[key]
+  setSetting('tag_ko_user', JSON.stringify(map))
+  // 한글 검색 색인을 다시 만들게
+  koEntries = null
+}
+
+export function listUserTagKo(): Record<string, string> {
+  return { ...loadUserKo() }
+}
+
+/**
+ * 한글 뜻 우선순위: 사용자 사전 > 기본 사전(tags-ko) > 위키 한글 별칭.
+ * 사용자가 직접 단 게 있으면 그걸 보여주고 userKo로 표시한다.
+ */
+function koFor(tag: string): { ko?: string; userKo?: boolean } {
+  const u = loadUserKo()[tag]
+  if (u) return { ko: u, userKo: true }
+  const base = loadKo().map[tag]
+  if (base) return { ko: base }
+  const w = loadWiki()[tag]?.ko
+  if (w?.length) return { ko: w.join('/') }
+  return {}
+}
+
+/** 결과 항목에 한글 뜻·영어 설명을 붙인다 */
+function enrich(t: TagEntry): TagEntry {
+  const k = koFor(t.tag)
+  const desc = loadWiki()[t.tag]?.en
+  return { ...t, ...k, ...(desc ? { desc } : {}) }
 }
 
 const HANGUL = /[가-힣]/
@@ -58,14 +132,12 @@ const HANGUL = /[가-힣]/
 /** 태그명 목록 → 정보 조회 (태그 탐색기용). 존재하지 않는 태그는 제외 */
 export function lookupTags(names: string[]): TagEntry[] {
   const all = load()
-  const { map } = loadKo()
   const byTag = new Map(all.map((t) => [t.tag, t]))
   const result: TagEntry[] = []
   for (const name of names) {
     const t = byTag.get(name)
     if (!t) continue
-    const ko = map[t.tag]
-    result.push(ko ? { ...t, ko } : t)
+    result.push(enrich(t))
   }
   return result
 }
@@ -86,7 +158,6 @@ function loadFuzzyPool(): { entry: TagEntry; key: string }[] {
 /** 발음 키 퍼지 매칭 — "미드리프트"→midriff, 영어 오타 보완용 */
 function fuzzySearch(queryKey: string, limit: number, excludeTags: Set<string>): TagEntry[] {
   if (queryKey.length < 3) return []
-  const { map } = loadKo()
   const scored: { entry: TagEntry; score: number }[] = []
   for (const { entry, key } of loadFuzzyPool()) {
     if (excludeTags.has(entry.tag)) continue
@@ -96,10 +167,7 @@ function fuzzySearch(queryKey: string, limit: number, excludeTags: Set<string>):
   }
   // 유사도 → 인기순
   scored.sort((a, b) => b.score - a.score || b.entry.count - a.entry.count)
-  return scored.slice(0, limit).map(({ entry }) => {
-    const ko = map[entry.tag]
-    return ko ? { ...entry, ko } : entry
-  })
+  return scored.slice(0, limit).map(({ entry }) => enrich(entry))
 }
 
 export function searchTags(query: string, limit = 8): TagEntry[] {
@@ -114,7 +182,7 @@ export function searchTags(query: string, limit = 8): TagEntry[] {
     const hits: TagEntry[] = []
     for (const { entry, ko } of entries) {
       if (words.every((w) => ko.includes(w) || entry.tag.includes(w))) {
-        hits.push({ ...entry, ko })
+        hits.push(enrich({ ...entry, ko }))
         if (hits.length >= limit) break
       }
     }
@@ -127,7 +195,6 @@ export function searchTags(query: string, limit = 8): TagEntry[] {
 
   if (q.length < 2) return []
   const all = load()
-  const { map } = loadKo()
 
   const prefix: TagEntry[] = []
   const substring: TagEntry[] = []
@@ -139,11 +206,8 @@ export function searchTags(query: string, limit = 8): TagEntry[] {
       substring.push(t)
     }
   }
-  // 영어 결과에도 한글 뜻을 붙여준다 (사전에 있으면)
-  const results = [...prefix, ...substring].slice(0, limit).map((t) => {
-    const ko = map[t.tag]
-    return ko ? { ...t, ko } : t
-  })
+  // 영어 결과에도 한글 뜻·설명을 붙여준다
+  const results = [...prefix, ...substring].slice(0, limit).map(enrich)
   // 정확 매칭이 부족하면 오타 등을 퍼지로 보완
   if (results.length < Math.min(3, limit)) {
     const seen = new Set(results.map((r) => r.tag))

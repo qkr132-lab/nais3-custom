@@ -153,7 +153,7 @@ import {
   reorderRefs,
   updateRefImage
 } from './refs/repo'
-import { lookupTags, searchTags } from './tags'
+import { lookupTags, searchTags, listUserTagKo, setUserTagKo } from './tags'
 import {
   cancelUpload,
   clearUploadHistory,
@@ -611,6 +611,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
 
   handle('tags:search', ({ query, limit }) => ({ items: searchTags(query, limit) }))
   handle('tags:lookup', ({ tags }) => ({ items: lookupTags(tags) }))
+  handle('tags:setKo', ({ tag, ko }) => {
+    setUserTagKo(tag, ko)
+  })
+  handle('tags:listUserKo', () => ({ entries: listUserTagKo() }))
   // 토큰 수는 실제 전송될 프롬프트 기준 (커스텀) — 주석(#) 제거 + 조각(<a1> 등) 확장 후 센다.
   // 랜덤 조각은 뽑기마다 길이가 달라지므로 항상 첫 줄 기준(rng=0)으로 세서 숫자가 흔들리지 않고,
   // peek 모드라 <*순차> 조각의 진행 카운터도 건드리지 않는다.

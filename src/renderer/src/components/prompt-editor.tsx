@@ -5,6 +5,8 @@ import { caretCoords } from '../lib/caret'
 import { highlightRanges } from '../lib/prompt-weights'
 import { commentStart } from '@shared/nai-presets'
 import { fragmentPaths } from '../stores/fragments-store'
+import { askText } from '../stores/dialog-store'
+import { toast } from '../stores/toast-store'
 
 /**
  * 프롬프트 에디터.
@@ -25,7 +27,17 @@ const TYPO =
 
 type Suggestion =
   | { kind: 'frag'; path: string }
-  | { kind: 'tag'; tag: string; count: number; type: string; ko?: string }
+  | {
+      kind: 'tag'
+      tag: string
+      count: number
+      type: string
+      ko?: string
+      /** 단보루 위키 영어 설명 (커스텀) */
+      desc?: string
+      /** 사용자가 직접 단 한글 뜻 */
+      userKo?: boolean
+    }
 
 const TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/
 
@@ -280,6 +292,19 @@ export function PromptEditor({
           } else if (e.key === 'Enter' || e.key === 'Tab') {
             e.preventDefault()
             complete(suggestions[selected])
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            // 선택된 태그에 한글 뜻 달기 (커스텀) — 사전에 없던 태그도 바로 검색되게
+            const cur = suggestions[selected]
+            if (cur?.kind === 'tag') {
+              e.preventDefault()
+              void (async () => {
+                const ko = await askText(`"${cur.tag}" 한글 뜻`, cur.userKo ? cur.ko ?? '' : '')
+                if (ko === null) return
+                await window.nais.invoke('tags:setKo', { tag: cur.tag, ko })
+                toast(ko.trim() ? `"${cur.tag}" ← ${ko.trim()}` : `"${cur.tag}" 뜻 지움`, 'success')
+                refreshSuggestions(value, textareaRef.current?.selectionStart ?? value.length)
+              })()
+            }
           } else if (e.key === 'Escape') {
             setSuggestions([])
           } else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
@@ -316,7 +341,7 @@ export function PromptEditor({
         popupPos &&
         createPortal(
           <div
-            className="fixed z-50 min-w-52 max-w-72 overflow-hidden rounded-md border border-line bg-surface shadow-xl"
+            className="fixed z-50 min-w-56 max-w-80 overflow-hidden rounded-md border border-line bg-surface shadow-xl"
             style={{ left: popupPos.left, top: popupPos.top }}
           >
             {suggestions.map((s, i) => (
@@ -343,10 +368,25 @@ export function PromptEditor({
                         {formatCount(s.count)}
                       </span>
                     </span>
-                    {/* 한글 뜻 (커스텀 사전) */}
-                    {s.ko && (
-                      <span className="w-full truncate font-sans text-[10.5px] leading-tight text-faint">
+                    {/* 한글 뜻 — 사용자가 단 것은 강조. 없으면 "뜻 달기" 안내 */}
+                    {s.ko ? (
+                      <span
+                        className={cn(
+                          'w-full truncate font-sans text-[10.5px] leading-tight',
+                          s.userKo ? 'text-emerald-500' : 'text-faint'
+                        )}
+                      >
                         {s.ko}
+                      </span>
+                    ) : (
+                      <span className="w-full font-sans text-[10px] leading-tight text-faint/60">
+                        Ctrl+K로 한글 뜻 달기
+                      </span>
+                    )}
+                    {/* 영어 설명 — 단보루 위키 첫 문단 (선택 항목만, 너무 길지 않게) */}
+                    {i === selected && s.desc && (
+                      <span className="mt-0.5 line-clamp-3 w-full whitespace-normal font-sans text-[10.5px] leading-snug text-muted">
+                        {s.desc}
                       </span>
                     )}
                   </>
