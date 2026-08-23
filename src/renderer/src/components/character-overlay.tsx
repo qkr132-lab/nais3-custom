@@ -138,7 +138,12 @@ export function CharacterOverlay(): React.JSX.Element {
     const { imported } = await window.nais.invoke('chars:importJson', { folderId })
     if (!imported) return
     await load()
-    toast(`캐릭터 ${imported}개를 가져왔습니다 (전부 꺼진 상태)`, 'success')
+    toast(
+      folderId === undefined
+        ? `캐릭터 ${imported}개를 폴더 구조 그대로 가져왔습니다 (전부 꺼진 상태)`
+        : `캐릭터 ${imported}개를 이 폴더로 가져왔습니다 (전부 꺼진 상태)`,
+      'success'
+    )
   }
 
   const deleteFolderWithItems = async (folderId: number): Promise<void> => {

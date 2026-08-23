@@ -334,15 +334,20 @@ export async function exportCharactersJson(folderId?: number | null): Promise<{
   const db = getDb()
   const where =
     folderId === undefined
-      ? 'deleted_at IS NULL'
+      ? 'c.deleted_at IS NULL'
       : folderId === null
-        ? 'deleted_at IS NULL AND folder_id IS NULL'
-        : 'deleted_at IS NULL AND folder_id = ?'
+        ? 'c.deleted_at IS NULL AND c.folder_id IS NULL'
+        : 'c.deleted_at IS NULL AND c.folder_id = ?'
   const params = folderId === undefined || folderId === null ? [] : [folderId]
+  // 폴더 이름을 함께 싣는다 — 가져올 때 폴더 구조를 그대로 되살리기 위해서다
   const rows = db
     .prepare(
-      `SELECT name, prompt, negative_prompt, center_x, center_y, role FROM character_prompts
-       WHERE ${where} ORDER BY sort_order, id`
+      `SELECT c.name, c.prompt, c.negative_prompt, c.center_x, c.center_y, c.role,
+              f.name AS folder_name
+       FROM character_prompts c
+       LEFT JOIN character_folders f ON f.id = c.folder_id
+       WHERE ${where}
+       ORDER BY c.sort_order, c.id`
     )
     .all(...params) as {
     name: string
@@ -351,6 +356,7 @@ export async function exportCharactersJson(folderId?: number | null): Promise<{
     center_x: number
     center_y: number
     role: string | null
+    folder_name: string | null
   }[]
 
   const folderName =
@@ -374,11 +380,24 @@ export async function exportCharactersJson(folderId?: number | null): Promise<{
     prompt: r.prompt,
     negativePrompt: r.negative_prompt,
     center: { x: r.center_x, y: r.center_y },
-    ...(r.role ? { role: r.role } : {})
+    ...(r.role ? { role: r.role } : {}),
+    // 카드가 속했던 폴더 (미분류면 null) — 가져오기에서 이 이름으로 폴더를 되살린다
+    folder: r.folder_name
   }))
+  // 빈 폴더까지 포함해 폴더 목록도 남긴다 (전체 내보내기일 때만 의미 있음)
+  const folders =
+    folderId === undefined
+      ? (
+          db.prepare('SELECT name FROM character_folders ORDER BY sort_order').all() as {
+            name: string
+          }[]
+        ).map((f) => f.name)
+      : folderName
+        ? [folderName]
+        : []
   writeFileSync(
     result.filePath,
-    JSON.stringify({ version: 1, folder: folderName ?? null, characters }, null, 2),
+    JSON.stringify({ version: 2, folder: folderName ?? null, folders, characters }, null, 2),
     'utf-8'
   )
   return { saved: true, count: characters.length }
@@ -390,6 +409,8 @@ interface ImportedCharacter {
   negativePrompt?: string
   center?: { x?: number; y?: number }
   role?: string
+  /** v2부터: 이 카드가 속했던 폴더 이름 */
+  folder?: string | null
 }
 
 /** 캐릭터 JSON 가져오기 — folderId를 주면 그 폴더로 들어간다. 켜진 상태로 들어오지 않는다 */
@@ -404,7 +425,7 @@ export async function importCharactersJson(
   })
   if (result.canceled || !result.filePaths[0]) return { imported: 0 }
 
-  let parsed: { characters?: ImportedCharacter[] } | ImportedCharacter[]
+  let parsed: { characters?: ImportedCharacter[]; folders?: string[] } | ImportedCharacter[]
   try {
     parsed = JSON.parse(readFileSync(result.filePaths[0], 'utf-8'))
   } catch {
@@ -413,10 +434,34 @@ export async function importCharactersJson(
   const list = Array.isArray(parsed) ? parsed : (parsed.characters ?? [])
   const db = getDb()
   let imported = 0
+
+  /**
+   * 폴더 이름 → id. 이름이 같은 폴더가 이미 있으면 그리로 합치고, 없으면 새로 만든다.
+   * 특정 폴더로 가져오는 경우(폴더 우클릭)는 사용자가 위치를 정한 것이므로 무시한다.
+   */
+  const folderIds = new Map<string, number>()
+  const resolveFolder = (name?: string | null): number | null => {
+    if (folderId !== undefined) return folderId // 지정 폴더로 몰아넣기
+    const trimmed = name?.trim()
+    if (!trimmed) return null // 미분류
+    const cached = folderIds.get(trimmed)
+    if (cached !== undefined) return cached
+    const existing = db
+      .prepare('SELECT id FROM character_folders WHERE name = ? LIMIT 1')
+      .get(trimmed) as { id: number } | undefined
+    const id = existing?.id ?? createFolder(trimmed)
+    folderIds.set(trimmed, id)
+    return id
+  }
+
+  // 빈 폴더도 되살린다 (v2 파일에만 folders가 있다)
+  const folderNames = Array.isArray(parsed) ? [] : (parsed.folders ?? [])
+
   db.transaction(() => {
+    if (folderId === undefined) for (const name of folderNames) resolveFolder(name)
     for (const c of list) {
       if (!c || typeof c.prompt !== 'string' || !c.prompt.trim()) continue
-      const id = createCharacter(c.name?.trim() || '', folderId ?? null)
+      const id = createCharacter(c.name?.trim() || '', resolveFolder(c.folder))
       updateCharacter(id, {
         prompt: c.prompt,
         negativePrompt: typeof c.negativePrompt === 'string' ? c.negativePrompt : '',
