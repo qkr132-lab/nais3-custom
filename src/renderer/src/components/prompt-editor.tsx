@@ -224,14 +224,22 @@ export function PromptEditor({
     let insert = s.kind === 'frag' ? s.path + '>' : s.tag
     // 완성 후 바로 다음 태그를 이어 칠 수 있게 ", " 부착 (뒤에 이미 쉼표가 있으면 생략)
     if (!value.slice(cursor).trimStart().startsWith(',')) insert += ', '
-    const next = value.slice(0, tokenStart) + insert + value.slice(cursor)
-    onValueChange(next)
     setSuggestions([])
-    requestAnimationFrame(() => {
-      const pos = tokenStart + insert.length
-      ta.setSelectionRange(pos, pos)
-      ta.focus()
-    })
+    // execCommand 삽입은 브라우저 undo 스택에 남는다 — 실수로 완성해도 Ctrl+Z로 되돌아간다.
+    // (onValueChange로 통째 교체하면 undo 기록이 끊겨서 복구 불가였다)
+    ta.focus()
+    ta.setSelectionRange(tokenStart, cursor)
+    const ok = document.execCommand('insertText', false, insert)
+    if (!ok) {
+      // 폴백 — undo는 안 되지만 완성 자체는 동작
+      const next = value.slice(0, tokenStart) + insert + value.slice(cursor)
+      onValueChange(next)
+      requestAnimationFrame(() => {
+        const pos = tokenStart + insert.length
+        ta.setSelectionRange(pos, pos)
+        ta.focus()
+      })
+    }
   }
 
   return (
@@ -279,8 +287,9 @@ export function PromptEditor({
           refreshSuggestions(e.target.value, e.target.selectionStart)
         }}
         onScroll={syncScroll}
-        // 클릭으로 커서를 옮기면 새 위치 기준으로 추천을 다시 계산 (스테일 팝업 잔류 방지)
-        onClick={(e) => refreshSuggestions(value, e.currentTarget.selectionStart)}
+        // 클릭은 팝업을 닫기만 — 추천은 타이핑 중에만 뜬다.
+        // (클릭마다 추천이 다시 떠서, 실수로 팝업을 눌러 태그가 덮이는 사고가 있었다)
+        onClick={() => setSuggestions([])}
         onKeyDown={(e) => {
           if (suggestions.length === 0) return
           if (e.key === 'ArrowDown') {
@@ -298,7 +307,7 @@ export function PromptEditor({
             if (cur?.kind === 'tag') {
               e.preventDefault()
               void (async () => {
-                const ko = await askText(`"${cur.tag}" 한글 뜻`, cur.userKo ? cur.ko ?? '' : '')
+                const ko = await askText(`"${cur.tag}" 한글 뜻`, cur.userKo ? (cur.ko ?? '') : '')
                 if (ko === null) return
                 await window.nais.invoke('tags:setKo', { tag: cur.tag, ko })
                 toast(ko.trim() ? `"${cur.tag}" ← ${ko.trim()}` : `"${cur.tag}" 뜻 지움`, 'success')
