@@ -4,6 +4,8 @@ import type { CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { cn } from '../lib/utils'
 import { useCharactersStore } from '../stores/characters-store'
+import { useSceneExtrasStore } from '../stores/scene-extras-store'
+import { toast } from '../stores/toast-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { PlacementCanvas, distributed } from './placement-canvas'
 import { PromptEditor } from './prompt-editor'
@@ -33,6 +35,16 @@ export function CompositionBoard(): React.JSX.Element {
   const caps = modelCaps(request.model)
 
   const chars = useMemo(() => items.filter((c) => c.enabled && c.prompt.trim()), [items])
+  const clearCoordOverrides = useSceneExtrasStore((s) => s.clearCoordOverrides)
+  // 항목 배열/맵을 직접 구독해 오버라이드 수를 파생 (끄면 배너가 바로 사라지게)
+  const extrasEntries = useSceneExtrasStore((s) => s.entries)
+  const extrasAdditions = useSceneExtrasStore((s) => s.additions)
+  const overrides = useMemo(() => {
+    let additions = 0
+    for (const scenes of Object.values(extrasAdditions))
+      for (const a of Object.values(scenes)) if (a.useCoords !== undefined) additions++
+    return { additions, entries: extrasEntries.filter((e) => e.useCoords !== undefined).length }
+  }, [extrasEntries, extrasAdditions])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const selected = chars.find((c) => c.id === selectedId) ?? chars[0] ?? null
 
@@ -138,6 +150,34 @@ export function CompositionBoard(): React.JSX.Element {
       {!request.useCoords && chars.length > 0 && (
         <p className="mt-2 text-[11.5px] text-muted">
           위치 지정이 꺼져 있어 지금 배치는 생성에 반영되지 않습니다. 오른쪽 위 스위치를 켜세요.
+        </p>
+      )}
+
+      {/* 전역을 꺼도 위치가 계속 적용되는 요인 — 숨어 있으면 "껐는데 유지된다"로 보인다 */}
+      {!request.useCoords && (overrides.additions > 0 || overrides.entries > 0) && (
+        <p className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11.5px] text-muted">
+          <span>
+            씬별 추가 {overrides.additions}건 · 큐 반복 {overrides.entries}건에 저장된
+            <b className="text-ink"> 위치 적용</b>이 이 스위치보다 우선이라, 그 씬들은 계속 좌표를
+            씁니다.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px] text-danger"
+            onClick={() => {
+              clearCoordOverrides()
+              toast('씬별·큐 반복의 위치 적용 오버라이드를 모두 껐습니다', 'success')
+            }}
+          >
+            전부 끄기
+          </Button>
+        </p>
+      )}
+      {!request.useCoords && (
+        <p className="mt-1 text-[11px] text-faint">
+          씬에 하는쪽/당하는쪽 역할 위치를 지정해 뒀다면 그 씬도 좌표가 강제로 켜집니다 — 씬 우클릭
+          → 역할 위치에서 해제하세요.
         </p>
       )}
     </div>

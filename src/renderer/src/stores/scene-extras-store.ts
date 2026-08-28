@@ -46,6 +46,14 @@ interface SceneExtrasState {
   setAdditionsEnabled: (v: boolean) => void
   updateAddition: (presetId: number, sceneId: number, addition: SceneAddition) => void
   clearAddition: (presetId: number, sceneId: number) => void
+  /**
+   * 씬별 추가·큐 반복에 저장된 '위치 적용' 오버라이드를 전부 지운다 (커스텀).
+   * 이 오버라이드는 전역 위치 지정 스위치보다 우선이라, 남아 있으면 전역을 꺼도
+   * 그 씬들은 계속 좌표를 쓴다 — "껐는데 유지된다"의 주범.
+   */
+  clearCoordOverrides: () => void
+  /** 위치 적용 오버라이드가 켜진 항목 수 (씬별 추가 / 큐 반복) */
+  countCoordOverrides: () => { additions: number; entries: number }
   /** 삭제된 캐릭터/레퍼/바이브 id를 모든 씬별 추가·큐 반복 항목에서 제거 (커스텀 — 정합성) */
   purgeIds: (ids: { characterIds?: number[]; charRefIds?: number[]; vibeIds?: number[] }) => void
 }
@@ -159,6 +167,33 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({ additions: { ...get().additions, [presetId]: preset } })
     persist()
   },
+
+  clearCoordOverrides: () => {
+    const { entries, additions } = get()
+    const nextEntries = entries.map((e) =>
+      e.useCoords === undefined ? e : { ...e, useCoords: undefined }
+    )
+    const nextAdditions: AdditionsMap = {}
+    for (const [pid, scenes] of Object.entries(additions)) {
+      nextAdditions[Number(pid)] = Object.fromEntries(
+        Object.entries(scenes).map(([sid, a]) => [
+          sid,
+          a.useCoords === undefined ? a : { ...a, useCoords: undefined }
+        ])
+      )
+    }
+    set({ entries: nextEntries, additions: nextAdditions })
+    persist()
+  },
+
+  countCoordOverrides: () => {
+    const { entries, additions } = get()
+    let adds = 0
+    for (const scenes of Object.values(additions))
+      for (const a of Object.values(scenes)) if (a.useCoords !== undefined) adds++
+    return { additions: adds, entries: entries.filter((e) => e.useCoords !== undefined).length }
+  },
+
   purgeIds: ({ characterIds, charRefIds, vibeIds }) => {
     const cSet = new Set(characterIds ?? [])
     const rSet = new Set(charRefIds ?? [])
@@ -188,7 +223,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
       const nextScenes: Record<number, SceneAddition> = {}
-      for (const [sceneId, add] of Object.entries(scenes)) nextScenes[Number(sceneId)] = filterAdd(add)
+      for (const [sceneId, add] of Object.entries(scenes))
+        nextScenes[Number(sceneId)] = filterAdd(add)
       nextAdditions[Number(presetId)] = nextScenes
     }
     set({
