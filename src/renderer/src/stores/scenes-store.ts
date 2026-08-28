@@ -191,15 +191,19 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
       return {
         prompt: appendPrompt(c.prompt, roleTags(c.id)),
         negativePrompt: c.negativePrompt,
-        center: explicit ?? c.center,
+        // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
+        // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
+        center: explicit ?? { x: 0.5, y: 0.5 },
         // 명시 위치(씬별/역할/큐)가 있었는지 — 아래 겹침 분산에서 이 캐릭터는 건드리지 않는다
         positioned: explicit != null,
         enabled: true as const
       }
     })
-  // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 메인 설정(전역 useCoords) 순 (커스텀)
+  // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 역할 위치 (커스텀).
+  // ⚠️ 전역(배치 탭) 위치 지정은 메인 탭 전용 — 씬에는 새지 않는다. 전역을 켰더니
+  // 씬의 "지정 안 한 캐릭터"까지 배치판 좌표로 그려지던 혼란(1.11.2 리포트)의 수정.
   const useCoordsOverride = add?.useCoords ?? entry?.useCoords
-  const finalUseCoords = useCoordsOverride ?? (rolePosApplied ? true : base.useCoords)
+  const finalUseCoords = useCoordsOverride ?? rolePosApplied
   // 좌표 모드에서 위치를 안 준 캐릭터들이 같은 칸(카드 기본 0.5,0.5)에 겹치면 NAI가
   // 한 명으로 합쳐 그린다 — 역할 위치 때문에 좌표가 켜졌을 때 특히 잘 남. 미지정
   // 캐릭터끼리(또는 지정 캐릭터와) 칸이 겹치면 같은 줄의 빈 칸으로 자동 분산 (커스텀)

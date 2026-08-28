@@ -157,9 +157,9 @@ export function CompositionBoard(): React.JSX.Element {
       {!request.useCoords && (overrides.additions > 0 || overrides.entries > 0) && (
         <p className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11.5px] text-muted">
           <span>
-            씬별 추가 {overrides.additions}건 · 큐 반복 {overrides.entries}건에 저장된
-            <b className="text-ink"> 위치 적용</b>이 이 스위치보다 우선이라, 그 씬들은 계속 좌표를
-            씁니다.
+            이 스위치는 메인 탭 전용입니다. 씬별 추가 {overrides.additions}건 · 큐 반복{' '}
+            {overrides.entries}건에 <b className="text-ink">위치 적용</b>이 켜져 있어 그 씬들은
+            좌표를 씁니다.
           </span>
           <Button
             size="sm"

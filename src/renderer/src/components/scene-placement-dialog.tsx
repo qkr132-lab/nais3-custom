@@ -55,8 +55,9 @@ export function ScenePlacementDialog({
     .map((id) => items.find((c) => c.id === id))
     .filter((c): c is CharacterCard => !!c)
 
+  // 미지정은 0.5 고정 — 카드 기본 좌표는 씬 생성에 쓰이지 않는다 (배치 탭 좌표가 새지 않게)
   const centerOf = (c: CharacterCard): { x: number; y: number } =>
-    positions?.[c.id] ?? c.center ?? { x: 0.5, y: 0.5 }
+    positions?.[c.id] ?? { x: 0.5, y: 0.5 }
 
   const setPos = (id: number, center: { x: number; y: number }): void =>
     onPatch({ positions: { ...(positions ?? {}), [id]: center } })
@@ -149,7 +150,7 @@ export function ScenePlacementDialog({
                         </span>
                         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">
                           {center.x.toFixed(2)},{center.y.toFixed(2)}
-                          {!overridden && <span className="ml-1">(기본)</span>}
+                          {!overridden && <span className="ml-1">(미지정)</span>}
                         </span>
                         {overridden && (
                           <button

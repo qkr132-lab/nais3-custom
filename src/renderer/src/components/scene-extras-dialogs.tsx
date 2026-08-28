@@ -641,7 +641,8 @@ function PositionPanel({
           <div className="mt-2 flex flex-wrap gap-2">
             {chars.map((c, i) => {
               const pos = positions?.[c.id]
-              const center = pos ?? c.center ?? { x: 0.5, y: 0.5 }
+              // 미지정은 0.5 — 카드 기본 좌표는 씬 생성에 쓰이지 않는다
+              const center = pos ?? { x: 0.5, y: 0.5 }
               return (
                 <div
                   key={c.id}
@@ -669,7 +670,7 @@ function PositionPanel({
                       >
                         <Crosshair size={11} />
                         {center.x},{center.y}
-                        {!pos && <span className="text-faint">(기본)</span>}
+                        {!pos && <span className="text-faint">(미지정)</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto">
