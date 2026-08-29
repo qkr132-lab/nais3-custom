@@ -177,6 +177,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     return (r === 'source' ? scene.sourcePos : r === 'target' ? scene.targetPos : null) ?? undefined
   }
   let rolePosApplied = false
+  let slotApplied = false
   const built = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
@@ -185,9 +186,13 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     .slice(0, 6)
     .map((c) => {
       const addPos = add?.positions?.[c.id]
-      const rp = addPos == null ? rolePos(c.id) : undefined
+      // 미리 잡아둔 자리에 배정돼 있으면 그 좌표를 쓴다 (커스텀) — 캐릭터별 지정 다음 순위
+      const slotIndex = add?.slotOf?.[c.id]
+      const slotPos = slotIndex != null ? add?.slots?.[slotIndex] : undefined
+      if (addPos == null && slotPos) slotApplied = true
+      const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
       if (rp) rolePosApplied = true
-      const explicit = addPos ?? rp ?? entry?.positions?.[c.id]
+      const explicit = addPos ?? slotPos ?? rp ?? entry?.positions?.[c.id]
       return {
         prompt: appendPrompt(c.prompt, roleTags(c.id)),
         negativePrompt: c.negativePrompt,
@@ -203,7 +208,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   // ⚠️ 전역(배치 탭) 위치 지정은 메인 탭 전용 — 씬에는 새지 않는다. 전역을 켰더니
   // 씬의 "지정 안 한 캐릭터"까지 배치판 좌표로 그려지던 혼란(1.11.2 리포트)의 수정.
   const useCoordsOverride = add?.useCoords ?? entry?.useCoords
-  const finalUseCoords = useCoordsOverride ?? rolePosApplied
+  const finalUseCoords = useCoordsOverride ?? (rolePosApplied || slotApplied)
   // 좌표 모드에서 위치를 안 준 캐릭터들이 같은 칸(카드 기본 0.5,0.5)에 겹치면 NAI가
   // 한 명으로 합쳐 그린다 — 역할 위치 때문에 좌표가 켜졌을 때 특히 잘 남. 미지정
   // 캐릭터끼리(또는 지정 캐릭터와) 칸이 겹치면 같은 줄의 빈 칸으로 자동 분산 (커스텀)

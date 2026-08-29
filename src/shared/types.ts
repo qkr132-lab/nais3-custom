@@ -78,6 +78,10 @@ export interface SequenceEntry {
   positions?: CharPositions
   /** 캐릭터별 행위 역할 (커스텀) — 씬의 하는쪽/당하는쪽 태그를 자동으로 얹는다 */
   roles?: CharRoles
+  /** 미리 잡아둔 자리 (커스텀) — 캐릭터 없이 위치·인원부터 정해둘 때 */
+  slots?: { x: number; y: number }[]
+  /** 캐릭터 id → 자리 번호 */
+  slotOf?: Record<number, number>
 }
 
 export interface GenerationRequest {

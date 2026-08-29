@@ -23,6 +23,13 @@ export interface SceneAddition {
   positions?: CharPositions
   /** 캐릭터별 행위 역할 (커스텀) — 씬의 하는쪽/당하는쪽 태그가 프롬프트 뒤에 얹힘 */
   roles?: CharRoles
+  /**
+   * 미리 잡아둔 자리 (커스텀). 캐릭터와 무관하게 좌표만 먼저 정해 둔다 —
+   * "이 씬은 2명, 여기랑 여기" 를 캐릭터 없이 짜두고 나중에 채우는 용도.
+   */
+  slots?: { x: number; y: number }[]
+  /** 캐릭터 id → 자리 번호(0-based). 배정된 캐릭터는 그 자리 좌표로 생성된다 */
+  slotOf?: Record<number, number>
 }
 
 /** presetId → sceneId → 추가 선택 */

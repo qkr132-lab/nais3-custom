@@ -18,8 +18,11 @@ import { Switch } from './ui/switch'
  * 여기서는 씬에 들어간 캐릭터 전원을 실제 생성 비율 판 위에 올려놓고 끌어서
  * 배치하며, 아래 목록에서 캐릭터를 넣고 뺄 수도 있다.
  *
- * 좌표는 씬 전용 오버라이드(positions)에만 쓴다 — 캐릭터 카드의 기본 좌표는
- * 건드리지 않는다. 아직 지정하지 않은 캐릭터는 카드 기본값을 (기본)으로 보여준다.
+ * 좌표는 씬 전용 오버라이드(positions)에만 쓴다 — 캐릭터 카드의 기본 좌표는 건드리지 않고,
+ * 씬 생성도 카드 좌표를 쓰지 않는다 (배치 탭에서 끌어놓은 위치가 씬으로 새지 않게).
+ *
+ * 자리(slots): 캐릭터 없이 좌표만 먼저 잡아두는 칸. "이 씬은 2명, 여기랑 여기"를 짜두고
+ * 나중에 자리를 골라 캐릭터를 꽂는다. 배정된 캐릭터는 그 자리 좌표로 생성된다.
  */
 
 function charLabel(c: CharacterCard, index: number): string {
@@ -33,6 +36,8 @@ export function ScenePlacementDialog({
   characterIds,
   positions,
   useCoords,
+  slots,
+  slotOf,
   onPatch
 }: {
   open: boolean
@@ -40,10 +45,16 @@ export function ScenePlacementDialog({
   characterIds: number[]
   positions?: CharPositions
   useCoords?: boolean
+  /** 미리 잡아둔 자리 */
+  slots?: { x: number; y: number }[]
+  /** 캐릭터 id → 자리 번호 */
+  slotOf?: Record<number, number>
   onPatch: (patch: {
     characterIds?: number[]
     positions?: CharPositions
     useCoords?: boolean
+    slots?: { x: number; y: number }[]
+    slotOf?: Record<number, number>
   }) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
@@ -66,6 +77,56 @@ export function ScenePlacementDialog({
     const next = { ...(positions ?? {}) }
     delete next[id]
     onPatch({ positions: next })
+  }
+
+  const slotList = slots ?? []
+  const assign = slotOf ?? {}
+  // 자리 → 그 자리에 배정된 캐릭터
+  const charAtSlot = (index: number): CharacterCard | undefined =>
+    picked.find((c) => assign[c.id] === index)
+  const [pickedSlot, setPickedSlot] = useState<number | null>(null)
+
+  const addSlot = (): void => {
+    // 새 자리는 가로로 고르게 — n+1개를 균등 배치한 마지막 자리
+    const next = [...slotList, { x: 0.5, y: 0.5 }]
+    onPatch({ slots: next.map((_, i) => distributed(next.length, i, 'x')) })
+  }
+
+  const removeSlot = (index: number): void => {
+    const next = slotList.filter((_, i) => i !== index)
+    // 배정 재정렬: 지운 자리보다 뒤 번호는 하나씩 당긴다
+    const nextAssign: Record<number, number> = {}
+    for (const [id, at] of Object.entries(assign)) {
+      if (at === index) continue
+      nextAssign[Number(id)] = at > index ? at - 1 : at
+    }
+    onPatch({ slots: next, slotOf: nextAssign })
+    setPickedSlot(null)
+  }
+
+  const moveSlot = (index: number, center: { x: number; y: number }): void =>
+    onPatch({ slots: slotList.map((s, i) => (i === index ? center : s)) })
+
+  /** 고른 자리에 캐릭터를 꽂는다 (씬에 없으면 함께 추가) */
+  const assignToSlot = (index: number, charId: number): void => {
+    const nextAssign: Record<number, number> = {}
+    // 한 자리엔 한 명 — 기존 배정자는 자리에서 빠진다
+    for (const [id, at] of Object.entries(assign)) {
+      if (at === index || Number(id) === charId) continue
+      nextAssign[Number(id)] = at
+    }
+    nextAssign[charId] = index
+    onPatch({
+      slotOf: nextAssign,
+      ...(characterIds.includes(charId) ? {} : { characterIds: [...characterIds, charId] })
+    })
+    setPickedSlot(null)
+  }
+
+  const clearSlot = (index: number): void => {
+    const nextAssign: Record<number, number> = {}
+    for (const [id, at] of Object.entries(assign)) if (at !== index) nextAssign[Number(id)] = at
+    onPatch({ slotOf: nextAssign })
   }
 
   const toggleChar = (id: number): void =>
@@ -94,19 +155,40 @@ export function ScenePlacementDialog({
 
         <div className="flex min-h-0 flex-1 flex-wrap gap-4 overflow-auto">
           <PlacementCanvas
-            chars={picked.map((c, i) => ({
-              id: c.id,
-              label: charLabel(c, i),
-              center: centerOf(c),
-              thumbnail: c.thumbnail || undefined,
-              isDefault: !positions?.[c.id]
-            }))}
+            chars={[
+              // 자리 — 음수 id로 구분. 비었으면 번호만, 차 있으면 캐릭터 이름
+              ...slotList.map((pos, i) => {
+                const occupant = charAtSlot(i)
+                return {
+                  id: -(i + 1),
+                  label: occupant ? `${i + 1}. ${charLabel(occupant, i)}` : `${i + 1}. 빈 자리`,
+                  center: pos,
+                  thumbnail: occupant?.thumbnail || undefined
+                }
+              }),
+              // 자리에 배정되지 않은 캐릭터만 따로
+              ...picked
+                .filter((c) => assign[c.id] === undefined)
+                .map((c, i) => ({
+                  id: c.id,
+                  label: charLabel(c, i),
+                  center: centerOf(c),
+                  thumbnail: c.thumbnail || undefined,
+                  isDefault: !positions?.[c.id]
+                }))
+            ]}
             width={request.width}
             height={request.height}
             freeform={caps.freeformCharacterPosition}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onMove={setPos}
+            selectedId={pickedSlot != null ? -(pickedSlot + 1) : selectedId}
+            onSelect={(id) => {
+              if (id < 0) setPickedSlot(-id - 1)
+              else {
+                setPickedSlot(null)
+                setSelectedId(id)
+              }
+            }}
+            onMove={(id, center) => (id < 0 ? moveSlot(-id - 1, center) : setPos(id, center))}
             onDistribute={(axis) =>
               onPatch({
                 positions: {
@@ -121,6 +203,88 @@ export function ScenePlacementDialog({
           />
 
           <div className="flex min-h-0 min-w-[260px] flex-1 flex-col gap-3">
+            {/* 미리 잡아둔 자리 — 캐릭터 없이 위치·인원부터 정한다 */}
+            <div>
+              <p className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted">
+                자리
+                <span className="font-mono text-[11px] text-faint">{slotList.length}명</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 gap-1 px-2 text-[11px]"
+                  onClick={addSlot}
+                >
+                  <Plus size={12} /> 자리 추가
+                </Button>
+              </p>
+              {slotList.length === 0 ? (
+                <p className="text-[11.5px] text-faint">
+                  자리를 먼저 잡아두면 캐릭터 없이도 이 씬의 인원과 배치를 짜둘 수 있습니다.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {slotList.map((pos, i) => {
+                    const occupant = charAtSlot(i)
+                    return (
+                      <div
+                        key={i}
+                        className={cn(
+                          'flex items-center gap-2 rounded-md border px-1.5 py-1 transition-colors',
+                          pickedSlot === i
+                            ? 'border-accent bg-accent-soft'
+                            : 'border-line bg-surface-2'
+                        )}
+                        onClick={() => setPickedSlot(pickedSlot === i ? null : i)}
+                      >
+                        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-paper font-mono text-[10px] text-muted">
+                          {i + 1}
+                        </span>
+                        <span
+                          className={cn(
+                            'min-w-0 flex-1 truncate text-[11.5px]',
+                            !occupant && 'text-faint'
+                          )}
+                        >
+                          {occupant ? charLabel(occupant, i) : '비어 있음 — 눌러서 채우기'}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">
+                          {pos.x.toFixed(2)},{pos.y.toFixed(2)}
+                        </span>
+                        {occupant && (
+                          <button
+                            className="shrink-0 rounded px-1 text-[11px] text-faint hover:text-ink"
+                            title="이 자리 비우기"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              clearSlot(i)
+                            }}
+                          >
+                            비우기
+                          </button>
+                        )}
+                        <button
+                          className="shrink-0 rounded px-1 text-[11px] text-faint hover:text-danger"
+                          title="자리 삭제"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeSlot(i)
+                          }}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {pickedSlot != null && (
+                    <p className="text-[11px] text-accent">
+                      {pickedSlot + 1}번 자리를 고른 상태 — 아래에서 캐릭터를 누르면 이 자리에
+                      들어갑니다.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* 이 씬에 들어간 캐릭터 */}
             <div>
               <p className="mb-1.5 text-[12px] font-medium text-muted">이 씬의 캐릭터</p>
@@ -196,7 +360,9 @@ export function ScenePlacementDialog({
                           ? 'border-accent bg-accent-soft text-accent'
                           : 'border-line text-muted hover:bg-surface-2'
                       )}
-                      onClick={() => toggleChar(c.id)}
+                      onClick={() =>
+                        pickedSlot != null ? assignToSlot(pickedSlot, c.id) : toggleChar(c.id)
+                      }
                     >
                       {c.thumbnail ? (
                         <img

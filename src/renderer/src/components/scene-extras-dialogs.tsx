@@ -412,6 +412,10 @@ function RefPicker({
 
 type SelectionPatch = {
   characterIds?: number[]
+  /** 미리 잡아둔 자리 (커스텀) */
+  slots?: { x: number; y: number }[]
+  /** 캐릭터 id → 자리 번호 */
+  slotOf?: Record<number, number>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -427,8 +431,9 @@ function SelectionPanel({
   useCoords,
   positions,
   roles,
-  onPatch
-}: {
+  onPatch,
+  slots,
+  slotOf}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -436,6 +441,8 @@ function SelectionPanel({
   positions?: CharPositions
   roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
+  slots?: { x: number; y: number }[]
+  slotOf?: Record<number, number>
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -483,6 +490,8 @@ function SelectionPanel({
         characterIds={characterIds}
         useCoords={useCoords}
         positions={positions}
+        slots={slots}
+        slotOf={slotOf}
         onPatch={onPatch}
       />
     </div>
@@ -584,11 +593,15 @@ function PositionPanel({
   characterIds,
   useCoords,
   positions,
+  slots,
+  slotOf,
   onPatch
 }: {
   characterIds: number[]
   useCoords?: boolean
   positions?: CharPositions
+  slots?: { x: number; y: number }[]
+  slotOf?: Record<number, number>
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
@@ -630,6 +643,8 @@ function PositionPanel({
         characterIds={characterIds}
         positions={positions}
         useCoords={useCoords}
+        slots={slots}
+        slotOf={slotOf}
         onPatch={onPatch}
       />
       {useCoords &&
@@ -844,6 +859,8 @@ function EntryEditor({
           charRefIds={entry.charRefIds}
           vibeIds={entry.vibeIds}
           useCoords={entry.useCoords}
+          slots={entry.slots}
+          slotOf={entry.slotOf}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -941,6 +958,8 @@ export function AdditionDialog({
             charRefIds={current.charRefIds}
             vibeIds={current.vibeIds}
             useCoords={current.useCoords}
+            slots={current.slots}
+            slotOf={current.slotOf}
             positions={current.positions}
             roles={current.roles}
             onPatch={patch}
