@@ -91,7 +91,15 @@ export function ScenePlacementDialog({
   const assign = slotOf ?? {}
   // 자리 → 그 자리에 배정된 캐릭터
   const charAtSlot = (index: number): CharacterCard | undefined =>
-    picked.find((c) => assign[c.id] === index)
+    // 명시 배정이 먼저, 없으면 카드에 적힌 자리 번호로 자동 매칭 (커스텀)
+    picked.find((c) => assign[c.id] === index) ??
+    picked.find((c) => assign[c.id] === undefined && c.slotNo === index + 1)
+
+  /** 이 자리를 차지한 캐릭터가 카드 번호로 자동 매칭된 것인지 */
+  const isAutoAt = (index: number): boolean => {
+    const c = charAtSlot(index)
+    return !!c && assign[c.id] === undefined && c.slotNo === index + 1
+  }
   const [pickedSlot, setPickedSlot] = useState<number | null>(null)
 
   const addSlot = (): void => {
@@ -288,6 +296,9 @@ export function ScenePlacementDialog({
                           )}
                         >
                           {occupant ? charLabel(occupant, i) : '비어 있음 — 눌러서 채우기'}
+                          {isAutoAt(i) && (
+                            <span className="ml-1 text-[10px] text-emerald-500">번호 자동</span>
+                          )}
                         </span>
                         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">
                           {pos.x.toFixed(2)},{pos.y.toFixed(2)}

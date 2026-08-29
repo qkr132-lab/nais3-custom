@@ -187,7 +187,9 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     .map((c) => {
       const addPos = add?.positions?.[c.id]
       // 미리 잡아둔 자리에 배정돼 있으면 그 좌표를 쓴다 (커스텀) — 캐릭터별 지정 다음 순위
-      const slotIndex = add?.slotOf?.[c.id]
+      // 명시 배정(slotOf) > 카드에 적힌 자리 번호 (커스텀) — 번호를 달아두면 씬마다
+      // 배정하지 않아도 그 씬의 N번 자리로 간다
+      const slotIndex = add?.slotOf?.[c.id] ?? (c.slotNo != null ? c.slotNo - 1 : undefined)
       const slotPos = slotIndex != null ? add?.slots?.[slotIndex] : undefined
       if (addPos == null && slotPos) slotApplied = true
       const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined

@@ -359,6 +359,27 @@ export function CharacterOverlay(): React.JSX.Element {
       </button>
       {/* 기본 행위 역할 (커스텀) — 클릭 순환: 없음 → 하는쪽 → 당하는쪽. 씬별 추가/큐
           항목에서 따로 지정하지 않으면 이 값이 적용된다 */}
+      {/* 자리 번호 (커스텀) — 씬에 잡아둔 N번 자리로 자동 배치. 클릭으로 1→2→…→8→없음 */}
+      <button
+        title={
+          char.slotNo
+            ? `${char.slotNo}번 자리 (클릭: 다음 번호) — 씬에 잡아둔 ${char.slotNo}번 자리로 갑니다`
+            : '자리 번호 없음 (클릭: 1번) — 번호를 달면 씬마다 배정하지 않아도 그 자리로 갑니다'
+        }
+        onClick={() =>
+          updateCard(char.id, {
+            slotNo: char.slotNo == null ? 1 : char.slotNo >= 8 ? null : char.slotNo + 1
+          })
+        }
+        className={cn(
+          'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors',
+          char.slotNo
+            ? 'bg-emerald-500 text-white'
+            : 'text-faint hover:bg-surface-2 hover:text-muted'
+        )}
+      >
+        {char.slotNo ? `${char.slotNo}번` : '번호'}
+      </button>
       <button
         title={
           char.role === 'source'

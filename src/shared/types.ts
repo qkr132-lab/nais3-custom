@@ -239,6 +239,11 @@ export interface CharacterCard {
   thumbnail: string
   enabled: boolean
   center: { x: number; y: number }
+  /**
+   * 자리 번호 (커스텀). 씬에 잡아둔 N번 자리로 자동 배치된다.
+   * null이면 번호 없음 — 씬별 명시 배정이나 역할 위치를 따른다.
+   */
+  slotNo?: number | null
   folderId: number | null
   /** 연결된 캐릭레퍼 id (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */
   charRefId: number | null
@@ -276,7 +281,14 @@ export const FOLDER_COLORS = [
 export type CharacterCardPatch = Partial<
   Pick<
     CharacterCard,
-    'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId' | 'role'
+    | 'name'
+    | 'prompt'
+    | 'negativePrompt'
+    | 'enabled'
+    | 'center'
+    | 'charRefId'
+    | 'role'
+    | 'slotNo'
   >
 >
 

@@ -365,6 +365,11 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 이름·색·순서·중첩까지 원래 자리로 돌아오게. 카드 휴지통(v21)과 짝.
   (db) => {
     db.exec(`ALTER TABLE character_folders ADD COLUMN deleted_at TEXT;`)
+  },
+  // v24 (커스텀): 캐릭터 카드 자리 번호 — 씬마다 배정하지 않아도, 씬에 잡아둔 N번 자리로
+  // 자동으로 간다. 씬별 명시 배정(slotOf)이 있으면 그쪽이 우선.
+  (db) => {
+    db.exec(`ALTER TABLE character_prompts ADD COLUMN slot_no INTEGER;`)
   }
 ]
 
@@ -404,6 +409,7 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('character_prompts', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('character_prompts', 'deleted_folder', 'deleted_folder TEXT')
   ensureColumn('character_folders', 'parent_id', 'parent_id INTEGER')
+  ensureColumn('character_prompts', 'slot_no', 'slot_no INTEGER')
   ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
