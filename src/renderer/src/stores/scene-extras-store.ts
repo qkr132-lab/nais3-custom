@@ -30,6 +30,8 @@ export interface SceneAddition {
   slots?: { x: number; y: number }[]
   /** 캐릭터 id → 자리 번호(0-based). 배정된 캐릭터는 그 자리 좌표로 생성된다 */
   slotOf?: Record<number, number>
+  /** 자리 번호 → 행위 역할. 그 자리에 꽂는 캐릭터가 이 역할을 물려받는다 */
+  slotRoles?: Record<number, 'source' | 'target' | null>
 }
 
 /** presetId → sceneId → 추가 선택 */

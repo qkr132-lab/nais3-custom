@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Plus, RotateCcw, User } from 'lucide-react'
-import type { CharPositions, CharacterCard } from '@shared/types'
+import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { cn } from '../lib/utils'
 import { useCharactersStore } from '../stores/characters-store'
@@ -38,6 +38,8 @@ export function ScenePlacementDialog({
   useCoords,
   slots,
   slotOf,
+  slotRoles,
+  roles,
   onPatch
 }: {
   open: boolean
@@ -49,12 +51,18 @@ export function ScenePlacementDialog({
   slots?: { x: number; y: number }[]
   /** 캐릭터 id → 자리 번호 */
   slotOf?: Record<number, number>
+  /** 자리 번호 → 행위 역할 */
+  slotRoles?: Record<number, CharRole | null>
+  /** 캐릭터별 행위 역할 (자리에 꽂으면 여기에도 반영된다) */
+  roles?: CharRoles
   onPatch: (patch: {
     characterIds?: number[]
     positions?: CharPositions
     useCoords?: boolean
     slots?: { x: number; y: number }[]
     slotOf?: Record<number, number>
+    slotRoles?: Record<number, CharRole | null>
+    roles?: CharRoles
   }) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
@@ -100,14 +108,36 @@ export function ScenePlacementDialog({
       if (at === index) continue
       nextAssign[Number(id)] = at > index ? at - 1 : at
     }
-    onPatch({ slots: next, slotOf: nextAssign })
+    // 자리 역할도 같이 당긴다
+    const nextSlotRoles: Record<number, CharRole | null> = {}
+    for (const [at, role] of Object.entries(slotRoles ?? {})) {
+      const n = Number(at)
+      if (n === index) continue
+      nextSlotRoles[n > index ? n - 1 : n] = role
+    }
+    onPatch({ slots: next, slotOf: nextAssign, slotRoles: nextSlotRoles })
     setPickedSlot(null)
   }
 
   const moveSlot = (index: number, center: { x: number; y: number }): void =>
     onPatch({ slots: slotList.map((s, i) => (i === index ? center : s)) })
 
-  /** 고른 자리에 캐릭터를 꽂는다 (씬에 없으면 함께 추가) */
+  /** 자리에 역할 지정 — 이미 꽂혀 있는 캐릭터에도 바로 반영한다 */
+  const setSlotRole = (index: number, role: CharRole | null): void => {
+    const nextSlotRoles = { ...(slotRoles ?? {}) }
+    if (role) nextSlotRoles[index] = role
+    else delete nextSlotRoles[index]
+
+    const occupant = charAtSlot(index)
+    const nextRoles: CharRoles = { ...(roles ?? {}) }
+    if (occupant) {
+      if (role) nextRoles[occupant.id] = role
+      else delete nextRoles[occupant.id]
+    }
+    onPatch({ slotRoles: nextSlotRoles, ...(occupant ? { roles: nextRoles } : {}) })
+  }
+
+  /** 고른 자리에 캐릭터를 꽂는다 (씬에 없으면 함께 추가, 자리 역할도 물려받는다) */
   const assignToSlot = (index: number, charId: number): void => {
     const nextAssign: Record<number, number> = {}
     // 한 자리엔 한 명 — 기존 배정자는 자리에서 빠진다
@@ -116,8 +146,18 @@ export function ScenePlacementDialog({
       nextAssign[Number(id)] = at
     }
     nextAssign[charId] = index
+
+    // 자리에 역할이 걸려 있으면 꽂는 캐릭터가 그 역할을 받는다
+    const slotRole = slotRoles?.[index]
+    const nextRoles: CharRoles = { ...(roles ?? {}) }
+    const prev = charAtSlot(index)
+    if (prev) delete nextRoles[prev.id] // 자리에서 빠지는 캐릭터는 역할도 반납
+    if (slotRole) nextRoles[charId] = slotRole
+    else delete nextRoles[charId]
+
     onPatch({
       slotOf: nextAssign,
+      roles: nextRoles,
       ...(characterIds.includes(charId) ? {} : { characterIds: [...characterIds, charId] })
     })
     setPickedSlot(null)
@@ -161,7 +201,9 @@ export function ScenePlacementDialog({
                 const occupant = charAtSlot(i)
                 return {
                   id: -(i + 1),
-                  label: occupant ? `${i + 1}. ${charLabel(occupant, i)}` : `${i + 1}. 빈 자리`,
+                  label:
+                    (slotRoles?.[i] === 'source' ? '하 ' : slotRoles?.[i] === 'target' ? '당 ' : '') +
+                    (occupant ? `${i + 1}. ${charLabel(occupant, i)}` : `${i + 1}. 빈 자리`),
                   center: pos,
                   thumbnail: occupant?.thumbnail || undefined
                 }
@@ -249,6 +291,31 @@ export function ScenePlacementDialog({
                         </span>
                         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">
                           {pos.x.toFixed(2)},{pos.y.toFixed(2)}
+                        </span>
+                        {/* 자리 역할 — 꽂는 캐릭터가 물려받는다 */}
+                        <span className="flex shrink-0 gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          {(
+                            [
+                              { v: 'source' as const, t: '하', title: '하는쪽' },
+                              { v: 'target' as const, t: '당', title: '당하는쪽' }
+                            ]
+                          ).map(({ v, t, title }) => (
+                            <button
+                              key={v}
+                              title={`${title} — 이 자리에 꽂는 캐릭터가 이 역할을 받습니다`}
+                              className={cn(
+                                'rounded px-1 text-[10.5px] font-medium transition-colors',
+                                slotRoles?.[i] === v
+                                  ? v === 'source'
+                                    ? 'bg-accent text-white'
+                                    : 'bg-violet-500 text-white'
+                                  : 'text-faint hover:bg-paper hover:text-muted'
+                              )}
+                              onClick={() => setSlotRole(i, slotRoles?.[i] === v ? null : v)}
+                            >
+                              {t}
+                            </button>
+                          ))}
                         </span>
                         {occupant && (
                           <button

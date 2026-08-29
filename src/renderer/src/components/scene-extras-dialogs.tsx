@@ -416,6 +416,8 @@ type SelectionPatch = {
   slots?: { x: number; y: number }[]
   /** 캐릭터 id → 자리 번호 */
   slotOf?: Record<number, number>
+  /** 자리 번호 → 행위 역할 */
+  slotRoles?: Record<number, CharRole | null>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -433,7 +435,8 @@ function SelectionPanel({
   roles,
   onPatch,
   slots,
-  slotOf}: {
+  slotOf,
+  slotRoles}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -443,6 +446,7 @@ function SelectionPanel({
   onPatch: (patch: SelectionPatch) => void
   slots?: { x: number; y: number }[]
   slotOf?: Record<number, number>
+  slotRoles?: Record<number, CharRole | null>
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -492,6 +496,8 @@ function SelectionPanel({
         positions={positions}
         slots={slots}
         slotOf={slotOf}
+        slotRoles={slotRoles}
+        roles={roles}
         onPatch={onPatch}
       />
     </div>
@@ -595,6 +601,8 @@ function PositionPanel({
   positions,
   slots,
   slotOf,
+  slotRoles,
+  roles,
   onPatch
 }: {
   characterIds: number[]
@@ -602,6 +610,8 @@ function PositionPanel({
   positions?: CharPositions
   slots?: { x: number; y: number }[]
   slotOf?: Record<number, number>
+  slotRoles?: Record<number, CharRole | null>
+  roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
@@ -645,6 +655,8 @@ function PositionPanel({
         useCoords={useCoords}
         slots={slots}
         slotOf={slotOf}
+        slotRoles={slotRoles}
+        roles={roles}
         onPatch={onPatch}
       />
       {useCoords &&
@@ -861,6 +873,7 @@ function EntryEditor({
           useCoords={entry.useCoords}
           slots={entry.slots}
           slotOf={entry.slotOf}
+          slotRoles={entry.slotRoles}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -960,6 +973,7 @@ export function AdditionDialog({
             useCoords={current.useCoords}
             slots={current.slots}
             slotOf={current.slotOf}
+            slotRoles={current.slotRoles}
             positions={current.positions}
             roles={current.roles}
             onPatch={patch}

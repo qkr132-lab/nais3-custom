@@ -82,6 +82,8 @@ export interface SequenceEntry {
   slots?: { x: number; y: number }[]
   /** 캐릭터 id → 자리 번호 */
   slotOf?: Record<number, number>
+  /** 자리 번호 → 행위 역할 (그 자리에 꽂는 캐릭터가 물려받는다) */
+  slotRoles?: Record<number, CharRole | null>
 }
 
 export interface GenerationRequest {
