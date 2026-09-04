@@ -115,6 +115,40 @@ export function prioritizeSceneCharacterIds(sceneIds: number[], baseIds: number[
 }
 
 /**
+ * 미리 잡아둔 자리에 캐릭터를 앉힌다 (커스텀). 반환: 캐릭터 id → 자리 번호(0-based).
+ *
+ * 규칙은 씬 배치 창이 화면에 그리는 것과 같아야 한다 — 안 그러면 창에서 본 배치와
+ * 실제 생성이 어긋난다:
+ * 1. 씬에서 직접 배정한 자리(slotOf)가 먼저다.
+ * 2. 남은 자리만 카드에 적힌 자리 번호(slotNo)가 채운다. 이미 찬 자리는 건너뛴다.
+ * 3. 같은 번호를 단 카드가 여럿이면 앞선 캐릭터가 그 자리를 가진다.
+ *
+ * 한 자리에 둘이 겹치면 NAI가 두 인물을 한 점에 그려 뭉개므로, 겹침은 여기서 막는다.
+ */
+export function assignSlots(
+  chars: { id: number; slotNo?: number | null }[],
+  slotOf?: Record<number, number>
+): Map<number, number> {
+  const out = new Map<number, number>()
+  const claimed = new Set<number>()
+  for (const c of chars) {
+    const explicit = slotOf?.[c.id]
+    if (explicit != null) {
+      out.set(c.id, explicit)
+      claimed.add(explicit)
+    }
+  }
+  for (const c of chars) {
+    if (out.has(c.id) || c.slotNo == null) continue
+    const index = c.slotNo - 1
+    if (index < 0 || claimed.has(index)) continue
+    out.set(c.id, index)
+    claimed.add(index)
+  }
+  return out
+}
+
+/**
  * 예약 당시의 기본 설정은 유지하고, 실행 직전 씬 프롬프트만 최신값으로 다시 합친다.
  * 이미 서버로 넘어간 generating 항목에는 호출되지 않고 pending 항목에만 자연스럽게 적용된다.
  */

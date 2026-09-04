@@ -418,6 +418,8 @@ type SelectionPatch = {
   slotOf?: Record<number, number>
   /** 자리 번호 → 행위 역할 */
   slotRoles?: Record<number, CharRole | null>
+  /** 자리 번호 → 그 자리에 꽂는 캐릭터에게 덧붙는 태그 */
+  slotTags?: Record<number, string>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -436,7 +438,8 @@ function SelectionPanel({
   onPatch,
   slots,
   slotOf,
-  slotRoles}: {
+  slotRoles,
+  slotTags}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -447,6 +450,7 @@ function SelectionPanel({
   slots?: { x: number; y: number }[]
   slotOf?: Record<number, number>
   slotRoles?: Record<number, CharRole | null>
+  slotTags?: Record<number, string>
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -497,6 +501,7 @@ function SelectionPanel({
         slots={slots}
         slotOf={slotOf}
         slotRoles={slotRoles}
+        slotTags={slotTags}
         roles={roles}
         onPatch={onPatch}
       />
@@ -602,6 +607,7 @@ function PositionPanel({
   slots,
   slotOf,
   slotRoles,
+  slotTags,
   roles,
   onPatch
 }: {
@@ -611,6 +617,7 @@ function PositionPanel({
   slots?: { x: number; y: number }[]
   slotOf?: Record<number, number>
   slotRoles?: Record<number, CharRole | null>
+  slotTags?: Record<number, string>
   roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
@@ -656,6 +663,7 @@ function PositionPanel({
         slots={slots}
         slotOf={slotOf}
         slotRoles={slotRoles}
+        slotTags={slotTags}
         roles={roles}
         onPatch={onPatch}
       />
@@ -874,6 +882,7 @@ function EntryEditor({
           slots={entry.slots}
           slotOf={entry.slotOf}
           slotRoles={entry.slotRoles}
+          slotTags={entry.slotTags}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -974,6 +983,7 @@ export function AdditionDialog({
             slots={current.slots}
             slotOf={current.slotOf}
             slotRoles={current.slotRoles}
+            slotTags={current.slotTags}
             positions={current.positions}
             roles={current.roles}
             onPatch={patch}

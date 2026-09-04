@@ -70,7 +70,8 @@ export function CompositionBoard(): React.JSX.Element {
             id: c.id,
             label: label(c, i),
             center: c.center,
-            thumbnail: c.thumbnail || undefined
+            thumbnail: c.thumbnail || undefined,
+            tags: c.prompt
           }))}
           width={request.width}
           height={request.height}

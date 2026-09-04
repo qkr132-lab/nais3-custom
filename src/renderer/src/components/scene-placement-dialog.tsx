@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Check, Plus, RotateCcw, User } from 'lucide-react'
 import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
+import { assignSlots } from '@shared/scene-request'
 import { cn } from '../lib/utils'
 import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { PlacementCanvas, distributed } from './placement-canvas'
+import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { Switch } from './ui/switch'
@@ -39,6 +41,7 @@ export function ScenePlacementDialog({
   slots,
   slotOf,
   slotRoles,
+  slotTags,
   roles,
   onPatch
 }: {
@@ -53,6 +56,8 @@ export function ScenePlacementDialog({
   slotOf?: Record<number, number>
   /** 자리 번호 → 행위 역할 */
   slotRoles?: Record<number, CharRole | null>
+  /** 자리 번호 → 그 자리에 꽂는 캐릭터에게 덧붙는 태그 */
+  slotTags?: Record<number, string>
   /** 캐릭터별 행위 역할 (자리에 꽂으면 여기에도 반영된다) */
   roles?: CharRoles
   onPatch: (patch: {
@@ -62,10 +67,12 @@ export function ScenePlacementDialog({
     slots?: { x: number; y: number }[]
     slotOf?: Record<number, number>
     slotRoles?: Record<number, CharRole | null>
+    slotTags?: Record<number, string>
     roles?: CharRoles
   }) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
+  const updateCard = useCharactersStore((s) => s.updateCard)
   const request = useGenerationStore((s) => s.request)
   const caps = modelCaps(request.model)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -89,18 +96,21 @@ export function ScenePlacementDialog({
 
   const slotList = slots ?? []
   const assign = slotOf ?? {}
-  // 자리 → 그 자리에 배정된 캐릭터
+  // 자리 배정은 생성과 같은 규칙을 쓴다 (assignSlots) — 창에서 본 배치와 실제 생성이
+  // 어긋나지 않게. 명시 배정이 먼저, 남은 자리만 카드 번호가 채운다.
+  const seated = assignSlots(picked, slotOf)
   const charAtSlot = (index: number): CharacterCard | undefined =>
-    // 명시 배정이 먼저, 없으면 카드에 적힌 자리 번호로 자동 매칭 (커스텀)
-    picked.find((c) => assign[c.id] === index) ??
-    picked.find((c) => assign[c.id] === undefined && c.slotNo === index + 1)
+    picked.find((c) => seated.get(c.id) === index)
 
   /** 이 자리를 차지한 캐릭터가 카드 번호로 자동 매칭된 것인지 */
   const isAutoAt = (index: number): boolean => {
     const c = charAtSlot(index)
-    return !!c && assign[c.id] === undefined && c.slotNo === index + 1
+    return !!c && assign[c.id] === undefined
   }
   const [pickedSlot, setPickedSlot] = useState<number | null>(null)
+  // 판에서 고른 표식 — 아래 태그 편집칸이 이걸 따라간다
+  const slotOccupant = pickedSlot != null ? charAtSlot(pickedSlot) : undefined
+  const selectedChar = picked.find((c) => c.id === selectedId)
 
   const addSlot = (): void => {
     // 새 자리는 가로로 고르게 — n+1개를 균등 배치한 마지막 자리
@@ -123,8 +133,28 @@ export function ScenePlacementDialog({
       if (n === index) continue
       nextSlotRoles[n > index ? n - 1 : n] = role
     }
-    onPatch({ slots: next, slotOf: nextAssign, slotRoles: nextSlotRoles })
+    // 자리 태그도 같이 당긴다 (안 당기면 남은 자리에 엉뚱한 태그가 붙는다)
+    const nextSlotTags: Record<number, string> = {}
+    for (const [at, text] of Object.entries(slotTags ?? {})) {
+      const n = Number(at)
+      if (n === index) continue
+      nextSlotTags[n > index ? n - 1 : n] = text
+    }
+    onPatch({
+      slots: next,
+      slotOf: nextAssign,
+      slotRoles: nextSlotRoles,
+      slotTags: nextSlotTags
+    })
     setPickedSlot(null)
+  }
+
+  /** 자리 추가 태그 — 그 자리에 꽂히는 캐릭터 뒤에 붙는다 (카드는 안 건드림) */
+  const setSlotTag = (index: number, text: string): void => {
+    const next = { ...(slotTags ?? {}) }
+    if (text.trim()) next[index] = text
+    else delete next[index]
+    onPatch({ slotTags: next })
   }
 
   const moveSlot = (index: number, center: { x: number; y: number }): void =>
@@ -202,55 +232,128 @@ export function ScenePlacementDialog({
         </DialogTitle>
 
         <div className="flex min-h-0 flex-1 flex-wrap gap-4 overflow-auto">
-          <PlacementCanvas
-            chars={[
-              // 자리 — 음수 id로 구분. 비었으면 번호만, 차 있으면 캐릭터 이름
-              ...slotList.map((pos, i) => {
-                const occupant = charAtSlot(i)
-                return {
-                  id: -(i + 1),
-                  label:
-                    (slotRoles?.[i] === 'source' ? '하 ' : slotRoles?.[i] === 'target' ? '당 ' : '') +
-                    (occupant ? `${i + 1}. ${charLabel(occupant, i)}` : `${i + 1}. 빈 자리`),
-                  center: pos,
-                  thumbnail: occupant?.thumbnail || undefined
+          <div className="flex min-w-[320px] flex-col gap-2">
+            <PlacementCanvas
+              chars={[
+                // 자리 — 음수 id로 구분. 비었으면 번호만, 차 있으면 캐릭터 이름
+                ...slotList.map((pos, i) => {
+                  const occupant = charAtSlot(i)
+                  return {
+                    id: -(i + 1),
+                    label:
+                      (slotRoles?.[i] === 'source'
+                        ? '하 '
+                        : slotRoles?.[i] === 'target'
+                          ? '당 '
+                          : '') +
+                      (occupant ? `${i + 1}. ${charLabel(occupant, i)}` : `${i + 1}. 빈 자리`),
+                    center: pos,
+                    thumbnail: occupant?.thumbnail || undefined,
+                    tags: occupant?.prompt,
+                    extraTags: slotTags?.[i]
+                  }
+                }),
+                // 자리에 앉지 않은 캐릭터만 따로 (앉은 캐릭터는 자리 표식이 대신 그린다)
+                ...picked
+                  .filter((c) => seated.get(c.id) === undefined)
+                  .map((c, i) => ({
+                    id: c.id,
+                    label: charLabel(c, i),
+                    center: centerOf(c),
+                    thumbnail: c.thumbnail || undefined,
+                    isDefault: !positions?.[c.id],
+                    tags: c.prompt
+                  }))
+              ]}
+              width={request.width}
+              height={request.height}
+              freeform={caps.freeformCharacterPosition}
+              selectedId={pickedSlot != null ? -(pickedSlot + 1) : selectedId}
+              onSelect={(id) => {
+                if (id < 0) setPickedSlot(-id - 1)
+                else {
+                  setPickedSlot(null)
+                  setSelectedId(id)
                 }
-              }),
-              // 자리에 배정되지 않은 캐릭터만 따로
-              ...picked
-                .filter((c) => assign[c.id] === undefined)
-                .map((c, i) => ({
-                  id: c.id,
-                  label: charLabel(c, i),
-                  center: centerOf(c),
-                  thumbnail: c.thumbnail || undefined,
-                  isDefault: !positions?.[c.id]
-                }))
-            ]}
-            width={request.width}
-            height={request.height}
-            freeform={caps.freeformCharacterPosition}
-            selectedId={pickedSlot != null ? -(pickedSlot + 1) : selectedId}
-            onSelect={(id) => {
-              if (id < 0) setPickedSlot(-id - 1)
-              else {
-                setPickedSlot(null)
-                setSelectedId(id)
+              }}
+              onMove={(id, center) => (id < 0 ? moveSlot(-id - 1, center) : setPos(id, center))}
+              onDistribute={(axis) =>
+                onPatch({
+                  positions: {
+                    ...(positions ?? {}),
+                    ...Object.fromEntries(
+                      picked.map((c, i) => [c.id, distributed(picked.length, i, axis)])
+                    )
+                  }
+                })
               }
-            }}
-            onMove={(id, center) => (id < 0 ? moveSlot(-id - 1, center) : setPos(id, center))}
-            onDistribute={(axis) =>
-              onPatch({
-                positions: {
-                  ...(positions ?? {}),
-                  ...Object.fromEntries(
-                    picked.map((c, i) => [c.id, distributed(picked.length, i, axis)])
-                  )
-                }
-              })
-            }
-            maxHeight="min(52vh, 460px)"
-          />
+              maxHeight="min(46vh, 400px)"
+            />
+
+            {/* 고른 표식의 태그 — 판에서 누른 그 자리/캐릭터를 여기서 바로 고친다 (커스텀) */}
+            {pickedSlot != null ? (
+              <div className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface-2/50 p-2.5">
+                <p className="text-[12px] font-medium text-muted">
+                  {pickedSlot + 1}번 자리 태그
+                  <span className="ml-1.5 text-[11px] font-normal text-faint">
+                    이 자리에 꽂히는 캐릭터 뒤에 붙습니다 · 이 씬에만
+                  </span>
+                </p>
+                <PromptEditor
+                  autoGrow
+                  tokensOverride={null}
+                  className="max-h-[120px] min-h-[52px] bg-paper"
+                  value={slotTags?.[pickedSlot] ?? ''}
+                  placeholder="smile, looking at viewer"
+                  onValueChange={(v) => setSlotTag(pickedSlot, v)}
+                />
+                {slotOccupant ? (
+                  <>
+                    <p className="mt-0.5 text-[12px] font-medium text-muted">
+                      {charLabel(slotOccupant, pickedSlot)} 카드 태그
+                      <span className="ml-1.5 text-[11px] font-normal text-faint">
+                        카드를 직접 고칩니다 · 모든 씬 공통
+                      </span>
+                    </p>
+                    <PromptEditor
+                      autoGrow
+                      tokensOverride={null}
+                      className="max-h-[120px] min-h-[52px] bg-paper"
+                      value={slotOccupant.prompt}
+                      placeholder="girl, ..."
+                      onValueChange={(v) => updateCard(slotOccupant.id, { prompt: v })}
+                    />
+                  </>
+                ) : (
+                  <p className="text-[11px] text-faint">
+                    빈 자리입니다 — 아래에서 캐릭터를 누르면 이 자리에 들어가고 위 태그를 물려받습니다.
+                  </p>
+                )}
+              </div>
+            ) : selectedChar ? (
+              <div className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface-2/50 p-2.5">
+                <p className="text-[12px] font-medium text-muted">
+                  {charLabel(selectedChar, picked.indexOf(selectedChar))} 카드 태그
+                  <span className="ml-1.5 text-[11px] font-normal text-faint">
+                    카드를 직접 고칩니다 · 모든 씬 공통
+                  </span>
+                </p>
+                <PromptEditor
+                  autoGrow
+                  tokensOverride={null}
+                  className="max-h-[140px] min-h-[52px] bg-paper"
+                  value={selectedChar.prompt}
+                  placeholder="girl, ..."
+                  onValueChange={(v) => updateCard(selectedChar.id, { prompt: v })}
+                />
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-line px-2.5 py-2 text-[11.5px] text-faint">
+                판에서 표식을 누르면 그 자리·캐릭터의 태그를 여기에서 고칠 수 있습니다. 커서를 올리면
+                무슨 태그가 걸려 있는지 바로 보입니다.
+              </p>
+            )}
+          </div>
 
           <div className="flex min-h-0 min-w-[260px] flex-1 flex-col gap-3">
             {/* 미리 잡아둔 자리 — 캐릭터 없이 위치·인원부터 정한다 */}
@@ -298,6 +401,11 @@ export function ScenePlacementDialog({
                           {occupant ? charLabel(occupant, i) : '비어 있음 — 눌러서 채우기'}
                           {isAutoAt(i) && (
                             <span className="ml-1 text-[10px] text-emerald-500">번호 자동</span>
+                          )}
+                          {slotTags?.[i]?.trim() && (
+                            <span className="ml-1 text-[10px] text-accent" title={slotTags[i]}>
+                              +태그
+                            </span>
                           )}
                         </span>
                         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-faint">

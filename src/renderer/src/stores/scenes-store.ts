@@ -3,6 +3,7 @@ import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import {
   appendPrompt,
+  assignSlots,
   mergePromptParts,
   mergeSceneIntoPromptParts,
   prioritizeSceneCharacterIds,
@@ -178,25 +179,30 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   }
   let rolePosApplied = false
   let slotApplied = false
-  const built = orderedCharIds
+  const sceneChars = orderedCharIds
     .flatMap((id) => {
       const character = charactersById.get(id)
       return character?.prompt.trim() ? [character] : []
     })
     .slice(0, 6)
+  // 미리 잡아둔 자리에 배정돼 있으면 그 좌표를 쓴다 (커스텀) — 캐릭터별 지정 다음 순위.
+  // 명시 배정(slotOf) > 카드에 적힌 자리 번호 — 번호를 달아두면 씬마다 배정하지 않아도
+  // 그 씬의 N번 자리로 간다. 겹침 방지 규칙은 씬 배치 창과 같다 (assignSlots).
+  const slotAssign = assignSlots(sceneChars, add?.slotOf)
+  const built = sceneChars
     .map((c) => {
       const addPos = add?.positions?.[c.id]
-      // 미리 잡아둔 자리에 배정돼 있으면 그 좌표를 쓴다 (커스텀) — 캐릭터별 지정 다음 순위
-      // 명시 배정(slotOf) > 카드에 적힌 자리 번호 (커스텀) — 번호를 달아두면 씬마다
-      // 배정하지 않아도 그 씬의 N번 자리로 간다
-      const slotIndex = add?.slotOf?.[c.id] ?? (c.slotNo != null ? c.slotNo - 1 : undefined)
+      const slotIndex = slotAssign.get(c.id)
       const slotPos = slotIndex != null ? add?.slots?.[slotIndex] : undefined
+      // 자리 태그 (커스텀) — 그 자리에 꽂힌 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
+      // 얹는 건 역할 태그와 같은 취급 — 자리는 좌표만이 아니라 "그 자리의 연기"이기도 하다
+      const slotTag = slotPos && slotIndex != null ? (add?.slotTags?.[slotIndex] ?? '') : ''
       if (addPos == null && slotPos) slotApplied = true
       const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
       if (rp) rolePosApplied = true
       const explicit = addPos ?? slotPos ?? rp ?? entry?.positions?.[c.id]
       return {
-        prompt: appendPrompt(c.prompt, roleTags(c.id)),
+        prompt: appendPrompt(appendPrompt(c.prompt, slotTag), roleTags(c.id)),
         negativePrompt: c.negativePrompt,
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.

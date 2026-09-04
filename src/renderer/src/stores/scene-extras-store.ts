@@ -32,6 +32,12 @@ export interface SceneAddition {
   slotOf?: Record<number, number>
   /** 자리 번호 → 행위 역할. 그 자리에 꽂는 캐릭터가 이 역할을 물려받는다 */
   slotRoles?: Record<number, 'source' | 'target' | null>
+  /**
+   * 자리 번호 → 그 자리에 꽂는 캐릭터에게 덧붙는 태그 (커스텀).
+   * "1번 자리는 웃는 얼굴" 식으로 자리에 연기를 걸어두면, 어느 캐릭터를 꽂든 그 태그가
+   * 카드 태그 뒤에 붙는다. 카드 자체는 건드리지 않으므로 이 씬에만 적용된다.
+   */
+  slotTags?: Record<number, string>
 }
 
 /** presetId → sceneId → 추가 선택 */

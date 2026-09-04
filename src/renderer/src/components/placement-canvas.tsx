@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { POSITION_GRID } from './position-picker'
@@ -18,6 +18,10 @@ export interface PlacementChar {
   thumbnail?: string
   /** 이 씬에서만 쓰는 좌표가 아니라 카드 기본 좌표를 그대로 쓰는 중 */
   isDefault?: boolean
+  /** 커서를 올렸을 때 보여줄 태그 (커스텀) — 이 표식이 어떤 캐릭터인지 판에서 바로 확인 */
+  tags?: string
+  /** 자리 추가 태그처럼 이 자리에서만 덧붙는 태그 (커스텀) */
+  extraTags?: string
 }
 
 export function round3(v: number): number {
@@ -62,6 +66,9 @@ export function PlacementCanvas({
 }): React.JSX.Element {
   const boxRef = useRef<HTMLDivElement>(null)
   const draggingId = useRef<number | null>(null)
+  // 커서를 올린 표식 — 끌기 시작하면 지운다 (툴팁이 손을 가리지 않게)
+  const [hoverId, setHoverId] = useState<number | null>(null)
+  const hovered = chars.find((c) => c.id === hoverId)
 
   const moveTo = useCallback(
     (id: number, clientX: number, clientY: number) => {
@@ -115,9 +122,12 @@ export function PlacementCanvas({
                   : 'border-line bg-surface-2 text-ink hover:border-accent'
               )}
               style={{ left: `${char.center.x * 100}%`, top: `${char.center.y * 100}%` }}
+              onPointerEnter={() => draggingId.current === null && setHoverId(char.id)}
+              onPointerLeave={() => setHoverId((id) => (id === char.id ? null : id))}
               onPointerDown={(e) => {
                 e.currentTarget.setPointerCapture(e.pointerId)
                 draggingId.current = char.id
+                setHoverId(null)
                 onSelect?.(char.id)
               }}
               onPointerMove={(e) => {
@@ -149,6 +159,32 @@ export function PlacementCanvas({
             </button>
           )
         })}
+
+        {/* 표식에 커서를 올리면 그 자리에 무슨 태그가 걸려 있는지 (커스텀) */}
+        {hovered && (hovered.tags?.trim() || hovered.extraTags?.trim()) && (
+          <div
+            className="pointer-events-none absolute z-20 w-[min(300px,86%)] rounded-md border border-line bg-surface-2 px-2 py-1.5 shadow-lg"
+            style={{
+              // 판 밖으로 새지 않게 가장자리에서는 안쪽으로 당기고, 위/아래로 자리를 피한다
+              left: `${Math.min(0.8, Math.max(0.2, hovered.center.x)) * 100}%`,
+              top: `${hovered.center.y * 100}%`,
+              transform:
+                hovered.center.y < 0.5
+                  ? 'translate(-50%, 18px)'
+                  : 'translate(-50%, calc(-100% - 18px))'
+            }}
+          >
+            <p className="truncate text-[11px] font-medium text-ink">{hovered.label}</p>
+            <p className="mt-0.5 max-h-24 overflow-hidden break-words text-[11px] leading-relaxed text-muted">
+              {hovered.tags?.trim() || '태그 없음'}
+            </p>
+            {hovered.extraTags?.trim() && (
+              <p className="mt-1 break-words text-[11px] leading-relaxed text-emerald-500">
+                + {hovered.extraTags.trim()}
+              </p>
+            )}
+          </div>
+        )}
 
         {!chars.length && (
           <div className="grid h-full place-items-center text-[12.5px] text-faint">
