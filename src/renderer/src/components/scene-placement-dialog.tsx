@@ -105,6 +105,7 @@ export function ScenePlacementDialog({
   slotRoles,
   slotTags,
   charTags,
+  baseCharacterIds,
   onPatch
 }: {
   open: boolean
@@ -124,6 +125,12 @@ export function ScenePlacementDialog({
   slotTags?: Record<number, string>
   /** 캐릭터 id → 이 씬에서만 덧붙는 태그 */
   charTags?: Record<number, string>
+  /**
+   * 이 씬에 함께 나가지만 여기서 고른 것은 아닌 캐릭터 (캐릭터 창에서 켜둔 카드).
+   * 생성에는 들어가는데 이 창에 안 보이면 자리에 앉힐 수가 없어, 자리를 다 잡아놓고도
+   * 아무도 안 앉은 채로 나가버린다 — 그래서 함께 보여준다.
+   */
+  baseCharacterIds?: number[]
   /** 캐릭터별 행위 역할 (자리 역할이 있으면 그쪽이 이긴다) */
   roles?: CharRoles
   onPatch: (patch: {
@@ -148,9 +155,14 @@ export function ScenePlacementDialog({
   // 편집칸이 카드를 고치는 중인지 — 기본은 씬 전용 태그 (카드는 실수로 바뀌면 안 된다)
   const [editCard, setEditCard] = useState(false)
 
-  const picked = characterIds
+  // 이 씬에 실제로 나갈 캐릭터 — 여기서 고른 것 먼저, 캐릭터 창에서 켜둔 카드가 뒤에
+  // (생성 순서와 같다: prioritizeSceneCharacterIds)
+  const allIds = [...new Set([...characterIds, ...(baseCharacterIds ?? [])])]
+  const picked = allIds
     .map((id) => items.find((c) => c.id === id))
     .filter((c): c is CharacterCard => !!c)
+  /** 여기서 고른 게 아니라 캐릭터 창에서 켜져 딸려 온 카드 */
+  const isFromLibrary = (id: number): boolean => !characterIds.includes(id)
 
   // 미지정은 0.5 고정 — 카드 기본 좌표는 씬 생성에 쓰이지 않는다 (배치 탭 좌표가 새지 않게)
   const centerOf = (c: CharacterCard): { x: number; y: number } =>
@@ -184,6 +196,14 @@ export function ScenePlacementDialog({
   const selectedChar = picked.find((c) => c.id === selectedId)
   // 실제로 그려질 인물 수 — 자리에 여러 번 앉은 캐릭터는 그만큼 늘어난다
   const figures = picked.reduce((n, c) => n + Math.max(1, seatsOf(c.id).length), 0)
+  /**
+   * 태그나 역할을 걸어놨는데 아무도 안 앉은 자리.
+   * 자리는 그릇일 뿐이라 앉은 캐릭터가 없으면 거기 적은 태그가 통째로 버려진다 —
+   * 조용히 버리면 "다 넣었는데 왜 안 나오냐"가 된다.
+   */
+  const deadSlots = slotList
+    .map((_, i) => i)
+    .filter((i) => !charAtSlot(i) && (slotTags?.[i]?.trim() || slotRoles?.[i]))
 
   const addSlot = (): void => {
     // 새 자리는 가로로 고르게 — n+1개를 균등 배치한 마지막 자리
@@ -635,6 +655,14 @@ export function ScenePlacementDialog({
                         </span>
                         <span className="min-w-0 flex-1 truncate text-[11.5px]">
                           {charLabel(c, i)}
+                          {isFromLibrary(c.id) && (
+                            <span
+                              className="ml-1 text-[10px] text-faint"
+                              title="캐릭터 창에서 켜져 있어 이 씬에도 함께 나갑니다"
+                            >
+                              캐릭터 창
+                            </span>
+                          )}
                           {charTags?.[c.id]?.trim() && (
                             <span className="ml-1 text-[10px] text-accent" title={charTags[c.id]}>
                               +태그
@@ -673,16 +701,18 @@ export function ScenePlacementDialog({
                             <RotateCcw size={11} />
                           </button>
                         )}
-                        <button
-                          className="shrink-0 rounded px-1 text-[11px] text-faint hover:text-danger"
-                          title="이 씬에서 빼기"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            removeChar(c.id)
-                          }}
-                        >
-                          빼기
-                        </button>
+                        {!isFromLibrary(c.id) && (
+                          <button
+                            className="shrink-0 rounded px-1 text-[11px] text-faint hover:text-danger"
+                            title="이 씬에서 빼기"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              removeChar(c.id)
+                            }}
+                          >
+                            빼기
+                          </button>
+                        )}
                       </div>
                     )
                   })}
@@ -728,6 +758,15 @@ export function ScenePlacementDialog({
           </div>
         </div>
 
+        {deadSlots.length > 0 && (
+          <p className="mt-2 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11.5px] text-muted">
+            <b className="text-danger">
+              {deadSlots.map((i) => i + 1).join('·')}번 자리가 비어 있습니다.
+            </b>{' '}
+            거기 적은 태그와 역할은 생성에 안 들어갑니다 — 자리를 누르고 아래 &lsquo;캐릭터
+            넣기&rsquo;에서 앉힐 캐릭터를 고르세요.
+          </p>
+        )}
         {figures > caps.maxCharacters && (
           <p className="mt-2 text-[11.5px] text-danger">
             인물이 {figures}명이라 앞에서 {caps.maxCharacters}명까지만 생성에 들어갑니다.

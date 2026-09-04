@@ -15,7 +15,7 @@ import {
   Users,
   Waves
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CharRefItem, CharacterCard, ListFolder, VibeItem } from '@shared/types'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
@@ -445,7 +445,8 @@ function SelectionPanel({
   slotRoles,
   slotTags,
   slotChars,
-  charTags}: {
+  charTags,
+  baseCharacterIds}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -459,6 +460,8 @@ function SelectionPanel({
   slotTags?: Record<number, string>
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
+  /** 캐릭터 창에서 켜져 이 씬에 함께 나가는 카드 (씬별 추가에서만 씀) */
+  baseCharacterIds?: number[]
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -512,6 +515,7 @@ function SelectionPanel({
         slotTags={slotTags}
         slotChars={slotChars}
         charTags={charTags}
+        baseCharacterIds={baseCharacterIds}
         roles={roles}
         onPatch={onPatch}
       />
@@ -620,6 +624,7 @@ function PositionPanel({
   slotTags,
   slotChars,
   charTags,
+  baseCharacterIds,
   roles,
   onPatch
 }: {
@@ -632,6 +637,7 @@ function PositionPanel({
   slotTags?: Record<number, string>
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
+  baseCharacterIds?: number[]
   roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
@@ -680,6 +686,7 @@ function PositionPanel({
         slotTags={slotTags}
         slotChars={slotChars}
         charTags={charTags}
+        baseCharacterIds={baseCharacterIds}
         roles={roles}
         onPatch={onPatch}
       />
@@ -933,6 +940,13 @@ export function AdditionDialog({
   const clearAddition = useSceneExtrasStore((s) => s.clearAddition)
 
   const current: SceneAddition = addition ?? { characterIds: [], charRefIds: [], vibeIds: [] }
+  // 캐릭터 창에서 켜둔 카드도 이 씬에 함께 나간다 — 배치 창이 그걸 못 보면 자리에 앉힐 수가
+  // 없어서, 자리를 다 잡아놓고도 빈 자리로 생성되던 문제가 생긴다
+  const libraryCards = useCharactersStore((s) => s.items)
+  const libraryIds = useMemo(
+    () => libraryCards.filter((c) => c.enabled && c.prompt.trim()).map((c) => c.id),
+    [libraryCards]
+  )
   const patch = (p: Partial<SceneAddition>): void => {
     if (!sceneIds) return
     const next = { ...current, ...p }
@@ -1004,6 +1018,7 @@ export function AdditionDialog({
             slotTags={current.slotTags}
             slotChars={current.slotChars}
             charTags={current.charTags}
+            baseCharacterIds={libraryIds}
             positions={current.positions}
             roles={current.roles}
             onPatch={patch}
