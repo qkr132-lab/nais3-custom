@@ -440,7 +440,10 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
     const bucket = (additions[presetId] ??= {})
     const prev = bucket[scene.id]
     bucket[scene.id] = {
-      // 이미 있던 선택은 지우지 않고 합친다 — 복원이 기존 작업을 덮어쓰면 곤란하다
+      // 이미 있던 선택은 지우지 않고 합친다 — 복원이 기존 작업을 덮어쓰면 곤란하다.
+      // 통째로 먼저 펼쳐야 백업이 모르는 설정(자리·자리 태그·씬 태그 등)이 살아남는다 —
+      // 아래에서 하나씩 적어 넣는 필드만 남기면 나머지가 조용히 지워진다.
+      ...prev,
       characterIds: [...new Set([...(prev?.characterIds ?? []), ...characterIds])],
       charRefIds: prev?.charRefIds ?? [],
       vibeIds: prev?.vibeIds ?? [],
