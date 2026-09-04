@@ -106,6 +106,7 @@ export function ScenePlacementDialog({
   slotTags,
   charTags,
   baseCharacterIds,
+  roles,
   onPatch
 }: {
   open: boolean
@@ -179,17 +180,21 @@ export function ScenePlacementDialog({
 
   const slotList = slots ?? []
   // 좌석표는 생성과 같은 규칙을 쓴다 (seatSlots) — 창에서 본 배치와 실제 생성이 어긋나지 않게
-  const seating = seatSlots(picked, { slots: slotList, slotChars, slotOf })
+  const seating = seatSlots(
+    picked.map((c) => ({ id: c.id, slotNo: c.slotNo, role: roles?.[c.id] ?? c.role })),
+    { slots: slotList, slotChars, slotOf, slotRoles }
+  )
   const charAtSlot = (index: number): CharacterCard | undefined => {
     const id = seating.bySlot.get(index)
     return id == null ? undefined : picked.find((c) => c.id === id)
   }
   const seatsOf = (id: number): number[] => seating.bySlots.get(id) ?? []
 
-  /** 이 자리를 차지한 캐릭터가 카드 번호로 자동 배정된 것인지 */
-  const isAutoAt = (index: number): boolean => {
+  /** 직접 앉힌 게 아니라 카드 번호·역할로 알아서 앉은 자리인지 (무엇으로 앉았는지까지) */
+  const autoAt = (index: number): '번호' | '역할' | null => {
     const c = charAtSlot(index)
-    return !!c && slotChars?.[index] == null && slotOf?.[c.id] == null
+    if (!c || slotChars?.[index] != null || slotOf?.[c.id] != null) return null
+    return c.slotNo === index + 1 ? '번호' : '역할'
   }
 
   const slotOccupant = pickedSlot != null ? charAtSlot(pickedSlot) : undefined
@@ -555,8 +560,17 @@ export function ScenePlacementDialog({
                           )}
                         >
                           {occupant ? charLabel(occupant, i) : '비어 있음 — 눌러서 채우기'}
-                          {isAutoAt(i) && (
-                            <span className="ml-1 text-[10px] text-emerald-500">번호 자동</span>
+                          {autoAt(i) && (
+                            <span
+                              className="ml-1 text-[10px] text-emerald-500"
+                              title={
+                                autoAt(i) === '번호'
+                                  ? '카드에 적힌 자리 번호로 자동 배정'
+                                  : '카드 역할이 이 자리 역할과 같아 자동 배정'
+                              }
+                            >
+                              {autoAt(i)} 자동
+                            </span>
                           )}
                           {slotTags?.[i]?.trim() && (
                             <span className="ml-1 text-[10px] text-accent" title={slotTags[i]}>

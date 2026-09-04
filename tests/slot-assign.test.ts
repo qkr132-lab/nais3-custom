@@ -115,3 +115,55 @@ describe('자리 태그의 역할 접두사', () => {
     expect(seatB).toBe('1girl, target#sex, ahegao')
   })
 })
+
+describe('역할로 자동 배정', () => {
+  it("카드에 '당하는쪽'만 걸어두면 당하는쪽 자리가 알아서 찬다", () => {
+    const s = seatSlots([{ id: 1, role: 'target' }], {
+      slots: slots(2),
+      slotRoles: { 0: 'target', 1: 'target' }
+    })
+    expect(s.bySlots.get(1)).toEqual([0, 1])
+  })
+
+  it('역할이 다른 자리는 건드리지 않는다', () => {
+    const s = seatSlots([{ id: 1, role: 'target' }, { id: 2, role: 'source' }], {
+      slots: slots(2),
+      slotRoles: { 0: 'target', 1: 'source' }
+    })
+    expect(s.bySlot.get(0)).toBe(1)
+    expect(s.bySlot.get(1)).toBe(2)
+  })
+
+  it('같은 역할 캐릭터가 여럿이면 한 명씩 고르게 나눠 앉는다', () => {
+    const s = seatSlots([{ id: 1, role: 'target' }, { id: 2, role: 'target' }], {
+      slots: slots(2),
+      slotRoles: { 0: 'target', 1: 'target' }
+    })
+    expect(s.bySlot.get(0)).toBe(1)
+    expect(s.bySlot.get(1)).toBe(2)
+  })
+
+  it('직접 앉힌 자리는 역할 배정이 밀어내지 못한다', () => {
+    const s = seatSlots([{ id: 1, role: 'target' }, { id: 2, role: 'target' }], {
+      slots: slots(2),
+      slotChars: { 0: 2 },
+      slotRoles: { 0: 'target', 1: 'target' }
+    })
+    expect(s.bySlot.get(0)).toBe(2)
+    expect(s.bySlot.get(1)).toBe(1)
+  })
+
+  it('역할이 안 걸린 자리는 비워 둔다', () => {
+    const s = seatSlots([{ id: 1, role: 'target' }], { slots: slots(2), slotRoles: { 0: 'target' } })
+    expect(s.bySlot.get(0)).toBe(1)
+    expect(s.bySlot.has(1)).toBe(false)
+  })
+
+  it('맞는 역할 캐릭터가 없으면 그대로 빈 자리', () => {
+    const s = seatSlots([{ id: 1, role: 'source' }], {
+      slots: slots(1),
+      slotRoles: { 0: 'target' }
+    })
+    expect(s.bySlot.size).toBe(0)
+  })
+})

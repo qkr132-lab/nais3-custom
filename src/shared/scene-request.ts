@@ -121,6 +121,8 @@ export interface SlotLayout {
   slotChars?: Record<number, number>
   /** (구형) 캐릭터 id → 자리 번호. slotChars가 없을 때만 읽는다 */
   slotOf?: Record<number, number>
+  /** 자리 번호 → 행위 역할. 남은 자리를 같은 역할 캐릭터로 채우는 데 쓴다 */
+  slotRoles?: Record<number, CharRole | null>
 }
 
 /** 좌석표 — 어느 자리에 누가 앉았고, 한 캐릭터가 어느 자리들을 차지했는지 */
@@ -141,11 +143,14 @@ export interface SlotSeating {
  * 2. 구형 데이터(slotOf, 캐릭터당 한 자리)는 아직 빈 자리에만 반영한다.
  * 3. 그래도 빈 자리는 카드에 적힌 자리 번호(slotNo)가 채운다. 이미 어딘가 앉은 캐릭터는
  *    번호로 또 앉지 않는다 — 직접 앉힌 배치가 번호보다 우선이라는 뜻.
+ * 4. 그래도 빈 자리에 역할(하는쪽/당하는쪽)이 걸려 있으면 **같은 역할 캐릭터**가 앉는다.
+ *    카드에 '당하는쪽'만 걸어두면 당하는쪽 자리들이 알아서 채워진다. 한 명이 여러 자리를
+ *    채워도 되고(같은 인물 여러 컷), 같은 역할 캐릭터가 여럿이면 적게 앉은 쪽부터 돌아간다.
  *
  * 한 자리에 둘이 겹치면 NAI가 두 인물을 한 점에 그려 뭉개므로, 겹침은 여기서 막는다.
  */
 export function seatSlots(
-  chars: { id: number; slotNo?: number | null }[],
+  chars: { id: number; slotNo?: number | null; role?: CharRole | null }[],
   layout: SlotLayout
 ): SlotSeating {
   const count = layout.slots?.length ?? 0
@@ -166,6 +171,23 @@ export function seatSlots(
     if (c.slotNo == null || [...bySlot.values()].includes(c.id)) continue
     const index = c.slotNo - 1
     if (valid(index)) bySlot.set(index, c.id)
+  }
+
+  // 4) 역할이 걸린 빈 자리는 같은 역할 캐릭터로 채운다
+  const seatCount = new Map<number, number>()
+  for (const id of bySlot.values()) seatCount.set(id, (seatCount.get(id) ?? 0) + 1)
+  for (let i = 0; i < count; i++) {
+    const role = layout.slotRoles?.[i]
+    if (!role || bySlot.has(i)) continue
+    // 적게 앉은 캐릭터부터 — 같은 역할이 여럿이면 한 명씩 고르게 나눠 앉는다
+    let pick: { id: number } | undefined
+    for (const c of chars) {
+      if (c.role !== role) continue
+      if (!pick || (seatCount.get(c.id) ?? 0) < (seatCount.get(pick.id) ?? 0)) pick = c
+    }
+    if (!pick) continue
+    bySlot.set(i, pick.id)
+    seatCount.set(pick.id, (seatCount.get(pick.id) ?? 0) + 1)
   }
 
   const bySlots = new Map<number, number[]>()

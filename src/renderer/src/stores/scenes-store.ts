@@ -192,7 +192,11 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   })
   // 미리 잡아둔 자리에 앉은 캐릭터는 그 자리 좌표·태그·역할로 그린다 (커스텀).
   // 한 카드가 여러 자리에 앉을 수 있어, 같은 인물이 자리 수만큼 나온다.
-  const seating = seatSlots(sceneChars, layout ?? {})
+  const seating = seatSlots(
+    // 역할까지 넘겨야 "카드에 당하는쪽만 걸어두면 당하는쪽 자리가 알아서 찬다"가 된다
+    sceneChars.map((c) => ({ id: c.id, slotNo: c.slotNo, role: roleOf(c.id) ?? null })),
+    layout ?? {}
+  )
 
   /**
    * 자리 하나 = 인물 하나. 캐릭터 순서는 그대로 두고, 여러 자리에 앉은 캐릭터만
