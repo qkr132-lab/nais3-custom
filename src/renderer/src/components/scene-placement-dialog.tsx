@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Plus, RotateCcw, User } from 'lucide-react'
 import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
@@ -26,6 +26,59 @@ import { Switch } from './ui/switch'
  * 자리(slots): 캐릭터 없이 좌표만 먼저 잡아두는 칸. "이 씬은 2명, 여기랑 여기"를 짜두고
  * 나중에 자리를 골라 캐릭터를 꽂는다. 배정된 캐릭터는 그 자리 좌표로 생성된다.
  */
+
+/**
+ * 자리 태그 입력칸.
+ *
+ * 씬별 추가 설정은 저장할 때 설정 전체(모든 씬의 추가 선택 + 큐 항목)를 통째로 다시 쓴다.
+ * 글자마다 저장하면 그 덩어리를 매번 디스크에 쓰므로, 잠깐 모았다가 넘긴다.
+ * 창을 닫거나 다른 자리를 골라 사라질 때도 마지막 입력을 흘리지 않게 한 번 더 넘긴다.
+ */
+function SlotTagEditor({
+  value,
+  onCommit
+}: {
+  value: string
+  onCommit: (text: string) => void
+}): React.JSX.Element {
+  const [text, setText] = useState(value)
+  const latest = useRef(text)
+  const dirty = useRef(false)
+  const commit = useRef(onCommit)
+
+  // 사라질 때 넘길 최신값을 들고 있는다 (렌더 중에 ref를 건드리지 않게 효과에서 갱신)
+  useEffect(() => {
+    commit.current = onCommit
+    latest.current = text
+  })
+
+  useEffect(() => {
+    if (!dirty.current) return
+    const timer = setTimeout(() => commit.current(text), 400)
+    return () => clearTimeout(timer)
+  }, [text])
+
+  useEffect(
+    () => () => {
+      if (dirty.current) commit.current(latest.current)
+    },
+    []
+  )
+
+  return (
+    <PromptEditor
+      autoGrow
+      tokensOverride={null}
+      className="max-h-[120px] min-h-[52px] bg-paper"
+      value={text}
+      placeholder="smile, looking at viewer"
+      onValueChange={(v) => {
+        dirty.current = true
+        setText(v)
+      }}
+    />
+  )
+}
 
 function charLabel(c: CharacterCard, index: number): string {
   const name = c.name.trim() || c.prompt.split(',')[0]?.trim() || `캐릭터 ${index + 1}`
@@ -299,13 +352,10 @@ export function ScenePlacementDialog({
                     이 자리에 꽂히는 캐릭터 뒤에 붙습니다 · 이 씬에만
                   </span>
                 </p>
-                <PromptEditor
-                  autoGrow
-                  tokensOverride={null}
-                  className="max-h-[120px] min-h-[52px] bg-paper"
+                <SlotTagEditor
+                  key={pickedSlot}
                   value={slotTags?.[pickedSlot] ?? ''}
-                  placeholder="smile, looking at viewer"
-                  onValueChange={(v) => setSlotTag(pickedSlot, v)}
+                  onCommit={(v) => setSlotTag(pickedSlot, v)}
                 />
                 {slotOccupant ? (
                   <>
