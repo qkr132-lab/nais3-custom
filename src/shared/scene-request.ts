@@ -114,38 +114,66 @@ export function prioritizeSceneCharacterIds(sceneIds: number[], baseIds: number[
   return [...new Set([...sceneIds, ...baseIds])]
 }
 
+/** 자리 배치 정보 (커스텀) — 씬별 추가·큐 항목이 같은 모양으로 갖는다 */
+export interface SlotLayout {
+  slots?: { x: number; y: number }[]
+  /** 자리 번호 → 그 자리에 앉은 캐릭터 id. 같은 캐릭터가 여러 자리에 앉아도 된다 */
+  slotChars?: Record<number, number>
+  /** (구형) 캐릭터 id → 자리 번호. slotChars가 없을 때만 읽는다 */
+  slotOf?: Record<number, number>
+}
+
+/** 좌석표 — 어느 자리에 누가 앉았고, 한 캐릭터가 어느 자리들을 차지했는지 */
+export interface SlotSeating {
+  /** 자리 번호 → 캐릭터 id */
+  bySlot: Map<number, number>
+  /** 캐릭터 id → 그 캐릭터가 앉은 자리 번호들 (번호 순) */
+  bySlots: Map<number, number[]>
+}
+
 /**
- * 미리 잡아둔 자리에 캐릭터를 앉힌다 (커스텀). 반환: 캐릭터 id → 자리 번호(0-based).
+ * 미리 잡아둔 자리에 캐릭터를 앉힌다 (커스텀).
  *
  * 규칙은 씬 배치 창이 화면에 그리는 것과 같아야 한다 — 안 그러면 창에서 본 배치와
  * 실제 생성이 어긋난다:
- * 1. 씬에서 직접 배정한 자리(slotOf)가 먼저다.
- * 2. 남은 자리만 카드에 적힌 자리 번호(slotNo)가 채운다. 이미 찬 자리는 건너뛴다.
- * 3. 같은 번호를 단 카드가 여럿이면 앞선 캐릭터가 그 자리를 가진다.
+ * 1. 자리에 직접 앉힌 캐릭터(slotChars)가 먼저다. **같은 캐릭터를 여러 자리에 앉혀도 된다** —
+ *    한 카드로 같은 인물을 여러 명 그리는 구도(자리마다 다른 태그·역할)를 위해서다.
+ * 2. 구형 데이터(slotOf, 캐릭터당 한 자리)는 아직 빈 자리에만 반영한다.
+ * 3. 그래도 빈 자리는 카드에 적힌 자리 번호(slotNo)가 채운다. 이미 어딘가 앉은 캐릭터는
+ *    번호로 또 앉지 않는다 — 직접 앉힌 배치가 번호보다 우선이라는 뜻.
  *
  * 한 자리에 둘이 겹치면 NAI가 두 인물을 한 점에 그려 뭉개므로, 겹침은 여기서 막는다.
  */
-export function assignSlots(
+export function seatSlots(
   chars: { id: number; slotNo?: number | null }[],
-  slotOf?: Record<number, number>
-): Map<number, number> {
-  const out = new Map<number, number>()
-  const claimed = new Set<number>()
-  for (const c of chars) {
-    const explicit = slotOf?.[c.id]
-    if (explicit != null) {
-      out.set(c.id, explicit)
-      claimed.add(explicit)
-    }
+  layout: SlotLayout
+): SlotSeating {
+  const count = layout.slots?.length ?? 0
+  const known = new Set(chars.map((c) => c.id))
+  const bySlot = new Map<number, number>()
+  const valid = (index: number): boolean => index >= 0 && index < count && !bySlot.has(index)
+
+  for (const [at, charId] of Object.entries(layout.slotChars ?? {})) {
+    const index = Number(at)
+    if (valid(index) && known.has(charId)) bySlot.set(index, charId)
+  }
+  for (const [charId, at] of Object.entries(layout.slotOf ?? {})) {
+    const id = Number(charId)
+    // 이미 어딘가 앉았으면 구형 배정은 무시 (새 배치가 이겨야 한다)
+    if (valid(at) && known.has(id) && ![...bySlot.values()].includes(id)) bySlot.set(at, id)
   }
   for (const c of chars) {
-    if (out.has(c.id) || c.slotNo == null) continue
+    if (c.slotNo == null || [...bySlot.values()].includes(c.id)) continue
     const index = c.slotNo - 1
-    if (index < 0 || claimed.has(index)) continue
-    out.set(c.id, index)
-    claimed.add(index)
+    if (valid(index)) bySlot.set(index, c.id)
   }
-  return out
+
+  const bySlots = new Map<number, number[]>()
+  for (const index of [...bySlot.keys()].sort((a, b) => a - b)) {
+    const charId = bySlot.get(index) as number
+    bySlots.set(charId, [...(bySlots.get(charId) ?? []), index])
+  }
+  return { bySlot, bySlots }
 }
 
 /**

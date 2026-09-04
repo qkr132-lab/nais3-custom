@@ -420,6 +420,10 @@ type SelectionPatch = {
   slotRoles?: Record<number, CharRole | null>
   /** 자리 번호 → 그 자리에 꽂는 캐릭터에게 덧붙는 태그 */
   slotTags?: Record<number, string>
+  /** 자리 번호 → 그 자리에 앉은 캐릭터 id */
+  slotChars?: Record<number, number>
+  /** 캐릭터 id → 이 씬/항목에서만 덧붙는 태그 */
+  charTags?: Record<number, string>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -439,7 +443,9 @@ function SelectionPanel({
   slots,
   slotOf,
   slotRoles,
-  slotTags}: {
+  slotTags,
+  slotChars,
+  charTags}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -451,6 +457,8 @@ function SelectionPanel({
   slotOf?: Record<number, number>
   slotRoles?: Record<number, CharRole | null>
   slotTags?: Record<number, string>
+  slotChars?: Record<number, number>
+  charTags?: Record<number, string>
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -502,6 +510,8 @@ function SelectionPanel({
         slotOf={slotOf}
         slotRoles={slotRoles}
         slotTags={slotTags}
+        slotChars={slotChars}
+        charTags={charTags}
         roles={roles}
         onPatch={onPatch}
       />
@@ -608,6 +618,8 @@ function PositionPanel({
   slotOf,
   slotRoles,
   slotTags,
+  slotChars,
+  charTags,
   roles,
   onPatch
 }: {
@@ -618,6 +630,8 @@ function PositionPanel({
   slotOf?: Record<number, number>
   slotRoles?: Record<number, CharRole | null>
   slotTags?: Record<number, string>
+  slotChars?: Record<number, number>
+  charTags?: Record<number, string>
   roles?: CharRoles
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
@@ -664,6 +678,8 @@ function PositionPanel({
         slotOf={slotOf}
         slotRoles={slotRoles}
         slotTags={slotTags}
+        slotChars={slotChars}
+        charTags={charTags}
         roles={roles}
         onPatch={onPatch}
       />
@@ -883,6 +899,8 @@ function EntryEditor({
           slotOf={entry.slotOf}
           slotRoles={entry.slotRoles}
           slotTags={entry.slotTags}
+          slotChars={entry.slotChars}
+          charTags={entry.charTags}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -984,6 +1002,8 @@ export function AdditionDialog({
             slotOf={current.slotOf}
             slotRoles={current.slotRoles}
             slotTags={current.slotTags}
+            slotChars={current.slotChars}
+            charTags={current.charTags}
             positions={current.positions}
             roles={current.roles}
             onPatch={patch}

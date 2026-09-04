@@ -38,6 +38,17 @@ export interface SceneAddition {
    * 카드 태그 뒤에 붙는다. 카드 자체는 건드리지 않으므로 이 씬에만 적용된다.
    */
   slotTags?: Record<number, string>
+  /**
+   * 자리 번호 → 그 자리에 앉은 캐릭터 id (커스텀).
+   * 같은 캐릭터를 여러 자리에 앉힐 수 있다 — 한 카드로 같은 인물을 여러 명 그리는 구도용.
+   * 구형 slotOf(캐릭터당 한 자리)는 이게 없을 때만 읽는다.
+   */
+  slotChars?: Record<number, number>
+  /**
+   * 캐릭터 id → 이 씬에서만 덧붙는 태그 (커스텀).
+   * 카드 태그는 그대로 두고 이 씬에서만 얹는다 — "이 씬에서 이 캐릭터는 교복" 같은 것.
+   */
+  charTags?: Record<number, string>
 }
 
 /** presetId → sceneId → 추가 선택 */
@@ -92,7 +103,15 @@ function persist(): void {
 }
 
 export function hasAddition(a: SceneAddition | undefined | null): a is SceneAddition {
-  return !!a && (a.characterIds.length > 0 || a.charRefIds.length > 0 || a.vibeIds.length > 0)
+  return (
+    !!a &&
+    // 자리만 잡아둔 씬도 내용이 있는 것으로 본다 — 캐릭터를 여기 넣지 않고 카드 번호로만
+    // 앉히는 쓰임이 있어서, 자리를 안 세면 그 씬의 배치가 통째로 무시된다
+    (a.characterIds.length > 0 ||
+      a.charRefIds.length > 0 ||
+      a.vibeIds.length > 0 ||
+      (a.slots?.length ?? 0) > 0)
+  )
 }
 
 /** 활성 항목들 (큐 반복 실행 대상) */
@@ -227,13 +246,31 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       for (const [id, r] of Object.entries(roles)) if (!cSet.has(Number(id))) next[Number(id)] = r
       return next
     }
+    // 자리에 앉아 있던 캐릭터가 지워지면 그 자리는 비운다 (유령이 앉아 있지 않게)
+    const stripSlotChars = (
+      map?: Record<number, number>
+    ): Record<number, number> | undefined => {
+      if (!map) return map
+      const next: Record<number, number> = {}
+      for (const [at, id] of Object.entries(map)) if (!cSet.has(id)) next[Number(at)] = id
+      return next
+    }
+    const stripKeyed = <V,>(map?: Record<number, V>): Record<number, V> | undefined => {
+      if (!map) return map
+      const next: Record<number, V> = {}
+      for (const [id, v] of Object.entries(map)) if (!cSet.has(Number(id))) next[Number(id)] = v
+      return next
+    }
     const filterAdd = (a: SceneAddition): SceneAddition => ({
       ...a,
       characterIds: a.characterIds.filter((id) => !cSet.has(id)),
       charRefIds: a.charRefIds.filter((id) => !rSet.has(id)),
       vibeIds: a.vibeIds.filter((id) => !vSet.has(id)),
       positions: stripPositions(a.positions),
-      roles: stripRoles(a.roles)
+      roles: stripRoles(a.roles),
+      slotOf: stripKeyed(a.slotOf),
+      slotChars: stripSlotChars(a.slotChars),
+      charTags: stripKeyed(a.charTags)
     })
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
@@ -249,7 +286,10 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
         charRefIds: e.charRefIds.filter((id) => !rSet.has(id)),
         vibeIds: e.vibeIds.filter((id) => !vSet.has(id)),
         positions: stripPositions(e.positions),
-        roles: stripRoles(e.roles)
+        roles: stripRoles(e.roles),
+        slotOf: stripKeyed(e.slotOf),
+        slotChars: stripSlotChars(e.slotChars),
+        charTags: stripKeyed(e.charTags)
       })),
       additions: nextAdditions
     })

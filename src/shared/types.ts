@@ -86,6 +86,10 @@ export interface SequenceEntry {
   slotRoles?: Record<number, CharRole | null>
   /** 자리 번호 → 그 자리에 꽂는 캐릭터에게 덧붙는 태그 (커스텀) */
   slotTags?: Record<number, string>
+  /** 자리 번호 → 그 자리에 앉은 캐릭터 id (커스텀). 같은 캐릭터가 여러 자리에 앉아도 된다 */
+  slotChars?: Record<number, number>
+  /** 캐릭터 id → 이 항목에서만 덧붙는 태그 (커스텀). 카드는 건드리지 않는다 */
+  charTags?: Record<number, string>
 }
 
 export interface GenerationRequest {

@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
+import { modelCaps } from '@shared/nai-models'
 import {
   appendPrompt,
-  assignSlots,
+  seatSlots,
   mergePromptParts,
   mergeSceneIntoPromptParts,
   prioritizeSceneCharacterIds,
@@ -158,8 +159,14 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     : undefined
   const add = hasAddition(rawAddition) ? rawAddition : null
 
+  /**
+   * 자리 묶음은 통째로 한쪽만 쓴다 — 씬별 추가에 자리가 있으면 그것, 없으면 큐 항목 것.
+   * 좌표·역할·태그가 모두 자리 번호로 엮여 있어서, 두 곳을 섞으면 엉뚱한 자리에 붙는다.
+   * (1.12.0~1.14.0에서는 씬별 추가만 읽어, 큐 항목에 잡아둔 자리가 조용히 무시됐다)
+   */
+  const layout = add?.slots?.length ? add : entry?.slots?.length ? entry : null
+
   // 캐릭터: 씬별 선택 순서 우선 → 반복 항목/메인 enabled 순서. 중복은 한 번만 포함한다.
-  // NAI 동시 캐릭터 한도(6)를 넘으면 이 우선순서대로 자른다.
   const baseCharIds = entry ? entry.characterIds : enabledCharacters().map((c) => c.id)
   const orderedCharIds = prioritizeSceneCharacterIds(add?.characterIds ?? [], baseCharIds)
   const charIds = new Set(orderedCharIds)
@@ -170,7 +177,6 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   // bare 상호작용 태그(sex, fellatio 등)는 roleTagsFor가 source#/target#을 자동으로 붙인다
   const roleOf = (id: number): 'source' | 'target' | undefined =>
     add?.roles?.[id] ?? entry?.roles?.[id] ?? charactersById.get(id)?.role ?? undefined
-  const roleTags = (id: number): string => roleTagsFor(roleOf(id), scene)
   // 씬별 역할 위치 (커스텀): 이 씬에서 하는쪽/당하는쪽이 "누구든" 역할 기준 좌표로 배치.
   // 큐 항목 위치는 전체 씬 공통이므로, 특정 씬만 다르게 두는 이 좌표가 그보다 우선한다.
   const rolePos = (id: number): { x: number; y: number } | undefined => {
@@ -179,30 +185,49 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   }
   let rolePosApplied = false
   let slotApplied = false
-  const sceneChars = orderedCharIds
-    .flatMap((id) => {
-      const character = charactersById.get(id)
-      return character?.prompt.trim() ? [character] : []
-    })
-    .slice(0, 6)
-  // 미리 잡아둔 자리에 배정돼 있으면 그 좌표를 쓴다 (커스텀) — 캐릭터별 지정 다음 순위.
-  // 명시 배정(slotOf) > 카드에 적힌 자리 번호 — 번호를 달아두면 씬마다 배정하지 않아도
-  // 그 씬의 N번 자리로 간다. 겹침 방지 규칙은 씬 배치 창과 같다 (assignSlots).
-  const slotAssign = assignSlots(sceneChars, add?.slotOf)
-  const built = sceneChars
-    .map((c) => {
-      const addPos = add?.positions?.[c.id]
-      const slotIndex = slotAssign.get(c.id)
-      const slotPos = slotIndex != null ? add?.slots?.[slotIndex] : undefined
-      // 자리 태그 (커스텀) — 그 자리에 꽂힌 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
+  const sceneChars = orderedCharIds.flatMap((id) => {
+    const character = charactersById.get(id)
+    return character?.prompt.trim() ? [character] : []
+  })
+  // 미리 잡아둔 자리에 앉은 캐릭터는 그 자리 좌표·태그·역할로 그린다 (커스텀).
+  // 한 카드가 여러 자리에 앉을 수 있어, 같은 인물이 자리 수만큼 나온다.
+  const seating = seatSlots(sceneChars, layout ?? {})
+
+  /**
+   * 자리 하나 = 인물 하나. 캐릭터 순서는 그대로 두고, 여러 자리에 앉은 캐릭터만
+   * 자리 번호 순으로 이어 넣는다 (한 자리씩만 쓰던 기존 씬은 결과가 그대로다).
+   */
+  const placements = sceneChars.flatMap((c) => {
+    const seats = seating.bySlots.get(c.id)
+    return seats?.length
+      ? seats.map((slotIndex) => ({ char: c, slotIndex }))
+      : [{ char: c, slotIndex: undefined as number | undefined }]
+  })
+  // NAI 동시 캐릭터 한도를 넘으면 이 순서대로 자른다 (V4.5=6, V5=32)
+  const built = placements
+    .slice(0, modelCaps(base.model).maxCharacters)
+    .map(({ char: c, slotIndex }) => {
+      const seated = slotIndex != null
+      const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
+      // 자리 태그 (커스텀) — 그 자리에 앉은 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
       // 얹는 건 역할 태그와 같은 취급 — 자리는 좌표만이 아니라 "그 자리의 연기"이기도 하다
-      const slotTag = slotPos && slotIndex != null ? (add?.slotTags?.[slotIndex] ?? '') : ''
-      if (addPos == null && slotPos) slotApplied = true
+      const slotTag = seated ? (layout?.slotTags?.[slotIndex] ?? '') : ''
+      // 이 씬(또는 이 큐 항목)에서만 이 캐릭터에 얹는 태그 — 카드는 건드리지 않는다
+      const charTag = add?.charTags?.[c.id] ?? entry?.charTags?.[c.id] ?? ''
+      // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
+      // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
+      const addPos = seated ? undefined : add?.positions?.[c.id]
+      const role = (seated ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
+      if (slotPos) slotApplied = true
       const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
       if (rp) rolePosApplied = true
-      const explicit = addPos ?? slotPos ?? rp ?? entry?.positions?.[c.id]
+      const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
       return {
-        prompt: appendPrompt(appendPrompt(c.prompt, slotTag), roleTags(c.id)),
+        // 카드 → 이 씬 태그 → 자리 태그 → 역할 태그 순으로 이어붙인다
+        prompt: appendPrompt(
+          appendPrompt(appendPrompt(c.prompt, charTag), slotTag),
+          roleTagsFor(role, scene)
+        ),
         negativePrompt: c.negativePrompt,
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
