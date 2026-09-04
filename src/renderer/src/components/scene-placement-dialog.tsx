@@ -86,6 +86,8 @@ function SceneTagEditor({
   )
 }
 
+const roleName = (role: CharRole): string => (role === 'source' ? '하는쪽' : '당하는쪽')
+
 function charLabel(c: CharacterCard, index: number): string {
   const name = c.name.trim() || c.prompt.split(',')[0]?.trim() || `캐릭터 ${index + 1}`
   return name.length > 12 ? name.slice(0, 12) + '…' : name
@@ -386,6 +388,16 @@ export function ScenePlacementDialog({
                     이 자리에 앉는 캐릭터 뒤에 붙습니다 · 카드는 그대로
                   </span>
                 </p>
+                {slotRoles?.[pickedSlot] && (
+                  <p className="text-[11px] text-faint">
+                    이 자리는 <b className="text-muted">{roleName(slotRoles[pickedSlot])}</b>이라
+                    <code className="mx-0.5 text-accent">sex</code> 같은 행위 태그를 적으면
+                    <code className="mx-0.5 text-accent">
+                      {slotRoles[pickedSlot]}#sex
+                    </code>
+                    로 알아서 붙습니다. 표정·포즈는 그대로 들어갑니다.
+                  </p>
+                )}
                 <SceneTagEditor
                   key={`slot-${pickedSlot}`}
                   value={slotTags?.[pickedSlot] ?? ''}

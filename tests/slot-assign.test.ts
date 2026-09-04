@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendPrompt, seatSlots } from '../src/shared/scene-request'
+import { appendPrompt, autoRolePrefix, seatSlots } from '../src/shared/scene-request'
 
 const slots = (n: number): { x: number; y: number }[] =>
   Array.from({ length: n }, (_, i) => ({ x: (i + 1) / (n + 1), y: 0.5 }))
@@ -91,5 +91,27 @@ describe('태그 층 쌓기', () => {
 
   it('빈 층은 건너뛴다', () => {
     expect(appendPrompt(appendPrompt(appendPrompt('1girl', ''), 'smile'), '')).toBe('1girl, smile')
+  })
+})
+
+describe('자리 태그의 역할 접두사', () => {
+  it('자리 역할이 있으면 행위 태그에 접두사가 자동으로 붙는다', () => {
+    expect(autoRolePrefix('sex, ahegao', 'target')).toBe('target#sex, ahegao')
+    expect(autoRolePrefix('sex, ahegao', 'source')).toBe('source#sex, ahegao')
+  })
+
+  it('표정·포즈 같은 일반 태그는 건드리지 않는다', () => {
+    expect(autoRolePrefix('smile, looking at viewer', 'target')).toBe('smile, looking at viewer')
+  })
+
+  it('이미 접두사를 적었으면 그대로 둔다', () => {
+    expect(autoRolePrefix('source#sex', 'target')).toBe('source#sex')
+  })
+
+  it('같은 당하는쪽이라도 자리마다 다른 행위가 들어간다', () => {
+    const seatA = appendPrompt('1girl', autoRolePrefix('fellatio, blush', 'target'))
+    const seatB = appendPrompt('1girl', autoRolePrefix('sex, ahegao', 'target'))
+    expect(seatA).toBe('1girl, target#fellatio, blush')
+    expect(seatB).toBe('1girl, target#sex, ahegao')
   })
 })

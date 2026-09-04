@@ -4,6 +4,7 @@ import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/
 import { modelCaps } from '@shared/nai-models'
 import {
   appendPrompt,
+  autoRolePrefix,
   seatSlots,
   mergePromptParts,
   mergeSceneIntoPromptParts,
@@ -217,7 +218,17 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
       // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
       // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
       const addPos = seated ? undefined : add?.positions?.[c.id]
-      const role = (seated ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
+      // 자리 역할이 먼저 — 같은 캐릭터라도 자리마다 하는쪽/당하는쪽이 다를 수 있다
+      const role =
+        (seated ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
+      /**
+       * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
+       * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
+       * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
+       * 표정·포즈 같은 일반 태그는 MUTUAL_TAGS에 없어 그대로 남는다.
+       */
+      const withRole = (tags: string): string =>
+        role && tags.trim() ? autoRolePrefix(tags, role) : tags
       if (slotPos) slotApplied = true
       const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
       if (rp) rolePosApplied = true
@@ -225,7 +236,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
       return {
         // 카드 → 이 씬 태그 → 자리 태그 → 역할 태그 순으로 이어붙인다
         prompt: appendPrompt(
-          appendPrompt(appendPrompt(c.prompt, charTag), slotTag),
+          appendPrompt(appendPrompt(c.prompt, withRole(charTag)), withRole(slotTag)),
           roleTagsFor(role, scene)
         ),
         negativePrompt: c.negativePrompt,
