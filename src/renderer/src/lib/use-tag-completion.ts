@@ -475,9 +475,12 @@ export function useTagCompletion(
       e.stopPropagation()
       // Moving the highlight must not blur/commit the IME: its queued commit
       // would otherwise append the last Korean syllable a second time.
+      // First Down starts at the default candidate; later presses move one row.
       choose(
         arrow === 'down'
-          ? (latest.selected + 1) % latest.items.length
+          ? latest.chosen
+            ? (latest.selected + 1) % latest.items.length
+            : 0
           : latest.selected <= 0
             ? latest.items.length - 1
             : latest.selected - 1

@@ -44,6 +44,8 @@ const out = '.superloopy/evidence/frontend/tags'
     passed.push('Shift+Enter inserts newline')
     await ready()
     await a.press('ArrowDown')
+    assert.equal(await a.getAttribute('aria-activedescendant'), await first.getAttribute('id'))
+    await a.press('ArrowDown')
     await a.press('Tab')
     assert.equal(await a.inputValue(), 'smirk, ')
     passed.push('arrow selection + Tab')

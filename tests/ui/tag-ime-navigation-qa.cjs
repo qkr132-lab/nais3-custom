@@ -29,17 +29,18 @@ async function key(cdp, code, composing = false) {
 }
 
 const scenarios = [
-  { name: 'Down then native commit preserves 아헤', arrows: ['ArrowDown'], index: 1 },
+  { name: 'First Down selects the first row and preserves 아헤', arrows: ['ArrowDown'], index: 0 },
+  { name: 'Second Down selects the second row', arrows: ['ArrowDown', 'ArrowDown'], index: 1 },
   { name: 'Up then native commit preserves 아헤', arrows: ['ArrowUp'], index: 9 },
   {
     name: 'Repeated arrows keep composition and selected candidate',
     arrows: ['ArrowDown', 'ArrowDown', 'ArrowUp'],
-    index: 1
+    index: 0
   },
   {
     name: 'Enter during composition accepts the arrow selection once',
     arrows: ['ArrowDown'],
-    index: 1,
+    index: 0,
     enterBeforeCommit: true
   },
   {
@@ -52,7 +53,7 @@ const scenarios = [
   {
     name: 'Editing the composing syllable clears the previous arrow choice',
     arrows: ['ArrowDown'],
-    index: 1,
+    index: 0,
     revise: true
   },
   {
@@ -139,7 +140,12 @@ const scenarios = [
             await input.press('Enter')
           }
         }
-        const tag = scenario.revise ? 'smile' : scenario.index === 1 ? 'smirk' : 'short hair'
+        const tag =
+          scenario.revise || scenario.index === 0
+            ? 'smile'
+            : scenario.index === 1
+              ? 'smirk'
+              : 'short hair'
         const expected = `${prefix}${tag}, ${suffix}`
         await page.waitForFunction(
           (value) => document.querySelector('textarea')?.value === value,

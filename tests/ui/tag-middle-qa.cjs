@@ -217,8 +217,8 @@ for (const direction of ['ArrowDown', 'ArrowUp']) {
       await ready(page)
       const before = await input.inputValue()
       const options = page.locator('[data-tag-popup]').getByRole('option')
-      const index = direction === 'ArrowDown' ? 1 : (await options.count()) - 1
-      const expectedTag = direction === 'ArrowDown' ? 'smirk' : 'short hair'
+      const index = direction === 'ArrowDown' ? 0 : (await options.count()) - 1
+      const expectedTag = direction === 'ArrowDown' ? 'smile' : 'short hair'
       const expectedId = await options.nth(index).getAttribute('id')
       const key = direction === 'ArrowDown' ? 40 : 38
       await cdp.send('Input.dispatchKeyEvent', {
