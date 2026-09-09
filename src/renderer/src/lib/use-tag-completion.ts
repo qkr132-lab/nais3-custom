@@ -14,7 +14,14 @@ import type { TagSuggestion } from '@shared/tag-search'
 import { fragmentPaths } from '../stores/fragments-store'
 import { askText } from '../stores/dialog-store'
 import { toast, toastUndo, useToastStore } from '../stores/toast-store'
-import { completionEdit, completionRange, type CompletionRange } from './prompt-completion'
+import {
+  completionEdit,
+  completionRange,
+  completionAnchor,
+  anchoredCompletionRange,
+  type CompletionAnchor,
+  type CompletionRange
+} from './prompt-completion'
 
 export type Suggestion = { kind: 'frag'; path: string } | ({ kind: 'tag' } & TagSuggestion)
 let dismissActive: { owner: string; close: () => void } | null = null
@@ -59,6 +66,8 @@ export function useTagCompletion(
   const seq = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const context = useRef<CompletionRange | null>(null)
+  const insertionAnchor = useRef<CompletionAnchor | null>(null)
+  const beforeEdit = useRef<{ text: string; start: number; end: number } | null>(null)
   const composing = useRef(false)
   const mounted = useRef(true)
   const pointerChoice = useRef<{
@@ -85,6 +94,8 @@ export function useTagCompletion(
     ++seq.current
     clearTimeout(timer.current)
     context.current = null
+    insertionAnchor.current = null
+    beforeEdit.current = null
     ready.current = null
     pendingEnter.current = null
     pointerChoice.current = null
@@ -107,7 +118,14 @@ export function useTagCompletion(
       ) {
         // Some IMEs emit the line break separately from the committing keydown.
         e.preventDefault()
+        return
       }
+      if (ta)
+        beforeEdit.current = {
+          text: ta.value,
+          start: ta.selectionStart,
+          end: ta.selectionEnd
+        }
     }
     ta?.addEventListener('beforeinput', beforeInput)
     const scroll = (e: Event): void => {
@@ -138,6 +156,15 @@ export function useTagCompletion(
 
   function refresh(text: string, cursor: number, explicit = false): void {
     const ta = textareaRef.current
+    if (beforeEdit.current) {
+      insertionAnchor.current = completionAnchor(
+        insertionAnchor.current,
+        beforeEdit.current,
+        text,
+        cursor
+      )
+      beforeEdit.current = null
+    }
     const pending = pendingEnter.current
     if (
       pending &&
@@ -145,14 +172,18 @@ export function useTagCompletion(
       (pending.text !== text || pending.cursor !== cursor)
     )
       pendingEnter.current = null
-    const range = completionRange(text, cursor, ta?.selectionEnd ?? cursor)
+    const range = insertionAnchor.current
+      ? anchoredCompletionRange(insertionAnchor.current, text, cursor, ta?.selectionEnd ?? cursor)
+      : completionRange(text, cursor, ta?.selectionEnd ?? cursor)
     if (
       !range ||
       (!explicit &&
         (range.query.trim().length < (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(range.query) ? 1 : 2) ||
           /\s$/.test(range.query)))
     ) {
+      const anchor = insertionAnchor.current
       close()
+      insertionAnchor.current = anchor
       return
     }
     if (dismissActive && dismissActive.owner !== owner) dismissActive.close()
@@ -227,8 +258,15 @@ export function useTagCompletion(
   function complete(s: Suggestion): void {
     const latest = ready.current
     if (status !== 'ready' || !latest || !latest.items.includes(s)) return
+    if (!finishComposition()) return
+    insertSuggestion(s, latest.range)
+  }
+
+  function finishComposition(): boolean {
+    if (!composing.current) return true
+    const latest = ready.current
     const ta = textareaRef.current
-    if (composing.current && ta && document.activeElement === ta) {
+    if (latest && ta && document.activeElement === ta) {
       const range = latest.range
       if (
         ta.value !== range.text ||
@@ -236,16 +274,33 @@ export function useTagCompletion(
         ta.selectionEnd !== range.cursor
       ) {
         close()
-        return
+        return false
       }
       // Commit the native IME before replacing its text. Keep the clicked
       // candidate locally because blur/compositionend can dismiss the popup.
+      const anchor = insertionAnchor.current
       ta.blur()
       composing.current = false
       ta.focus()
+      if (
+        ta.value !== range.text ||
+        ta.selectionStart !== range.cursor ||
+        ta.selectionEnd !== range.cursor
+      ) {
+        close()
+        return false
+      }
       context.current = range
+      insertionAnchor.current = anchor
+      ready.current = latest
+      setOpen(true)
+      setSuggestions(latest.items)
+      setSelected(latest.selected)
+      setStatus('ready')
+      dismissActive = { owner, close }
+      return true
     }
-    insertSuggestion(s, latest.range)
+    return false
   }
 
   function insertSuggestion(s: Suggestion, range: CompletionRange): void {
@@ -334,7 +389,16 @@ export function useTagCompletion(
         return
       }
       const ta = textareaRef.current
-      const range = ta && completionRange(ta.value, ta.selectionStart, ta.selectionEnd)
+      const range =
+        ta &&
+        (insertionAnchor.current
+          ? anchoredCompletionRange(
+              insertionAnchor.current,
+              ta.value,
+              ta.selectionStart,
+              ta.selectionEnd
+            )
+          : completionRange(ta.value, ta.selectionStart, ta.selectionEnd))
       if (ta && range && context.current && range.query.trim()) {
         const latest = ready.current
         const selectedItem = latest?.items[latest.selected]
@@ -374,6 +438,26 @@ export function useTagCompletion(
     if (!isEnter && !['Shift', 'Control', 'Alt', 'Meta'].includes(e.key))
       pendingEnter.current = null
     if (isEnter && e.shiftKey) pendingEnter.current = null
+    const arrow =
+      e.key === 'ArrowDown' || e.code === 'ArrowDown'
+        ? 'down'
+        : e.key === 'ArrowUp' || e.code === 'ArrowUp'
+          ? 'up'
+          : null
+    const latest = ready.current
+    if (arrow && latest?.items.length && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!finishComposition()) return
+      choose(
+        arrow === 'down'
+          ? (latest.selected + 1) % latest.items.length
+          : latest.selected <= 0
+            ? latest.items.length - 1
+            : latest.selected - 1
+      )
+      return
+    }
     if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229) return
     if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
       e.preventDefault()
@@ -395,20 +479,6 @@ export function useTagCompletion(
       return
     }
     if (
-      (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
-      status === 'ready' &&
-      suggestions.length
-    ) {
-      e.preventDefault()
-      e.stopPropagation()
-      choose(
-        e.key === 'ArrowDown'
-          ? (selected + 1) % suggestions.length
-          : selected <= 0
-            ? suggestions.length - 1
-            : selected - 1
-      )
-    } else if (
       (e.key === 'Tab' || e.key === 'Enter') &&
       !e.shiftKey &&
       selected >= 0 &&
@@ -445,7 +515,9 @@ export function useTagCompletion(
     },
     compositionStart: () => {
       composing.current = true
+      const anchor = insertionAnchor.current
       close()
+      insertionAnchor.current = anchor
       // Show suggestions while typing, but insert only after IME commit finishes.
     },
     compositionEnd: (text, cursor) => {
