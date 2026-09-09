@@ -124,8 +124,9 @@ export function completionRange(
   // consume that tag when no edit-session snapshot is available (e.g. a paste).
   if (
     !role &&
-    /[가-힣ㄱ-ㅎㅏ-ㅣ]\s*$/.test(text.slice(start, cursor)) &&
-    /[a-zA-Z0-9]/.test(text[cursor] ?? '')
+    (!text.slice(start, cursor).trim() ||
+      (/[가-힣ㄱ-ㅎㅏ-ㅣ]\s*$/.test(text.slice(start, cursor)) &&
+        /[a-zA-Z0-9]/.test(text[cursor] ?? '')))
   )
     return {
       text,
@@ -148,10 +149,10 @@ export function completionEdit(
   let insert = (range.insertionPrefix ?? '') + text + (range.kind === 'frag' ? '>' : '')
   const head = range.text.slice(0, range.start)
   if (range.insertion) {
-    const trimmed = head.trimEnd()
+    const trimmed = head.replace(/[^\S\r\n]+$/g, '')
     const rolePrefix = /(?:^|[,\n{}[\]|<>:])\s*(?:source|target|mutual)#$/.test(trimmed)
     const openingWeight = /(?:^|[,\n{}[\]|<>:])\s*-?\d+(?:\.\d+)?::$/.test(trimmed)
-    const separated = /[,\n{[|<]$/.test(trimmed) || (/:$/.test(trimmed) && !/::$/.test(trimmed))
+    const separated = /[,\r\n{[|</]$/.test(trimmed) || (/:$/.test(trimmed) && !/::$/.test(trimmed))
     if (trimmed && !rolePrefix && !openingWeight && !separated) insert = ', ' + insert
   }
   const tail = range.text.slice(range.end)

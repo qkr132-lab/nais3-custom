@@ -3,7 +3,9 @@ import {
   completionEdit,
   completionRange,
   completionAnchor,
-  anchoredCompletionRange
+  anchoredCompletionRange,
+  type CompletionAnchor,
+  type CompletionRange
 } from '../src/renderer/src/lib/prompt-completion'
 
 describe('completion replacement boundaries', () => {
@@ -37,7 +39,18 @@ describe('completion replacement boundaries', () => {
 })
 
 describe('new tag insertion preserves existing neighbors', () => {
-  function insertAt(original: string, start: number, query: string, tag = 'abs') {
+  function insertAt(
+    original: string,
+    start: number,
+    query: string,
+    tag = 'abs'
+  ): {
+    text: string
+    cursor: number
+    anchor: CompletionAnchor
+    range: CompletionRange
+    edit: ReturnType<typeof completionEdit>
+  } {
     const text = original.slice(0, start) + query + original.slice(start)
     const cursor = start + query.length
     const anchor = completionAnchor(null, { text: original, start, end: start }, text, cursor)
@@ -173,5 +186,17 @@ describe('new tag insertion preserves existing neighbors', () => {
   it('does not offer anchored completion inside a comment', () => {
     const text = '# note 복근'
     expect(anchoredCompletionRange({ prefix: '# note ', suffix: '' }, text, text.length)).toBeNull()
+  })
+
+  it('inserts explicit history recommendations at empty boundaries without consuming the next tag', () => {
+    expect(completionEdit(completionRange('sky, blue eyes', 5)!, 'abs').next).toBe(
+      'sky, abs, blue eyes'
+    )
+    expect(completionEdit(completionRange('blue eyes', 0)!, 'abs').next).toBe('abs, blue eyes')
+  })
+
+  it('retains existing line separators instead of adding a leading comma on the new line', () => {
+    expect(insertAt('sky\nclouds', 4, '복근').edit.next).toBe('sky\nabs, clouds')
+    expect(insertAt('sky\r\n  clouds', 7, '복근').edit.next).toBe('sky\r\n  abs, clouds')
   })
 })
