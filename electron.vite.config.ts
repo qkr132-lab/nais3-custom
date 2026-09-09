@@ -9,7 +9,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/main/index.ts'),
-          'tag-search-worker': resolve('src/main/tag-search-worker.ts')
+          'tag-search-worker': resolve('src/main/tag-search-worker.ts'),
+          'nai-token-worker': resolve('src/main/nai-token-worker.ts')
         }
       }
     },

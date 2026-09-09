@@ -1,14 +1,16 @@
-import { scenePositivePrompt, sceneNegativePrompt } from '@shared/scene-request'
+import { promptTokenRequest } from '@shared/nai-tokens'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import { ArrowLeft, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
 import { imageUrl } from '../lib/constants'
 import { imageDragOutProps } from '../lib/drag-out'
 import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
-import { useScenesStore } from '../stores/scenes-store'
+import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useCharactersStore } from '../stores/characters-store'
+import { useSceneExtrasStore } from '../stores/scene-extras-store'
+import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
@@ -20,6 +22,7 @@ import { Button } from './ui/button'
 export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const [censorOpen, setCensorOpen] = useState(false)
   const select = useScenesStore((s) => s.select)
+  const activePresetId = useScenesStore((s) => s.activePresetId)
   const update = useScenesStore((s) => s.update)
   const adjustReserve = useScenesStore((s) => s.adjustReserve)
   const images = useScenesStore((s) => s.images)
@@ -34,12 +37,13 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const deleteNonFavorites = useScenesStore((s) => s.deleteNonFavorites)
 
   const source = useGenerationStore((s) => s.source)
-  const basePrompt = useGenerationStore((s) => s.request.prompt)
-  const baseParts = useGenerationStore((s) =>
-    s.promptSplitEnabled ? s.request.promptParts : undefined
-  )
-  const baseNegative = useGenerationStore((s) => s.request.negativePrompt)
+  const request = useGenerationStore((s) => s.request)
+  const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const charItems = useCharactersStore((s) => s.items)
+  const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
+  const sequenceEntries = useSceneExtrasStore((s) => s.entries)
+  const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
+  const additions = useSceneExtrasStore((s) => s.additions)
   const previewPng = useGenerationStore((s) => s.previewPng)
   const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
   const streaming = generatingSceneId === scene.id
@@ -79,55 +83,46 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       : null
   const showTile = streaming || heldFrame != null
 
-  // F9: 씬 에디터 토큰 수를 base(메인)+씬 합산으로 표시 — 실제 전송은 base 뒤에 씬을 붙이므로
-  const [sceneTokens, setSceneTokens] = useState<{ pos: number | null; neg: number | null }>({
-    pos: null,
-    neg: null
+  // Preview the same per-round requests used by generation, including placements
+  // and scene additions. Store subscriptions invalidate this read-only snapshot.
+  const tokenRounds = useMemo(
+    () => previewSceneRequests(scene),
+    // The helper reads these subscribed stores through getState().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      scene,
+      activePresetId,
+      request,
+      promptSplitEnabled,
+      source,
+      charItems,
+      sequenceEnabled,
+      sequenceEntries,
+      additionsEnabled,
+      additions
+    ]
+  )
+  const tokenPreview = usePromptTokens('tokens:preview', {
+    requests: tokenRounds.map(({ request: round }) => promptTokenRequest(round))
   })
-  useEffect(() => {
-    const enabled = charItems.filter((c) => c.enabled && c.prompt.trim())
-    const posTexts = [
-      scenePositivePrompt(
-        basePrompt,
-        {
-          prompt: scene.prompt,
-          censorKinds: scene.censorKinds,
-          censorWeights: scene.censorWeights
-        },
-        baseParts
-      ).prompt,
-      ...enabled.map((c) => c.prompt)
-    ].filter((t) => t.trim())
-    const negText = sceneNegativePrompt(baseNegative, scene)
-    const negTexts = negText.trim() ? [negText] : []
-    if (posTexts.length === 0 && negTexts.length === 0) {
-      setSceneTokens({ pos: null, neg: null })
-      return
-    }
-    const timer = setTimeout(() => {
-      void window.nais
-        .invoke('tokens:count', { texts: [...posTexts, ...negTexts] })
-        .then(({ counts }) => {
-          const sum = (a: number[]): number | null =>
-            a.length === 0 ? null : a.reduce((x, y) => x + y, 0)
-          setSceneTokens({
-            pos: sum(counts.slice(0, posTexts.length)),
-            neg: sum(counts.slice(posTexts.length))
-          })
-        })
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [
-    basePrompt,
-    baseNegative,
-    scene.prompt,
-    scene.negativePrompt,
-    scene.censorKinds,
-    scene.censorWeights,
-    scene.suppressAnal,
-    baseParts,
-    charItems
-  ])
+  const reports = tokenPreview.data?.reports
+  const sceneTokens = {
+    pos: reports?.length ? Math.max(...reports.map((report) => report.positive)) : null,
+    neg: reports?.length ? Math.max(...reports.map((report) => report.negative)) : null
+  }
+  const tokensEstimated = reports?.some((report) => report.estimated) ?? false
+  const tokenTitle = (sign: 'positive' | 'negative'): string => {
+    const heading = sign === 'positive' ? '긍정' : '부정'
+    const details = reports?.map(
+      (report, index) =>
+        `${tokenRounds[index]?.label ?? `회차 ${index + 1}`}: ${report[sign]}/${report.limit}${report.estimated ? ' (예상)' : ''}`
+    )
+    return [
+      `${heading} 최종 합계: 씬·추가 설정·배치 캐릭터와 품질/UC 포함`,
+      ...(reports && reports.length > 1 ? ['회차별 독립 한도 · 배지는 가장 큰 회차 표시'] : []),
+      ...(details ?? [])
+    ].join('\n')
+  }
 
   // ESC로 씬 목록으로 (라이트박스가 열려 있으면 라이트박스만 닫힘)
   useEffect(() => {
@@ -223,6 +218,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             onValueChange={(v) => void update(scene.id, { prompt: v })}
             placeholder="씬 프롬프트"
             tokensOverride={sceneTokens.pos}
+            model={request.model}
+            tokensEstimated={tokensEstimated}
+            tokensTitle={tokenTitle('positive')}
             className="h-32 max-h-[520px] min-h-24 resize-y"
           />
           <PromptEditor
@@ -231,6 +229,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             placeholder="씬 네거티브 프롬프트"
             negative
             tokensOverride={sceneTokens.neg}
+            model={request.model}
+            tokensEstimated={tokensEstimated}
+            tokensTitle={tokenTitle('negative')}
             className="h-20 max-h-96 min-h-16 resize-y"
           />
         </div>

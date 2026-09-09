@@ -17,6 +17,7 @@ import { initLiveResync } from '../../src/renderer/src/lib/live-resync'
 import { mergePromptParts } from '../../src/shared/scene-request'
 import type { GenerationRequest, IpcInvokeMap, PromptPreset, Scene } from '../../src/shared/types'
 import './placement.css'
+import { tokenFixtureInvoke } from './token-fixture'
 
 const parts = { base: 'base A', additional: 'middle A', detail: 'detail A' }
 const initial = { ...DEFAULT_REQUEST, promptParts: parts, prompt: mergePromptParts(parts) }
@@ -109,7 +110,11 @@ window.nais = {
       case 'scenes:update':
         break
       case 'tokens:count':
-        result = { counts: [0] }
+      case 'tokens:preview':
+        result = tokenFixtureInvoke(
+          channel,
+          req as IpcInvokeMap['tokens:count']['req'] | IpcInvokeMap['tokens:preview']['req']
+        )
         break
       case 'tags:search':
         result = { items: [] }

@@ -23,11 +23,23 @@ export interface FragmentTrace {
   content: string
 }
 
+export interface WildcardProcessOptions {
+  peek?: boolean
+  trace?: FragmentTrace[]
+  /** Optional local counters shared across all captions of one preview request. */
+  sequentialCounters?: Map<string, number>
+  onChoice?: () => void
+}
+
 const MAX_DEPTH = 10
 const sequentialCounters = new Map<string, number>()
 
 export function resetSequentialCounters(): void {
   sequentialCounters.clear()
+}
+
+export function snapshotSequentialCounters(): Map<string, number> {
+  return new Map(sequentialCounters)
 }
 
 function normalizePath(path: string): string {
@@ -40,7 +52,9 @@ function processFileWildcards(
   rng: () => number,
   depth: number,
   peek: boolean,
-  trace?: FragmentTrace[]
+  trace?: FragmentTrace[],
+  counters?: Map<string, number>,
+  onChoice?: () => void
 ): string {
   if (depth > MAX_DEPTH) return prompt
   const filePattern = /<([^<>]+)>/g
@@ -55,6 +69,7 @@ function processFileWildcards(
         .map((o) => o.trim())
         .filter((o) => o.length > 0)
       if (options.length === 0) return match
+      onChoice?.()
       return options[Math.floor(rng() * options.length)]
     }
 
@@ -68,27 +83,42 @@ function processFileWildcards(
 
     let line: string
     if (isSequential) {
-      const index = sequentialCounters.get(path) ?? 0
+      const activeCounters = counters ?? sequentialCounters
+      const index = activeCounters.get(path) ?? 0
       line = lines[index % lines.length]
-      // peek(토큰 세기 등 미리보기)면 순차 카운터를 진행시키지 않는다 — 실제 생성 순서 보존
-      if (!peek) sequentialCounters.set(path, index + 1)
+      // A supplied snapshot advances locally even during peek; real counters stay intact.
+      if (!peek || counters) activeCounters.set(path, index + 1)
     } else {
       line = lines[Math.floor(rng() * lines.length)]
     }
+    onChoice?.()
 
     // 바깥 조각을 먼저 기록해 표시 순서를 입력 순서와 맞춘다. 선택값은 재귀 치환 후 채운다.
     const traceIndex = trace?.length
     if (trace) trace.push({ token: match, path, selected: '', content: lines.join('\n') })
 
     // 선택된 줄 안의 중첩 조각 재귀 치환
-    const selected = processFileWildcards(line, source, rng, depth + 1, peek, trace)
+    const selected = processFileWildcards(
+      line,
+      source,
+      rng,
+      depth + 1,
+      peek,
+      trace,
+      counters,
+      onChoice
+    )
     if (traceIndex != null && trace) trace[traceIndex].selected = selected
     return selected
   })
 }
 
 /** (a, b/c, d) — 괄호 안에 슬래시가 있으면 옵션 세트 중 하나 선택 */
-function processParenthesisWildcards(prompt: string, rng: () => number): string {
+function processParenthesisWildcards(
+  prompt: string,
+  rng: () => number,
+  onChoice?: () => void
+): string {
   const parenPattern = /\(([^()]+\/[^()]+)\)/g
   return prompt.replace(parenPattern, (_match, content: string) => {
     const options = content
@@ -96,12 +126,13 @@ function processParenthesisWildcards(prompt: string, rng: () => number): string 
       .map((o) => o.trim())
       .filter((o) => o.length > 0)
     if (options.length <= 1) return content
+    onChoice?.()
     return options[Math.floor(rng() * options.length)]
   })
 }
 
 /** 쉼표 구분 태그 안의 a/b/c (공백 없음, URL 아님). 줄 단위로 처리해 개행을 보존한다 */
-function processSimpleWildcards(prompt: string, rng: () => number): string {
+function processSimpleWildcards(prompt: string, rng: () => number, onChoice?: () => void): string {
   // ⚠️ 전체를 split(',')→join(', ')하면 trim이 개행을 삼켜 프롬프트가 한 줄로 붕괴한다
   //    (주석(#) 범위가 전체로 번져 빈 프롬프트가 전송되던 버그의 원인)
   return prompt
@@ -121,7 +152,10 @@ function processSimpleWildcards(prompt: string, rng: () => number): string {
               .split('/')
               .map((o) => o.trim())
               .filter((o) => o.length > 0)
-            if (options.length > 1) return options[Math.floor(rng() * options.length)]
+            if (options.length > 1) {
+              onChoice?.()
+              return options[Math.floor(rng() * options.length)]
+            }
           }
           return trimmed
         })
@@ -134,11 +168,20 @@ export function processWildcards(
   prompt: string,
   source: FragmentSource,
   rng: () => number = Math.random,
-  opts: { peek?: boolean; trace?: FragmentTrace[] } = {}
+  opts: WildcardProcessOptions = {}
 ): string {
   if (!prompt) return prompt
-  let result = processFileWildcards(prompt, source, rng, 0, opts.peek ?? false, opts.trace)
-  result = processParenthesisWildcards(result, rng)
-  result = processSimpleWildcards(result, rng)
+  let result = processFileWildcards(
+    prompt,
+    source,
+    rng,
+    0,
+    opts.peek ?? false,
+    opts.trace,
+    opts.sequentialCounters,
+    opts.onChoice
+  )
+  result = processParenthesisWildcards(result, rng, opts.onChoice)
+  result = processSimpleWildcards(result, rng, opts.onChoice)
   return result
 }

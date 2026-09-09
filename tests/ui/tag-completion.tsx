@@ -4,6 +4,7 @@ import { PromptEditor } from '../../src/renderer/src/components/prompt-editor'
 import { Toaster } from '../../src/renderer/src/components/toaster'
 import { TextPromptHost } from '../../src/renderer/src/components/text-prompt-host'
 import { tagFixtureInvoke } from './tag-fixture'
+import { tokenFixtureInvoke } from './token-fixture'
 import type { IpcInvokeMap } from '../../src/shared/types'
 import './placement.css'
 
@@ -14,7 +15,11 @@ window.nais = {
   ): Promise<IpcInvokeMap[C]['res']> => {
     if (channel.startsWith('tags:'))
       return (await tagFixtureInvoke(channel, req)) as IpcInvokeMap[C]['res']
-    if (channel === 'tokens:count') return { counts: [0] } as IpcInvokeMap[C]['res']
+    if (channel === 'tokens:count' || channel === 'tokens:preview')
+      return tokenFixtureInvoke(
+        channel,
+        req as IpcInvokeMap['tokens:count']['req'] | IpcInvokeMap['tokens:preview']['req']
+      ) as IpcInvokeMap[C]['res']
     throw new Error(`Blocked IPC: ${channel}`)
   },
   on: () => () => {},
@@ -41,7 +46,10 @@ function Harness(): React.JSX.Element {
           className="h-[132px]"
           tokensOverride={null}
         />
-      <button className="fixed right-4 top-4 rounded border border-line p-2" data-testid="outside">
+        <button
+          className="fixed right-4 top-4 rounded border border-line p-2"
+          data-testid="outside"
+        >
           다른 곳
         </button>
         <pre data-testid="values">{JSON.stringify({ a, b })}</pre>

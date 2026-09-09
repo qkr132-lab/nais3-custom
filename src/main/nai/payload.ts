@@ -29,7 +29,7 @@ export {
   mergeUcPreset,
   removeComments
 } from '../../shared/nai-presets'
-import { mergeQualityTags, mergeUcPreset, removeComments } from '../../shared/nai-presets'
+import { preparePromptCaptions } from '../../shared/nai-prompts'
 import { effectiveNoiseSchedule, isV5, modelCaps } from '../../shared/nai-models'
 
 /**
@@ -131,17 +131,10 @@ export function buildGenerateImagePayload(
   req: GenerationRequest,
   opts: BuildOptions = {}
 ): NaiImagePayload {
-  const prompt = mergeQualityTags(removeComments(req.prompt), req.qualityToggle)
-  const negative = mergeUcPreset(removeComments(req.negativePrompt), req.ucPreset)
-
-  // 캐릭터 프롬프트도 주석(#) 제거 — 기본/네거만 걸러지고 캐릭터 칸은 그대로 전송되던 버그 수정
-  const activeChars = req.characterPrompts
-    .map((c) => ({
-      ...c,
-      prompt: removeComments(c.prompt),
-      negativePrompt: removeComments(c.negativePrompt)
-    }))
-    .filter((c) => c.enabled && c.prompt.trim())
+  const captions = preparePromptCaptions(req)
+  const prompt = captions.positive.base
+  const negative = captions.negative.base
+  const activeChars = captions.activeCharacters
   const center = (c: (typeof activeChars)[number]): { x: number; y: number } =>
     req.useCoords ? (c.center ?? { x: 0.5, y: 0.5 }) : { x: 0.5, y: 0.5 }
 

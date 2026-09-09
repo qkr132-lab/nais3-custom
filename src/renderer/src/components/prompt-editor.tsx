@@ -5,6 +5,9 @@ import { Popover, PopoverAnchor } from './ui/popover'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId } from 'react'
 import { cn } from '../lib/utils'
 import { highlightRanges } from '../lib/prompt-weights'
+import { promptTokenLimit } from '@shared/nai-tokens'
+import { useGenerationStore } from '../stores/generation-store'
+import { usePromptTokens } from '../lib/use-prompt-tokens'
 
 /**
  * 프롬프트 에디터.
@@ -23,8 +26,6 @@ import { highlightRanges } from '../lib/prompt-weights'
 const TYPO =
   'whitespace-pre-wrap break-words p-2.5 pr-9 font-mono text-[length:var(--prompt-size,15px)] leading-relaxed [scrollbar-gutter:stable]'
 
-const TOKEN_LIMIT = 512
-
 export function PromptEditor({
   value,
   onValueChange,
@@ -32,7 +33,10 @@ export function PromptEditor({
   className,
   negative = false,
   autoGrow = false,
-  tokensOverride
+  tokensOverride,
+  model: explicitModel,
+  tokensEstimated = false,
+  tokensTitle
 }: {
   value: string
   onValueChange: (value: string) => void
@@ -43,6 +47,10 @@ export function PromptEditor({
   autoGrow?: boolean
   /** 외부에서 합산한 토큰 수 (기본+캐릭터 합산 등). undefined면 자체 카운트, null이면 숨김 */
   tokensOverride?: number | null
+  /** Defaults to the currently selected generation model. */
+  model?: string
+  tokensEstimated?: boolean
+  tokensTitle?: string
 }): React.JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
@@ -65,28 +73,22 @@ export function PromptEditor({
     setContentHeight((h) => (h === next ? h : next))
   }, [autoGrow, value])
 
-  // 토큰 카운트 (V4.5 = T5, 한도 512 — NAI 웹과 동일: 원문 기준, 가중치 문법 제거 후)
-  const [ownTokens, setOwnTokens] = useState<number | null>(null)
+  const currentModel = useGenerationStore((s) => s.request.model)
+  const model = explicitModel ?? currentModel
   const external = tokensOverride !== undefined
-  useEffect(() => {
-    if (external || !value.trim()) return
-    let cancelled = false
-    const timer = setTimeout(() => {
-      void window.nais
-        .invoke('tokens:count', { texts: [value] })
-        .then(({ counts }) => {
-          if (!cancelled) setOwnTokens(counts[0])
-        })
-        .catch(() => {
-          if (!cancelled) setOwnTokens(null)
-        })
-    }, 250)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [value, external])
-  const tokens = external ? tokensOverride : value.trim() ? ownTokens : null
+  const ownCount = usePromptTokens(
+    'tokens:count',
+    external || !value.trim() ? null : { model, texts: [value] }
+  )
+  const tokens = external ? tokensOverride : (ownCount.data?.counts[0] ?? null)
+  const tokenLimit = ownCount.data?.limit ?? promptTokenLimit(model)
+  const estimated = external ? tokensEstimated : (ownCount.data?.estimated ?? false)
+  const tokenDescription =
+    tokensTitle ??
+    (external
+      ? '기본 프롬프트와 활성 캐릭터를 포함한 최종 합계'
+      : '이 입력칸만의 부분 계산. 기본 프롬프트·다른 캐릭터와 토큰 한도를 공유합니다.')
+  const tokenTooltip = `${tokenDescription}\n${estimated ? '선택·무작위 구문을 포함한 예상값. ' : ''}${tokens}/${tokenLimit} 토큰${tokens !== null && tokens > tokenLimit ? ' — 모델 한도 초과' : ''}`
 
   // 세로 스크롤바가 생기면 textarea 콘텐츠 폭이 줄어 줄바꿈이 달라진다 —
   // 미러의 오른쪽을 스크롤바 폭만큼 좁혀 두 레이어의 줄바꿈을 항상 일치시킨다
@@ -193,16 +195,15 @@ export function PromptEditor({
           {tokens !== null && (
             <span
               className={cn(
-                'pointer-events-none absolute bottom-1 right-1.5 rounded bg-paper/85 px-1 font-mono text-[10.5px] backdrop-blur-sm',
-                tokens > TOKEN_LIMIT ? 'text-danger' : 'text-faint'
+                'absolute bottom-1 right-1.5 cursor-help select-none rounded bg-paper/85 px-1 font-mono text-[10.5px] backdrop-blur-sm',
+                tokens > tokenLimit ? 'text-danger' : 'text-faint'
               )}
-              title={
-                tokens > TOKEN_LIMIT
-                  ? `한도 초과 — ${tokens}/${TOKEN_LIMIT} 토큰. 초과분은 잘려서 반영되지 않습니다`
-                  : `${tokens}/${TOKEN_LIMIT} 토큰`
-              }
+              title={tokenTooltip}
+              aria-label={tokenTooltip}
+              onPointerDown={(event) => event.preventDefault()}
             >
-              {tokens}/{TOKEN_LIMIT}
+              {estimated ? '약 ' : ''}
+              {tokens}/{tokenLimit}
             </span>
           )}
         </div>

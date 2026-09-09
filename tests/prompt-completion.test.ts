@@ -154,9 +154,9 @@ describe('new tag insertion preserves existing neighbors', () => {
     expect(
       completionAnchor(
         null,
-        { text: 'target#blue eyes, sky', start: 7, end: 7 },
-        'target#복근blue eyes, sky',
-        9
+        { text: 'target#blue eyes, sky', start: 9, end: 9 },
+        'target#bl복근ue eyes, sky',
+        11
       )
     ).toBeNull()
     expect(completionEdit(completionRange('target#복근blue eyes, sky', 9)!, 'abs').next).toBe(
@@ -171,6 +171,17 @@ describe('new tag insertion preserves existing neighbors', () => {
     expect(insertAt('sky, clouds', 3, 'target#복근').edit.next).toBe('sky, target#abs, clouds')
     expect(insertAt('source#', 7, '복근').edit.next).toBe('source#abs, ')
   })
+
+  it.each(['source', 'target', 'mutual'])(
+    'preserves the existing right tag when inserting immediately after %s#',
+    (role) => {
+      const original = `full body, ${role}#standing, blue eyes`
+      const start = `full body, ${role}#`.length
+      expect(insertAt(original, start, '복근').edit.next).toBe(
+        `full body, ${role}#abs, standing, blue eyes`
+      )
+    }
+  )
 
   it('keeps numeric emphasis, braces, and fragments intact', () => {
     expect(insertAt('3::sky::', 3, '복근').edit.next).toBe('3::abs, sky::')

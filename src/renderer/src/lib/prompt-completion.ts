@@ -58,7 +58,7 @@ export function completionAnchor(
   const prefix = before.text.slice(0, before.start)
   const suffix = before.text.slice(before.end)
   if (!text.startsWith(prefix) || !text.endsWith(suffix)) return null
-  // Existing fragments and role-qualified tag bodies are edited as one token.
+  // Existing fragments and tag interiors are edited as one token.
   if (/<[^<>|]*$/.test(prefix)) return null
   let start = before.start
   let end = before.start
@@ -66,7 +66,9 @@ export function completionAnchor(
   while (end < before.text.length && !SEPARATOR.test(before.text[end])) end++
   while (start < end && /\s/.test(before.text[start])) start++
   while (end > start && /\s/.test(before.text[end - 1])) end--
-  if (before.start > start && before.start < end) return null
+  const role = /^(?:source|target|mutual)#/.exec(before.text.slice(start, end))
+  const atRoleBodyStart = role !== null && before.start === start + role[0].length
+  if (!atRoleBodyStart && before.start > start && before.start < end) return null
   return { prefix, suffix }
 }
 

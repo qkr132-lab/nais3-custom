@@ -2,6 +2,7 @@
 // 규칙: 렌더러는 이 타입들로만 메인과 대화한다 (IPC 계약).
 
 import type { OpusUsage } from './opus-usage'
+import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
 export type { OpusUsage }
 
@@ -605,8 +606,16 @@ export interface IpcInvokeMap {
     req: { tags: string[] }
     res: { items: { tag: string; count: number; type: string; ko?: string }[] }
   }
-  /** T5 토큰 카운트 (V4.5 한도 512, EOS 포함 — NAI 웹과 동일 방식) */
-  'tokens:count': { req: { texts: string[] }; res: { counts: number[] } }
+  /** 선택한 NAI 모델의 토크나이저로 개별 입력을 센다. */
+  'tokens:count': {
+    req: { model: string; texts: string[] }
+    res: { counts: number[]; limit: number; estimated?: boolean }
+  }
+  /** 생성과 동일하게 품질/UC/캐릭터 프롬프트를 합친 부호별 최종 합계. */
+  'tokens:preview': {
+    req: { requests: PromptTokenRequest[] }
+    res: { reports: PromptTokenReport[] }
+  }
   /** 히스토리 이미지를 i2i/인페인트 소스로 읽기 */
   'images:readForSource': {
     req: { filePath: string }

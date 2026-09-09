@@ -16,6 +16,8 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { estimateAnlas } from '@shared/anlas'
+import { promptTokenLimit, promptTokenRequest } from '@shared/nai-tokens'
+import { requestForPromptMode } from '@shared/prompt-state'
 import type { SequenceEntry } from '@shared/types'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from '../stores/characters-store'
 import { hasAddition, useSceneExtrasStore } from '../stores/scene-extras-store'
@@ -34,8 +36,7 @@ import { TagExplorer } from './tag-explorer'
 import { SOURCE_BANNER_HEIGHT, SourceBanner } from './source-banner'
 import { Button } from './ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
-
-const TOKEN_LIMIT = 512
+import { usePromptTokens } from '../lib/use-prompt-tokens'
 
 export function PromptPanel(): React.JSX.Element {
   const request = useGenerationStore((s) => s.request)
@@ -121,38 +122,18 @@ export function PromptPanel(): React.JSX.Element {
   const generating = queueCount > 0
   const activeChars = charItems.filter((c) => c.enabled && c.prompt.trim()).length
 
-  // 토큰 표시: 포지티브는 기본+캐릭터 합산(공홈과 동일), 네거티브는 메인 것만 —
-  // 공홈이 메인 네거와 캐릭터 네거를 별개로 세므로 합산하지 않는다 (캐릭 네거는 카드에서 자체 표시)
-  const [tokenTotals, setTokenTotals] = useState<{ pos: number | null; neg: number | null }>({
-    pos: null,
-    neg: null
+  const tokenPreview = usePromptTokens('tokens:preview', {
+    requests: [
+      promptTokenRequest({
+        ...requestForPromptMode(request, promptSplitEnabled),
+        characterPrompts: charItems
+          .filter((c) => c.enabled && c.prompt.trim())
+          .map((c) => ({ prompt: c.prompt, negativePrompt: c.negativePrompt, enabled: true }))
+      })
+    ]
   })
-  const enabledChars = useMemo(
-    () => charItems.filter((c) => c.enabled && c.prompt.trim()),
-    [charItems]
-  )
-  useEffect(() => {
-    const posTexts = [request.prompt, ...enabledChars.map((c) => c.prompt)].filter((t) => t.trim())
-    const negTexts = [request.negativePrompt].filter((t) => t.trim())
-    if (posTexts.length === 0 && negTexts.length === 0) {
-      const timer = setTimeout(() => setTokenTotals({ pos: null, neg: null }))
-      return () => clearTimeout(timer)
-    }
-    const timer = setTimeout(() => {
-      void window.nais
-        .invoke('tokens:count', { texts: [...posTexts, ...negTexts] })
-        .then(({ counts }) => {
-          // 공홈은 캡션별 EOS를 각각 포함해 그대로 합산한다 (빈 칸 = 1토큰인 이유)
-          const sum = (arr: number[]): number | null =>
-            arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0)
-          setTokenTotals({
-            pos: sum(counts.slice(0, posTexts.length)),
-            neg: sum(counts.slice(posTexts.length))
-          })
-        })
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [request.prompt, request.negativePrompt, enabledChars])
+  const tokenReport = tokenPreview.data?.reports[0]
+  const tokenLimit = tokenReport?.limit ?? promptTokenLimit(request.model)
 
   const anlas = useMemo(
     () =>
@@ -305,7 +286,13 @@ export function PromptPanel(): React.JSX.Element {
             onToggle={() => setPosCollapsed((v) => !v)}
             action={
               <div className="flex items-center gap-1">
-                {promptSplitEnabled && <TokenBadge tokens={tokenTotals.pos} />}
+                {promptSplitEnabled && (
+                  <TokenBadge
+                    tokens={tokenReport?.positive ?? null}
+                    limit={tokenLimit}
+                    estimated={tokenReport?.estimated}
+                  />
+                )}
                 {/* 태그 탐색기 (커스텀) — 카테고리별 태그 둘러보기 */}
                 <button
                   className="grid size-5 place-items-center rounded text-faint transition-colors hover:text-ink"
@@ -328,7 +315,9 @@ export function PromptPanel(): React.JSX.Element {
               <PromptEditor
                 className="min-h-0 flex-1"
                 value={request.prompt}
-                tokensOverride={tokenTotals.pos}
+                tokensOverride={tokenReport?.positive ?? null}
+                tokensEstimated={tokenReport?.estimated}
+                tokensTitle="긍정 최종 합계: 기본·품질 태그와 활성 캐릭터의 긍정 프롬프트"
                 placeholder="1girl, ...  (태그 자동완성 · <조각>)"
                 onValueChange={(v) => patch({ prompt: v })}
               />
@@ -363,7 +352,9 @@ export function PromptPanel(): React.JSX.Element {
               negative
               className="min-h-0 flex-1"
               value={request.negativePrompt}
-              tokensOverride={tokenTotals.neg}
+              tokensOverride={tokenReport?.negative ?? null}
+              tokensEstimated={tokenReport?.estimated}
+              tokensTitle="부정 최종 합계: UC 프리셋·기본 부정과 활성 캐릭터의 부정 프롬프트"
               placeholder="UC 프리셋 뒤에 이어 붙습니다"
               onValueChange={(v) => patch({ negativePrompt: v })}
             />
@@ -534,22 +525,27 @@ function CollapseHeader({
   )
 }
 
-function TokenBadge({ tokens }: { tokens: number | null }): React.JSX.Element | null {
+function TokenBadge({
+  tokens,
+  limit,
+  estimated = false
+}: {
+  tokens: number | null
+  limit: number
+  estimated?: boolean
+}): React.JSX.Element | null {
   if (tokens === null) return null
-  const over = tokens > TOKEN_LIMIT
+  const over = tokens > limit
   return (
     <span
       className={
         'rounded bg-paper px-1.5 py-0.5 font-mono text-[10.5px] ' +
         (over ? 'text-danger' : 'text-faint')
       }
-      title={
-        over
-          ? `한도 초과 — ${tokens}/${TOKEN_LIMIT} 토큰. 초과분은 잘려서 반영되지 않습니다`
-          : `최종 프롬프트 ${tokens}/${TOKEN_LIMIT} 토큰`
-      }
+      title={`긍정 최종 합계: 기본·품질 태그와 활성 캐릭터 포함. ${estimated ? '선택·무작위 구문을 포함한 예상값. ' : ''}${tokens}/${limit} 토큰${over ? ' — 모델 한도 초과' : ''}`}
     >
-      {tokens}/{TOKEN_LIMIT}
+      {estimated ? '약 ' : ''}
+      {tokens}/{limit}
     </span>
   )
 }

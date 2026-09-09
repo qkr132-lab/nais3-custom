@@ -25,6 +25,9 @@ import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { modelCaps } from '@shared/nai-models'
+import { promptTokenLimit, promptTokenRequest } from '@shared/nai-tokens'
+import { requestForPromptMode } from '@shared/prompt-state'
+import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { FolderListView } from './folder-list-view'
@@ -245,30 +248,20 @@ export function CharacterOverlay(): React.JSX.Element {
   // 캐릭터 상한은 모델 의존 (V4.5=6, V5=32)
   const maxCharacters = modelCaps(useGenerationStore((s) => s.request.model)).maxCharacters
 
-  // 기본 프롬프트 + 캐릭터 프롬프트가 512 토큰을 합산 공유 (공홈 실측)
-  const basePrompt = useGenerationStore((s) => s.request.prompt)
-  const positiveTexts = useMemo(
-    () =>
-      [
-        basePrompt,
-        ...items.filter((c) => c.enabled && c.prompt.trim()).map((c) => c.prompt)
-      ].filter((t) => t.trim()),
-    [basePrompt, items]
-  )
-  const [charTokens, setCharTokens] = useState<number | null>(null)
-  useEffect(() => {
-    if (positiveTexts.length === 0) {
-      const timer = setTimeout(() => setCharTokens(null))
-      return () => clearTimeout(timer)
-    }
-    const timer = setTimeout(() => {
-      void window.nais.invoke('tokens:count', { texts: positiveTexts }).then(({ counts }) => {
-        // 공홈은 캡션별 EOS를 각각 포함해 그대로 합산
-        setCharTokens(counts.reduce((a, b) => a + b, 0))
+  const request = useGenerationStore((s) => s.request)
+  const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
+  const tokenPreview = usePromptTokens('tokens:preview', {
+    requests: [
+      promptTokenRequest({
+        ...requestForPromptMode(request, promptSplitEnabled),
+        characterPrompts: items
+          .filter((c) => c.enabled && c.prompt.trim())
+          .map((c) => ({ prompt: c.prompt, negativePrompt: c.negativePrompt, enabled: true }))
       })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [positiveTexts])
+    ]
+  })
+  const tokenReport = tokenPreview.data?.reports[0]
+  const tokenLimit = tokenReport?.limit ?? promptTokenLimit(request.model)
 
   const exportBackup = async (): Promise<void> => {
     const withThumbs = await askConfirm('썸네일도 함께 넣을까요?', {
@@ -571,16 +564,20 @@ export function CharacterOverlay(): React.JSX.Element {
             전체 해제
           </Button>
         )}
-        {charTokens !== null && (
-          <span
-            className={cn(
-              'font-mono text-[10.5px]',
-              charTokens > 512 ? 'text-danger' : 'text-faint'
-            )}
-            title="기본 프롬프트 + 캐릭터 프롬프트 합산 (512 토큰 공유)"
+        {tokenReport && (
+          <div
+            className="flex gap-2 font-mono text-[10.5px]"
+            title={`기본·품질/UC와 활성 캐릭터 합계. 긍정과 부정은 각각 ${tokenLimit} 토큰을 공유합니다.${tokenReport.estimated ? ' 선택·무작위 구문을 포함한 예상값입니다.' : ''}`}
           >
-            {charTokens}/512
-          </span>
+            <span className={tokenReport.positive > tokenLimit ? 'text-danger' : 'text-faint'}>
+              긍정 {tokenReport.estimated ? '약 ' : ''}
+              {tokenReport.positive}/{tokenLimit}
+            </span>
+            <span className={tokenReport.negative > tokenLimit ? 'text-danger' : 'text-faint'}>
+              부정 {tokenReport.estimated ? '약 ' : ''}
+              {tokenReport.negative}/{tokenLimit}
+            </span>
+          </div>
         )}
         <label
           className="ml-auto flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted"

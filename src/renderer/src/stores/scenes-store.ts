@@ -154,7 +154,7 @@ export { appendPrompt } from '@shared/scene-request'
  * - entry(큐 반복 항목)가 있으면 캐릭터/바이브/캐릭레퍼는 메인 설정 대신 항목의 선택만 적용
  * - 씬별 캐릭터 추가가 켜져 있으면 해당 씬의 추가 선택을 합집합으로 얹는다
  */
-function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): GenerationRequest {
+export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): GenerationRequest {
   const generation = useGenerationStore.getState()
   const base = requestForPromptMode(generation.request, generation.promptSplitEnabled)
   const src = useGenerationStore.getState().source
@@ -347,6 +347,19 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
         }
       : undefined
   }
+}
+
+/** Read-only preview of each actual queue combination, without reserving or drawing images. */
+export function previewSceneRequests(
+  scene: Scene
+): { entryId: string | null; label: string; request: GenerationRequest }[] {
+  const entries = enabledEntries()
+  const rounds: (SequenceEntry | null)[] = entries.length ? entries : [null]
+  return rounds.map((entry) => ({
+    entryId: entry?.id ?? null,
+    label: entry?.name || '기본 설정',
+    request: buildSceneRequest(scene, entry)
+  }))
 }
 
 /** 커스텀 확장이 참조하는 스토어들이 로드됐는지 보장 (씬 생성 직전 호출) */

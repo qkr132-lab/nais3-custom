@@ -10,6 +10,7 @@ import { TooltipProvider } from '../../src/renderer/src/components/ui/tooltip'
 import { useScenesStore } from '../../src/renderer/src/stores/scenes-store'
 import { useGenerationStore } from '../../src/renderer/src/stores/generation-store'
 import './placement.css'
+import { tokenFixtureInvoke } from './token-fixture'
 
 const initial: Scene[] = Array.from({ length: 30 }, (_, i) => ({
   id: i + 1,
@@ -71,7 +72,11 @@ window.nais = {
         result = { items: [], total: 0 }
         break
       case 'tokens:count':
-        result = { counts: (req as { texts: string[] }).texts.map((s) => s.split(',').length) }
+      case 'tokens:preview':
+        result = tokenFixtureInvoke(
+          channel,
+          req as IpcInvokeMap['tokens:count']['req'] | IpcInvokeMap['tokens:preview']['req']
+        )
         break
       case 'tags:search':
         result = { items: [] }

@@ -14,6 +14,7 @@ import { useSceneExtrasStore } from '../../src/renderer/src/stores/scene-extras-
 import { useScenesStore } from '../../src/renderer/src/stores/scenes-store'
 import './placement.css'
 import { tagFixtureInvoke } from './tag-fixture'
+import { tokenFixtureInvoke } from './token-fixture'
 
 type PlacementProps = ComponentProps<typeof ScenePlacementDialog>
 type PlacementState = Omit<PlacementProps, 'open' | 'onOpenChange' | 'onPatch'>
@@ -50,12 +51,12 @@ window.nais = {
     request: IpcInvokeMap[C]['req']
   ): Promise<IpcInvokeMap[C]['res']> => {
     switch (channel) {
-      case 'tokens:count': {
-        const { texts } = request as IpcInvokeMap['tokens:count']['req']
-        return {
-          counts: texts.map((text) => text.split(/[,\s]+/).length)
-        } as IpcInvokeMap[C]['res']
-      }
+      case 'tokens:count':
+      case 'tokens:preview':
+        return tokenFixtureInvoke(
+          channel,
+          request as IpcInvokeMap['tokens:count']['req'] | IpcInvokeMap['tokens:preview']['req']
+        ) as IpcInvokeMap[C]['res']
       case 'tags:search':
         return params.get('tags') === '1'
           ? ((await tagFixtureInvoke(channel, request)) as IpcInvokeMap[C]['res'])

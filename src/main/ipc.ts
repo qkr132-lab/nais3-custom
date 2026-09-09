@@ -11,7 +11,6 @@ import {
   shell
 } from 'electron'
 import type { IpcEventMap, IpcInvokeMap } from '../shared/types'
-import { removeComments } from '../shared/nai-presets'
 import {
   createCharacter,
   createFolder,
@@ -59,7 +58,7 @@ import {
   setFragmentFolderColor,
   updateFragment
 } from './fragments/repo'
-import { processWildcards, resetSequentialCounters } from './fragments/processor'
+import { resetSequentialCounters } from './fragments/processor'
 import {
   deleteNaiToken,
   getNaiToken,
@@ -140,7 +139,8 @@ import {
 import { exportAll, importAll } from './backup/repo'
 import { importNais2 } from './backup/nais2'
 import { checkForUpdatesNow, startUpdateDownload } from './updater'
-import { countTokens } from './nai/tokenizer'
+import { countTokenTexts } from './nai/tokenizer-client'
+import { previewPromptTokens, previewTokenTexts } from './nai/token-preview'
 import {
   addRefImages,
   collapseRefFolder,
@@ -631,14 +631,17 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   // 토큰 수는 실제 전송될 프롬프트 기준 (커스텀) — 주석(#) 제거 + 조각(<a1> 등) 확장 후 센다.
   // 랜덤 조각은 뽑기마다 길이가 달라지므로 항상 첫 줄 기준(rng=0)으로 세서 숫자가 흔들리지 않고,
   // peek 모드라 <*순차> 조각의 진행 카운터도 건드리지 않는다.
-  handle('tokens:count', ({ texts }) => {
-    const src = fragmentSource()
-    return {
-      counts: texts.map((t) =>
-        countTokens(processWildcards(removeComments(t), src, () => 0, { peek: true }))
-      )
-    }
-  })
+  // 일반 태그 입력에는 조각 DB 전체를 읽지 않는다. 필요한 요청에서만 한 번 준비한다.
+  const tokenFragmentSource = (): ReturnType<typeof fragmentSource> => {
+    let source: ReturnType<typeof fragmentSource> | null = null
+    return { getLines: (path) => (source ??= fragmentSource()).getLines(path) }
+  }
+  handle('tokens:count', ({ model, texts }) =>
+    previewTokenTexts(model, texts, tokenFragmentSource(), countTokenTexts)
+  )
+  handle('tokens:preview', async ({ requests }) => ({
+    reports: await previewPromptTokens(requests, tokenFragmentSource(), countTokenTexts)
+  }))
 
   handle('images:showInFolder', ({ filePath }) => {
     if (isUnderImagesRoot(filePath)) shell.showItemInFolder(filePath)

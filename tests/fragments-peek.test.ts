@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   processWildcards,
   resetSequentialCounters,
+  snapshotSequentialCounters,
   type FragmentSource
 } from '../src/main/fragments/processor'
 
@@ -55,5 +56,66 @@ describe('processWildcards — 토큰 세기용 확장 (peek)', () => {
     expect(processWildcards('<*seq>', source, () => 0)).toBe('second')
     expect(processWildcards('<*seq>', source, () => 0)).toBe('third')
     expect(processWildcards('<*seq>', source, () => 0)).toBe('first')
+  })
+
+  it('uses one local snapshot across repeated fragments and consecutive caption previews', () => {
+    expect(processWildcards('<*seq>', source, () => 0)).toBe('first')
+    const local = snapshotSequentialCounters()
+    const options = { peek: true, sequentialCounters: local }
+    expect(processWildcards('<*seq>, <*seq>', source, () => 0, options)).toBe('second, third')
+    expect(processWildcards('<*seq>', source, () => 0, options)).toBe('first')
+    expect(local.get('seq')).toBe(4)
+    expect(snapshotSequentialCounters().get('seq')).toBe(1)
+    expect(processWildcards('<*seq>', source, () => 0)).toBe('second')
+  })
+
+  it('shares local sequence positions through nested expansion without touching generation counters', () => {
+    const nested: FragmentSource = {
+      getLines: (path) => (path === 'nested-seq' ? ['<*seq>, <*seq>'] : source.getLines(path))
+    }
+    const local = snapshotSequentialCounters()
+    const onChoice = vi.fn()
+    expect(
+      processWildcards('<nested-seq>, <*seq>', nested, () => 0, {
+        peek: true,
+        sequentialCounters: local,
+        onChoice
+      })
+    ).toBe('first, second, third')
+    expect(local.get('seq')).toBe(3)
+    expect(snapshotSequentialCounters().size).toBe(0)
+    expect(onChoice).toHaveBeenCalledTimes(4)
+    expect(processWildcards('<*seq>', source, () => 0)).toBe('first')
+  })
+
+  it('reports actual choices for file, inline, parenthesis, and simple wildcard syntax', () => {
+    const onChoice = vi.fn()
+    expect(
+      processWildcards('<seq>, <red|blue>, (left, right/up, down), bright/dark', source, () => 0, {
+        peek: true,
+        onChoice
+      })
+    ).toBe('first, red, left, right, bright')
+    expect(onChoice).toHaveBeenCalledTimes(4)
+    onChoice.mockClear()
+    processWildcards(
+      '<missing>, plain, https://example.com/a/b, red hair/blue hair',
+      source,
+      () => 0,
+      {
+        peek: true,
+        onChoice
+      }
+    )
+    expect(onChoice).not.toHaveBeenCalled()
+  })
+
+  it('returns independent snapshots so callers cannot mutate the real generation sequence', () => {
+    processWildcards('<*seq>', source, () => 0)
+    const snapshot = snapshotSequentialCounters()
+    snapshot.set('seq', 100)
+    snapshot.set('other', 99)
+    expect([...snapshotSequentialCounters()]).toEqual([['seq', 1]])
+    expect(processWildcards('<*seq>', source, () => 0)).toBe('second')
   })
 })
