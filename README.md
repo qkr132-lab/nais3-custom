@@ -68,7 +68,11 @@ GPL-3.0. 원작 [sunanakgo/NAIS3](https://github.com/sunanakgo/NAIS3)를 따릅�
 ```bash
 npm install
 npm run build:win   # Windows 설치본 (dist/)
+npm run build:mac   # macOS에서 Apple Silicon·Intel 설치본 (dist/)
 ```
+
+macOS 빌드는 기종별로 격리된 임시 폴더에서 네이티브 라이브러리를 준비하고,
+패키지의 SQLite·이미지 처리 라이브러리 아키텍처를 검사합니다.
 
 `npm install`/`npm ci`는 버전이 고정된 검색 사전을 내려받아 압축을 풀고,
 `resources/tag-search-manifest.json`의 크기와 SHA-256을 확인합니다.
