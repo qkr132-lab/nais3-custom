@@ -26,6 +26,7 @@ import type { FragmentPromptMetadata } from '../shared/types'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
+import { shutdownTagSearch } from './tags'
 import { migrateFromSharedFolder, needsMigration } from './migrate-data'
 import { setupUpdater } from './updater'
 import { logBalance } from './nai/anlas-log'
@@ -347,6 +348,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
+  shutdownTagSearch()
   closeDb()
 })
 

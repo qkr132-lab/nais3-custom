@@ -32,3 +32,9 @@ Thumbs.db
 # 내부 문서 (공개 제외)
 docs
 RESEARCH.md
+
+# Local QA evidence and generated search database (restored by npm install)
+.superloopy/
+resources/tag-search.sqlite
+resources/tag-search.sqlite.gz
+resources/tag-search.sqlite.*.tmp

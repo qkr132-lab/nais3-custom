@@ -1,3 +1,5 @@
+import type { CensorChanges } from '@shared/censor-tags'
+import { requestForPromptMode } from '@shared/prompt-state'
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
@@ -6,8 +8,8 @@ import {
   appendPrompt,
   autoRolePrefix,
   seatSlots,
-  mergePromptParts,
-  mergeSceneIntoPromptParts,
+  scenePositivePrompt,
+  sceneNegativePrompt,
   prioritizeSceneCharacterIds,
   roleTagsFor
 } from '@shared/scene-request'
@@ -107,6 +109,7 @@ interface ScenesState {
   bulkClearReserve: () => Promise<void>
   /** 선택 씬 variety+ 일괄 적용/해제 — 커스텀 */
   bulkSetVariety: (v: boolean) => Promise<void>
+  setCensors: (ids: number[], changes: CensorChanges) => Promise<void>
   /** 내보내기 번호 매기기 (커스텀) — 선택 씬 목록 순서대로 start부터. null = 제거 */
   bulkAssignNumbers: (start: number | null) => Promise<void>
   /** 선택 씬 일괄 복제 — 커스텀 */
@@ -152,7 +155,8 @@ export { appendPrompt } from '@shared/scene-request'
  * - 씬별 캐릭터 추가가 켜져 있으면 해당 씬의 추가 선택을 합집합으로 얹는다
  */
 function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): GenerationRequest {
-  const base = useGenerationStore.getState().request
+  const generation = useGenerationStore.getState()
+  const base = requestForPromptMode(generation.request, generation.promptSplitEnabled)
   const src = useGenerationStore.getState().source
   const extras = useSceneExtrasStore.getState()
   const rawAddition = extras.additionsEnabled
@@ -311,14 +315,12 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
   }
 
   // 분할 사용 시 씬 프롬프트는 가변 뒤·디테일 앞 (전체 끝에 붙이면 디테일에 묻힘 — 커스텀 수정)
-  const mergedParts = base.promptParts
-    ? mergeSceneIntoPromptParts(base.promptParts, scene.prompt)
-    : undefined
+  const positive = scenePositivePrompt(base.prompt, scene, base.promptParts)
   return {
     ...base,
-    prompt: mergedParts ? mergePromptParts(mergedParts) : appendPrompt(base.prompt, scene.prompt),
-    promptParts: mergedParts,
-    negativePrompt: appendPrompt(base.negativePrompt, scene.negativePrompt),
+    ...positive,
+    promptParts: positive.promptParts,
+    negativePrompt: sceneNegativePrompt(base.negativePrompt, scene),
     width: src ? src.width : scene.width,
     height: src ? src.height : scene.height,
     // 씬별 variety+ 오버라이드 (커스텀) — 켜져 있으면 강제 on, 아니면 메인 설정 따름
@@ -331,6 +333,7 @@ function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): Generati
     sceneId: scene.id,
     // 큐 실행 시 최신 씬 태그를 다시 붙일 수 있도록 기본 부분을 별도로 보존한다.
     sceneBasePrompt: base.prompt,
+    sceneBasePromptParts: base.promptParts,
     sceneBaseNegativePrompt: base.negativePrompt,
     sceneBaseAdditionalPrompt: base.promptParts?.additional,
     // 대기 항목 재구성(생성 중 편집 반영) 시 같은 큐 반복 조합으로 복원하기 위한 스냅샷
@@ -525,6 +528,9 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         height: patch.height,
         reserveCount: patch.reserveCount,
         varietyPlus: patch.varietyPlus,
+        censorKinds: patch.censorKinds,
+        censorWeights: patch.censorWeights,
+        suppressAnal: patch.suppressAnal,
         sourceTags: patch.sourceTags,
         targetTags: patch.targetTags,
         // 씬별 역할 위치 (커스텀) — 여기 빠지면 낙관적 갱신만 되고 저장이 안 돼
@@ -631,6 +637,15 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     for (const id of ids) {
       void window.nais.invoke('scenes:update', { id, patch: { reserveCount: 0 } })
     }
+  },
+  setCensors: async (ids, changes) => {
+    const { items } = await window.nais.invoke('scenes:setCensors', { ids, changes })
+    const byId = new Map(items.map((item) => [item.id, item]))
+    set({
+      scenes: get().scenes.map((scene) =>
+        byId.has(scene.id) ? { ...scene, ...byId.get(scene.id) } : scene
+      )
+    })
   },
   bulkSetVariety: async (v) => {
     const ids = new Set(get().selection)
@@ -892,7 +907,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     // 이미 서버로 넘어간 generating 항목은 건드리지 않는다. 다른 프리셋 항목도 스킵.
     // 브로드캐스트는 요약본이라 전체 request는 여기서만 필요할 때 조회한다 (커스텀 — 성능)
     const { items } = await window.nais.invoke('queue:pending', undefined)
-    const pending = items.filter((i) => i.request.sceneId != null)
+    const pending = items
     if (pending.length === 0) return
     await ensureExtrasData()
     const byId = new Map(get().scenes.map((s) => [s.id, s]))
@@ -903,6 +918,20 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     )
     const updates: { id: string; request: GenerationRequest }[] = []
     for (const item of pending) {
+      if (item.request.sceneId == null) {
+        const gen = useGenerationStore.getState()
+        const current = requestForPromptMode(gen.request, gen.promptSplitEnabled)
+        updates.push({
+          id: item.id,
+          request: {
+            ...item.request,
+            prompt: current.prompt,
+            promptParts: current.promptParts,
+            negativePrompt: current.negativePrompt
+          }
+        })
+        continue
+      }
       const scene = byId.get(item.request.sceneId!)
       if (!scene) continue // 현재 프리셋에 없는 씬(다른 프리셋 대기 항목)은 그대로 둔다
       const snap = item.request.sceneSequenceEntry ?? null

@@ -1,6 +1,6 @@
 {
   "name": "nais3-custom",
-  "version": "1.18.0",
+  "version": "1.19.2",
   "description": "NAIS3 Custom - NovelAI Image Studio 3 커스텀판 (NAIS2 기능 이식 + 한글 태그 + 휴지통/백업 등)",
   "main": "./out/main/index.js",
   "author": "sunanakgo",
@@ -15,7 +15,8 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev --watch",
     "build": "npm run typecheck && electron-vite build",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "electron-builder install-app-deps && node scripts/prepare-tag-search.mjs",
+    "prepare:tag-search": "node scripts/prepare-tag-search.mjs",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",

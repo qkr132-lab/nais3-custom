@@ -17,7 +17,7 @@ export interface SceneAddition {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
-  /** 위치 적용 on/off (커스텀). undefined = 메인 설정 따름 */
+  /** 위치 적용 on/off. undefined = 큐 항목을 따르고, 없으면 자리·씬 역할 위치로 자동 결정 */
   useCoords?: boolean
   /** 캐릭터별 위치 오버라이드 (커스텀) */
   positions?: CharPositions
@@ -105,12 +105,16 @@ function persist(): void {
 export function hasAddition(a: SceneAddition | undefined | null): a is SceneAddition {
   return (
     !!a &&
-    // 자리만 잡아둔 씬도 내용이 있는 것으로 본다 — 캐릭터를 여기 넣지 않고 카드 번호로만
-    // 앉히는 쓰임이 있어서, 자리를 안 세면 그 씬의 배치가 통째로 무시된다
+    // 캐릭터 창/큐에서 함께 나가는 카드의 위치·태그만 고친 경우도 유효한 씬 설정이다.
+    // 특히 false는 자동 배치를 끄려는 명시 설정이므로 빈 설정으로 버리면 안 된다.
     (a.characterIds.length > 0 ||
       a.charRefIds.length > 0 ||
       a.vibeIds.length > 0 ||
-      (a.slots?.length ?? 0) > 0)
+      (a.slots?.length ?? 0) > 0 ||
+      a.useCoords !== undefined ||
+      Object.keys(a.positions ?? {}).length > 0 ||
+      Object.keys(a.roles ?? {}).length > 0 ||
+      Object.keys(a.charTags ?? {}).length > 0)
   )
 }
 

@@ -4,6 +4,13 @@ productName: NAIS3 Custom
 directories:
   buildResources: build
 files:
+  - '!resources/tag-search.sqlite.gz'
+  - '!resources/tag-search.sqlite.*.tmp'
+  - '!.superloopy/**'
+  - '!DESIGN.md'
+  - '!dist/**'
+  - '!tests/**'
+  - '!docs/**'
   - '!**/.vscode/*'
   - '!src/*'
   - '!docs/*'

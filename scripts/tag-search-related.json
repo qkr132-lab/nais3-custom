@@ -1,0 +1,148 @@
+[
+  {
+    "words": ["카메하메하", "에네르기파", "에너르기파", "장풍", "기공파"],
+    "tags": ["energy beam", "energy ball", "energy blast", "kamehameha (dragon ball)", "hadouken"]
+  },
+  {
+    "words": ["에너지 공격", "기술 이펙트", "필살기"],
+    "tags": ["energy beam", "energy ball", "energy blast", "aura", "explosion", "speed lines"]
+  },
+  {
+    "words": ["마법", "마법사 기술", "주문"],
+    "tags": ["magic circle", "casting spell", "glowing", "aura", "staff", "wand"]
+  },
+  {
+    "words": ["방어", "방어막", "보호막", "결계"],
+    "tags": ["barrier", "energy barrier", "energy shield", "shield"]
+  },
+  {
+    "words": ["검술", "칼싸움", "검 공격"],
+    "tags": ["holding sword", "slashing", "sword", "fighting stance", "motion blur"]
+  },
+  {
+    "words": ["전투", "싸움", "격투", "액션"],
+    "tags": ["fighting stance", "battle", "punching", "kicking", "speed lines", "motion blur"]
+  },
+  {
+    "words": ["총격", "총싸움", "사격 자세"],
+    "tags": ["aiming", "shooting", "holding gun", "muzzle flash"]
+  },
+  {
+    "words": ["속도감", "역동적인", "역동감", "빠른 동작"],
+    "tags": ["speed lines", "motion blur", "afterimage", "foreshortening", "jumping"]
+  },
+  {
+    "words": ["화염 마법", "불 마법"],
+    "tags": ["fire", "flame", "fireball", "burning", "explosion"]
+  },
+  { "words": ["얼음 마법", "빙결 마법"], "tags": ["ice", "icicle", "snowflake", "frost"] },
+  { "words": ["번개 마법", "전기 마법"], "tags": ["lightning", "electricity", "sparks"] },
+  {
+    "words": ["물 마법", "수중 마법"],
+    "tags": ["water", "water splash", "water drop", "underwater"]
+  },
+  {
+    "words": ["구도", "카메라 구도", "화면 구성"],
+    "tags": [
+      "full body",
+      "upper body",
+      "cowboy shot",
+      "close-up",
+      "wide shot",
+      "from above",
+      "from below"
+    ]
+  },
+  { "words": ["전신 구도", "온몸 구도"], "tags": ["full body", "wide shot"] },
+  {
+    "words": ["조명", "빛 연출", "광원"],
+    "tags": [
+      "backlighting",
+      "sunlight",
+      "moonlight",
+      "spotlight",
+      "volumetric lighting",
+      "lens flare"
+    ]
+  },
+  {
+    "words": ["분위기 있는 밤", "야경"],
+    "tags": ["night", "city lights", "starry sky", "moonlight", "neon lights"]
+  },
+  {
+    "words": ["표정", "감정 표현", "얼굴 표정"],
+    "tags": ["smile", "angry", "crying", "surprised", "expressionless", "blush"]
+  },
+  { "words": ["귀여운 표정", "애교"], "tags": ["smile", "blush", "wink", "pout", "head tilt"] },
+  {
+    "words": ["화난 표정", "분노한 표정"],
+    "tags": ["angry", "frown", "furrowed brow", "clenched teeth"]
+  },
+  { "words": ["슬픈 표정", "슬퍼하는 얼굴"], "tags": ["sad", "crying", "tears", "frown"] },
+  {
+    "words": ["자세", "포즈", "기본 자세"],
+    "tags": ["standing", "sitting", "lying", "kneeling", "crossed arms", "contrapposto"]
+  },
+  { "words": ["휴식", "쉬는 모습"], "tags": ["sitting", "lying", "sleeping", "relaxing"] },
+  {
+    "words": ["헤어스타일", "머리 스타일", "머리 모양"],
+    "tags": ["long hair", "short hair", "twintails", "ponytail", "braid", "bob cut"]
+  },
+  {
+    "words": ["머리색", "머리 색깔", "염색"],
+    "tags": [
+      "black hair",
+      "blonde hair",
+      "white hair",
+      "blue hair",
+      "pink hair",
+      "multicolored hair"
+    ]
+  },
+  {
+    "words": ["눈색", "눈 색깔", "눈동자 색"],
+    "tags": ["blue eyes", "red eyes", "green eyes", "yellow eyes", "purple eyes", "heterochromia"]
+  },
+  {
+    "words": ["눈매", "눈 모양"],
+    "tags": ["tsurime", "tareme", "sanpaku", "half-closed eyes", "narrowed eyes"]
+  },
+  {
+    "words": ["날씨", "기상"],
+    "tags": ["rain", "snowing", "cloud", "sunlight", "lightning", "fog"]
+  },
+  {
+    "words": ["자연 배경", "풍경", "자연"],
+    "tags": ["forest", "mountain", "ocean", "beach", "sky", "field"]
+  },
+  {
+    "words": ["판타지 배경", "중세 배경"],
+    "tags": ["castle", "ruins", "forest", "stone wall", "mountain"]
+  },
+  {
+    "words": ["도시 배경", "현대 배경"],
+    "tags": ["city", "street", "building", "city lights", "skyscraper"]
+  },
+  {
+    "words": ["우주 배경", "우주 풍경"],
+    "tags": ["space", "planet", "star (sky)", "galaxy", "earth (planet)"]
+  },
+  { "words": ["겨울 옷", "겨울 의상"], "tags": ["coat", "scarf", "gloves", "sweater", "boots"] },
+  {
+    "words": ["갑옷 의상", "기사 의상"],
+    "tags": ["armor", "pauldrons", "gauntlets", "greaves", "helmet"]
+  },
+  { "words": ["정장 의상", "정장 차림"], "tags": ["suit", "necktie", "dress shirt", "blazer"] },
+  {
+    "words": ["빛나는 효과", "반짝임"],
+    "tags": ["glowing", "sparkle", "light particles", "lens flare"]
+  },
+  {
+    "words": ["비 오는 배경", "비오는 풍경"],
+    "tags": ["rain", "wet", "puddle", "umbrella", "cloud"]
+  },
+  {
+    "words": ["눈 오는 배경", "눈오는 풍경", "겨울 풍경"],
+    "tags": ["snowing", "snow", "snowflake", "snow-covered tree"]
+  }
+]

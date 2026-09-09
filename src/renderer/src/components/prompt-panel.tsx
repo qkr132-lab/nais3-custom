@@ -559,7 +559,11 @@ type SplitPromptParts = Record<SplitPartKey, string>
 
 const SPLIT_PARTS: { key: SplitPartKey; label: string; placeholder: string }[] = [
   { key: 'base', label: '고정', placeholder: '항상 유지할 기본 프롬프트' },
-  { key: 'additional', label: '가변', placeholder: '매번 지우고 바꿀 프롬프트' },
+  {
+    key: 'additional',
+    label: '가변',
+    placeholder: '상황에 따라 바꿀 프롬프트 (자동으로 지워지지 않음)'
+  },
   { key: 'detail', label: '디테일', placeholder: '품질, 구도, 세부 묘사' }
 ]
 
@@ -596,7 +600,7 @@ function loadSplitSizes(): Record<SplitPartKey, number> {
   }
 }
 
-function SplitPromptFields({
+export function SplitPromptFields({
   parts,
   onChange
 }: {
@@ -665,6 +669,13 @@ function SplitPromptFields({
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-1">
+      <details className="shrink-0 rounded border border-line p-2 text-[11px] text-muted">
+        <summary className="cursor-pointer">합친 원문 보기 · 고정 → 가변 → 디테일</summary>
+        <p className="mt-1">씬 프롬프트는 가변 뒤에 추가돼요. 접은 칸도 전송에 포함돼요.</p>
+        <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap break-words font-mono text-ink">
+          {mergePromptParts(parts) || '입력한 프롬프트 없음'}
+        </pre>
+      </details>
       {SPLIT_PARTS.map((part) => {
         const isCollapsed = collapsed[part.key]
         const nextOpen = isCollapsed ? undefined : nextOpenAfter(part.key)
@@ -798,3 +809,4 @@ function ToolButton({
     </div>
   )
 }
+import { mergePromptParts } from '@shared/scene-request'

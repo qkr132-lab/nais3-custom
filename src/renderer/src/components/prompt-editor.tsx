@@ -1,12 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Search } from 'lucide-react'
+import { useTagCompletion } from '../lib/use-tag-completion'
+import { TagSuggestions } from './tag-suggestions'
+import { Popover, PopoverAnchor } from './ui/popover'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId } from 'react'
 import { cn } from '../lib/utils'
-import { caretCoords } from '../lib/caret'
 import { highlightRanges } from '../lib/prompt-weights'
-import { commentStart } from '@shared/nai-presets'
-import { fragmentPaths } from '../stores/fragments-store'
-import { askText } from '../stores/dialog-store'
-import { toast } from '../stores/toast-store'
 
 /**
  * 프롬프트 에디터.
@@ -17,42 +15,13 @@ import { toast } from '../stores/toast-store'
  * - 테두리는 컨테이너가 가진다 (textarea/미러 metrics 완전 동일 보장)
  *
  * 색: 강조({}·양수 가중치)=붉은색, 약화([]·1 미만·음수)=파란색, <조각>=녹색
- * 자동완성: 커서 바로 아래 팝업. `<`는 조각, 그 외 토큰은 단부루 태그(IPC 검색)
+ * 자동완성: 입력창 가장자리에 고정한 팝업. `<`는 조각, 그 외 토큰은 단부루 태그(IPC 검색)
  */
 
 // 폰트 크기는 설정값(--prompt-size)을 따름. mirror/textarea가 동일해야 배경 정렬이 맞는다.
 // scrollbar-gutter:stable — 스크롤바 자리를 미리 배정(mirror도 동일해야 정렬 유지)
 const TYPO =
-  'whitespace-pre-wrap break-words p-2.5 font-mono text-[length:var(--prompt-size,15px)] leading-relaxed [scrollbar-gutter:stable]'
-
-type Suggestion =
-  | { kind: 'frag'; path: string }
-  | {
-      kind: 'tag'
-      tag: string
-      count: number
-      type: string
-      ko?: string
-      /** 단보루 위키 영어 설명 (커스텀) */
-      desc?: string
-      /** 사용자가 직접 단 한글 뜻 */
-      userKo?: boolean
-    }
-
-const TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/
-
-function formatCount(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
-  if (count >= 1_000) return `${Math.round(count / 1_000)}k`
-  return String(count)
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  artist: 'text-[#e05c50]',
-  character: 'text-[#5c9e6e]',
-  copyright: 'text-[#b07fd8]',
-  meta: 'text-[#c9a34f]'
-}
+  'whitespace-pre-wrap break-words p-2.5 pr-9 font-mono text-[length:var(--prompt-size,15px)] leading-relaxed [scrollbar-gutter:stable]'
 
 const TOKEN_LIMIT = 512
 
@@ -77,14 +46,8 @@ export function PromptEditor({
 }): React.JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  // 검색 세대 — 이미 날아간(in-flight) 태그 검색의 스테일 결과가 뒤늦게 패널을 다시 여는 것 방지.
-  // (패널이 남으면 Enter가 줄바꿈 대신 자동완성 삽입으로 먹혀 "줄바꿈이 안 된다"로 나타남)
-  const searchSeqRef = useRef(0)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [selected, setSelected] = useState(0)
-  const [tokenStart, setTokenStart] = useState(-1)
-  const [popupPos, setPopupPos] = useState<{ left: number; top: number } | null>(null)
+  const completion = useTagCompletion(textareaRef, value, onValueChange)
+  const listId = useId()
 
   const ranges = useMemo(() => highlightRanges(value), [value])
 
@@ -106,19 +69,24 @@ export function PromptEditor({
   const [ownTokens, setOwnTokens] = useState<number | null>(null)
   const external = tokensOverride !== undefined
   useEffect(() => {
-    if (external) return
-    if (!value.trim()) {
-      setOwnTokens(null)
-      return
-    }
+    if (external || !value.trim()) return
+    let cancelled = false
     const timer = setTimeout(() => {
       void window.nais
         .invoke('tokens:count', { texts: [value] })
-        .then(({ counts }) => setOwnTokens(counts[0]))
+        .then(({ counts }) => {
+          if (!cancelled) setOwnTokens(counts[0])
+        })
+        .catch(() => {
+          if (!cancelled) setOwnTokens(null)
+        })
     }, 250)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [value, external])
-  const tokens = external ? tokensOverride : ownTokens
+  const tokens = external ? tokensOverride : value.trim() ? ownTokens : null
 
   // 세로 스크롤바가 생기면 textarea 콘텐츠 폭이 줄어 줄바꿈이 달라진다 —
   // 미러의 오른쪽을 스크롤바 폭만큼 좁혀 두 레이어의 줄바꿈을 항상 일치시킨다
@@ -139,272 +107,107 @@ export function PromptEditor({
     const observer = new ResizeObserver(syncScroll)
     observer.observe(ta)
     return () => observer.disconnect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /** 커서 아래 팝업 좌표 (뷰포트 기준, 화면 밖으로 나가지 않게 클램프) */
-  function placePopup(itemCount: number): void {
-    const ta = textareaRef.current
-    if (!ta) return
-    const caret = caretCoords(ta, ta.selectionStart)
-    const rect = ta.getBoundingClientRect()
-    // 한글 뜻이 붙으면 항목이 2줄이 될 수 있어 넉넉히 추정
-    const estimatedHeight = Math.min(itemCount, 8) * 40 + 10
-    let left = rect.left + caret.left - ta.scrollLeft
-    let top = rect.top + caret.top - ta.scrollTop + caret.height + 4
-    left = Math.max(8, Math.min(left, window.innerWidth - 288))
-    if (top + estimatedHeight > window.innerHeight - 8) {
-      top = rect.top + caret.top - ta.scrollTop - estimatedHeight - 4
-    }
-    setPopupPos({ left, top })
-  }
-
-  function refreshSuggestions(text: string, cursor: number): void {
-    clearTimeout(debounceRef.current)
-    const seq = ++searchSeqRef.current // 이 시점 이전에 발사된 검색 결과는 전부 무효
-    const before = text.slice(0, cursor)
-
-    // 주석 구간(# 뒤)에서는 추천 안 함 — 어차피 전송 안 되는 텍스트.
-    // 단 'target#action'처럼 토큰 중간의 #은 주석이 아니므로 commentStart 규칙을 따른다
-    const lineStart = before.lastIndexOf('\n') + 1
-    if (commentStart(before.slice(lineStart)) !== -1) {
-      setSuggestions([])
-      return
-    }
-
-    const frag = /<([^<>|]*)$/.exec(before)
-    if (frag) {
-      const paths = fragmentPaths(frag[1])
-      setTokenStart(cursor - frag[1].length)
-      setSuggestions(paths.map((path) => ({ kind: 'frag', path })))
-      setSelected(0)
-      if (paths.length > 0) placePopup(paths.length)
-      return
-    }
-
-    let sepIdx = -1
-    for (let i = before.length - 1; i >= 0; i--) {
-      if (TAG_TOKEN_SEPARATORS.test(before[i])) {
-        sepIdx = i
-        break
-      }
-    }
-    const rawToken = before.slice(sepIdx + 1)
-    // 방금 띄어쓰기를 친 상태(토큰이 공백으로 끝남)면 추천을 닫는다 — 다음 단어를
-    // 시작하면 AND 검색("핑크 동공")으로 다시 뜬다 (스테일 추천 잔류 방지, 커스텀)
-    if (/\s$/.test(rawToken)) {
-      setSuggestions([])
-      return
-    }
-    const token = rawToken.trimStart()
-    const start = sepIdx + 1 + (rawToken.length - token.length)
-    // 한글은 한 글자도 의미가 있어("눈", "귀") 1자부터 검색
-    const minLen = /[가-힣]/.test(token) ? 1 : 2
-    if (token.trim().length < minLen) {
-      setSuggestions([])
-      return
-    }
-    setTokenStart(start)
-    debounceRef.current = setTimeout(() => {
-      void window.nais
-        .invoke('tags:search', { query: token.trim(), limit: 8 })
-        .then(({ items }) => {
-          if (searchSeqRef.current !== seq) return // 스테일 — 그 사이 입력이 바뀜
-          setSuggestions(items.map((t) => ({ kind: 'tag' as const, ...t })))
-          setSelected(0)
-          if (items.length > 0) placePopup(items.length)
-        })
-    }, 90)
-  }
-
-  function complete(s: Suggestion): void {
-    const ta = textareaRef.current
-    if (!ta || tokenStart < 0) return
-    const cursor = ta.selectionStart
-    let insert = s.kind === 'frag' ? s.path + '>' : s.tag
-    // 완성 후 바로 다음 태그를 이어 칠 수 있게 ", " 부착 (뒤에 이미 쉼표가 있으면 생략)
-    if (!value.slice(cursor).trimStart().startsWith(',')) insert += ', '
-    setSuggestions([])
-    // execCommand 삽입은 브라우저 undo 스택에 남는다 — 실수로 완성해도 Ctrl+Z로 되돌아간다.
-    // (onValueChange로 통째 교체하면 undo 기록이 끊겨서 복구 불가였다)
-    ta.focus()
-    ta.setSelectionRange(tokenStart, cursor)
-    const ok = document.execCommand('insertText', false, insert)
-    if (!ok) {
-      // 폴백 — undo는 안 되지만 완성 자체는 동작
-      const next = value.slice(0, tokenStart) + insert + value.slice(cursor)
-      onValueChange(next)
-      requestAnimationFrame(() => {
-        const pos = tokenStart + insert.length
-        ta.setSelectionRange(pos, pos)
-        ta.focus()
-      })
-    }
-  }
-
   return (
-    <div
-      className={cn(
-        'relative overflow-hidden rounded-md border border-line bg-paper transition-colors',
-        negative && 'border-danger/25',
-        autoGrow && 'overflow-y-auto',
-        className
-      )}
-      style={autoGrow && contentHeight !== null ? { height: contentHeight } : undefined}
+    <Popover
+      open={completion.open}
+      onOpenChange={(open) => {
+        if (!open) completion.close()
+      }}
     >
-      <div
-        ref={mirrorRef}
-        aria-hidden
-        className={cn(
-          TYPO,
-          'pointer-events-none absolute inset-0 overflow-hidden text-transparent'
-        )}
-      >
-        {ranges.map((r) =>
-          r.bg ? (
-            <span key={r.start} style={{ background: r.bg, borderRadius: 3 }}>
-              {value.slice(r.start, r.end)}
-            </span>
-          ) : (
-            <span key={r.start}>{value.slice(r.start, r.end)}</span>
-          )
-        )}
-        {value.endsWith('\n') && '​'}
-      </div>
-
-      <textarea
-        ref={textareaRef}
-        className={cn(
-          TYPO,
-          'relative block h-full w-full resize-none bg-transparent text-ink outline-none placeholder:text-faint'
-        )}
-        style={{ caretColor: 'var(--ink)' }}
-        spellCheck={false}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          onValueChange(e.target.value)
-          refreshSuggestions(e.target.value, e.target.selectionStart)
-        }}
-        onScroll={syncScroll}
-        // 클릭은 팝업을 닫기만 — 추천은 타이핑 중에만 뜬다.
-        // (클릭마다 추천이 다시 떠서, 실수로 팝업을 눌러 태그가 덮이는 사고가 있었다)
-        onClick={() => setSuggestions([])}
-        onKeyDown={(e) => {
-          if (suggestions.length === 0) return
-          if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            setSelected((selected + 1) % suggestions.length)
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            setSelected((selected - 1 + suggestions.length) % suggestions.length)
-          } else if (e.key === 'Enter' || e.key === 'Tab') {
-            e.preventDefault()
-            complete(suggestions[selected])
-          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-            // 선택된 태그에 한글 뜻 달기 (커스텀) — 사전에 없던 태그도 바로 검색되게
-            const cur = suggestions[selected]
-            if (cur?.kind === 'tag') {
-              e.preventDefault()
-              void (async () => {
-                const ko = await askText(`"${cur.tag}" 한글 뜻`, cur.userKo ? (cur.ko ?? '') : '')
-                if (ko === null) return
-                await window.nais.invoke('tags:setKo', { tag: cur.tag, ko })
-                toast(ko.trim() ? `"${cur.tag}" ← ${ko.trim()}` : `"${cur.tag}" 뜻 지움`, 'success')
-                refreshSuggestions(value, textareaRef.current?.selectionStart ?? value.length)
-              })()
-            }
-          } else if (e.key === 'Escape') {
-            setSuggestions([])
-          } else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-            // 커서만 이동 — 지금 추천은 이전 위치 기준이므로 닫는다 (다시 치면 재등장)
-            setSuggestions([])
-          }
-        }}
-        onBlur={() => {
-          // 포커스가 떠나면 추천 닫기. seq를 올려 in-flight 검색 결과가 뒤늦게 패널을
-          // 되열지 못하게 한다 (B7). 150ms 지연은 추천 클릭이 blur보다 먼저 처리되도록.
-          clearTimeout(debounceRef.current)
-          searchSeqRef.current++
-          setTimeout(() => setSuggestions([]), 150)
-        }}
-      />
-
-      {tokens !== null && (
-        <span
+      <PopoverAnchor asChild>
+        <div
           className={cn(
-            'pointer-events-none absolute bottom-1 right-1.5 rounded bg-paper/85 px-1 font-mono text-[10.5px] backdrop-blur-sm',
-            tokens > TOKEN_LIMIT ? 'text-danger' : 'text-faint'
+            'relative overflow-hidden rounded-md border border-line bg-paper transition-colors',
+            negative && 'border-danger/25',
+            autoGrow && 'overflow-y-auto',
+            className
           )}
-          title={
-            tokens > TOKEN_LIMIT
-              ? `한도 초과 — ${tokens}/${TOKEN_LIMIT} 토큰. 초과분은 잘려서 반영되지 않습니다`
-              : `${tokens}/${TOKEN_LIMIT} 토큰`
-          }
+          style={autoGrow && contentHeight !== null ? { height: contentHeight } : undefined}
         >
-          {tokens}/{TOKEN_LIMIT}
-        </span>
-      )}
-
-      {suggestions.length > 0 &&
-        popupPos &&
-        createPortal(
           <div
-            className="fixed z-50 min-w-56 max-w-80 overflow-hidden rounded-md border border-line bg-surface shadow-xl"
-            style={{ left: popupPos.left, top: popupPos.top }}
+            ref={mirrorRef}
+            aria-hidden
+            className={cn(
+              TYPO,
+              'pointer-events-none absolute inset-0 overflow-hidden text-transparent'
+            )}
           >
-            {suggestions.map((s, i) => (
-              <button
-                key={s.kind === 'frag' ? `f:${s.path}` : `t:${s.tag}`}
-                className={cn(
-                  'flex w-full flex-col px-2.5 py-1 text-left font-mono text-[12px] text-muted',
-                  i === selected && 'bg-surface-2 text-ink'
-                )}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  complete(s)
-                }}
-              >
-                {s.kind === 'frag' ? (
-                  <span className="truncate text-[#5cbe7d]">{`<${s.path}>`}</span>
-                ) : (
-                  <>
-                    <span className="flex w-full items-center gap-2">
-                      <span className={cn('min-w-0 flex-1 truncate', TYPE_COLORS[s.type])}>
-                        {s.tag}
-                      </span>
-                      <span className="shrink-0 text-[10.5px] text-faint">
-                        {formatCount(s.count)}
-                      </span>
-                    </span>
-                    {/* 한글 뜻 — 사용자가 단 것은 강조. 없으면 "뜻 달기" 안내 */}
-                    {s.ko ? (
-                      <span
-                        className={cn(
-                          'w-full truncate font-sans text-[10.5px] leading-tight',
-                          s.userKo ? 'text-emerald-500' : 'text-faint'
-                        )}
-                      >
-                        {s.ko}
-                      </span>
-                    ) : (
-                      <span className="w-full font-sans text-[10px] leading-tight text-faint/60">
-                        Ctrl+K로 한글 뜻 달기
-                      </span>
-                    )}
-                    {/* 영어 설명 — 단보루 위키 첫 문단 (선택 항목만, 너무 길지 않게) */}
-                    {i === selected && s.desc && (
-                      <span className="mt-0.5 line-clamp-3 w-full whitespace-normal font-sans text-[10.5px] leading-snug text-muted">
-                        {s.desc}
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-            ))}
-          </div>,
-          document.body
-        )}
-    </div>
+            {ranges.map((r) =>
+              r.bg ? (
+                <span key={r.start} style={{ background: r.bg, borderRadius: 3 }}>
+                  {value.slice(r.start, r.end)}
+                </span>
+              ) : (
+                <span key={r.start}>{value.slice(r.start, r.end)}</span>
+              )
+            )}
+            {value.endsWith('\n') && '​'}
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            className={cn(
+              TYPO,
+              'relative block h-full w-full resize-none bg-transparent text-ink outline-none placeholder:text-faint'
+            )}
+            style={{ caretColor: 'var(--ink)' }}
+            spellCheck={false}
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => {
+              onValueChange(e.target.value)
+              completion.refresh(e.target.value, e.target.selectionStart)
+            }}
+            onScroll={syncScroll}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={completion.open}
+            aria-controls={completion.open ? listId : undefined}
+            aria-activedescendant={
+              completion.open && completion.selected >= 0
+                ? `${listId}-${completion.selected}`
+                : undefined
+            }
+            onClick={completion.close}
+            onKeyDown={completion.onKeyDown}
+            onKeyUp={completion.onKeyUp}
+            onCompositionStart={completion.compositionStart}
+            onCompositionEnd={(e) =>
+              completion.compositionEnd(e.currentTarget.value, e.currentTarget.selectionStart)
+            }
+            onBlur={completion.onBlur}
+          />
+
+          <button
+            type="button"
+            className="absolute right-1 top-1 rounded p-1 text-muted hover:bg-surface-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+            aria-label="태그 추천 및 사용 기록"
+            title="태그 추천 / 최근·자주 사용 (Ctrl+Space)"
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => (completion.open ? completion.close() : completion.show())}
+          >
+            <Search size={14} />
+          </button>
+          {tokens !== null && (
+            <span
+              className={cn(
+                'pointer-events-none absolute bottom-1 right-1.5 rounded bg-paper/85 px-1 font-mono text-[10.5px] backdrop-blur-sm',
+                tokens > TOKEN_LIMIT ? 'text-danger' : 'text-faint'
+              )}
+              title={
+                tokens > TOKEN_LIMIT
+                  ? `한도 초과 — ${tokens}/${TOKEN_LIMIT} 토큰. 초과분은 잘려서 반영되지 않습니다`
+                  : `${tokens}/${TOKEN_LIMIT} 토큰`
+              }
+            >
+              {tokens}/{TOKEN_LIMIT}
+            </span>
+          )}
+        </div>
+      </PopoverAnchor>
+      {completion.open && <TagSuggestions completion={completion} listId={listId} />}
+    </Popover>
   )
 }

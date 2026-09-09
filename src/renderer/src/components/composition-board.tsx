@@ -7,7 +7,8 @@ import { useCharactersStore } from '../stores/characters-store'
 import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { toast } from '../stores/toast-store'
 import { useGenerationStore } from '../stores/generation-store'
-import { PlacementCanvas, distributed } from './placement-canvas'
+import { distributed } from '../lib/placement-geometry'
+import { PlacementCanvas } from './placement-canvas'
 import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
 import { Switch } from './ui/switch'
@@ -81,7 +82,9 @@ export function CompositionBoard(): React.JSX.Element {
           onMove={setCenterLive}
           onDistribute={(axis) =>
             chars.forEach((c, i) =>
-              updateCard(c.id, { center: distributed(chars.length, i, axis) })
+              updateCard(c.id, {
+                center: distributed(chars.length, i, axis, caps.freeformCharacterPosition)
+              })
             )
           }
         />

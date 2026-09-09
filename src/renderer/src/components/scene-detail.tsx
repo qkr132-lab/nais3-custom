@@ -1,3 +1,5 @@
+import { scenePositivePrompt, sceneNegativePrompt } from '@shared/scene-request'
+import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import { ArrowLeft, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
@@ -5,7 +7,7 @@ import { imageUrl } from '../lib/constants'
 import { imageDragOutProps } from '../lib/drag-out'
 import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
-import { useScenesStore, appendPrompt } from '../stores/scenes-store'
+import { useScenesStore } from '../stores/scenes-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -16,6 +18,7 @@ import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
 
 export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
+  const [censorOpen, setCensorOpen] = useState(false)
   const select = useScenesStore((s) => s.select)
   const update = useScenesStore((s) => s.update)
   const adjustReserve = useScenesStore((s) => s.adjustReserve)
@@ -32,6 +35,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
 
   const source = useGenerationStore((s) => s.source)
   const basePrompt = useGenerationStore((s) => s.request.prompt)
+  const baseParts = useGenerationStore((s) =>
+    s.promptSplitEnabled ? s.request.promptParts : undefined
+  )
   const baseNegative = useGenerationStore((s) => s.request.negativePrompt)
   const charItems = useCharactersStore((s) => s.items)
   const previewPng = useGenerationStore((s) => s.previewPng)
@@ -81,10 +87,18 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   useEffect(() => {
     const enabled = charItems.filter((c) => c.enabled && c.prompt.trim())
     const posTexts = [
-      appendPrompt(basePrompt, scene.prompt),
+      scenePositivePrompt(
+        basePrompt,
+        {
+          prompt: scene.prompt,
+          censorKinds: scene.censorKinds,
+          censorWeights: scene.censorWeights
+        },
+        baseParts
+      ).prompt,
       ...enabled.map((c) => c.prompt)
     ].filter((t) => t.trim())
-    const negText = appendPrompt(baseNegative, scene.negativePrompt)
+    const negText = sceneNegativePrompt(baseNegative, scene)
     const negTexts = negText.trim() ? [negText] : []
     if (posTexts.length === 0 && negTexts.length === 0) {
       setSceneTokens({ pos: null, neg: null })
@@ -103,7 +117,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [basePrompt, baseNegative, scene.prompt, scene.negativePrompt, charItems])
+  }, [
+    basePrompt,
+    baseNegative,
+    scene.prompt,
+    scene.negativePrompt,
+    scene.censorKinds,
+    scene.censorWeights,
+    scene.suppressAnal,
+    baseParts,
+    charItems
+  ])
 
   // ESC로 씬 목록으로 (라이트박스가 열려 있으면 라이트박스만 닫힘)
   useEffect(() => {
@@ -134,6 +158,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
+      <CensorStatus scene={scene} onEdit={() => setCensorOpen(true)} />
+      {censorOpen && <SceneCensorDialog scenes={[scene]} onClose={() => setCensorOpen(false)} />}
       {/* 헤더 */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <Button size="sm" variant="ghost" className="gap-1" onClick={() => select(null)}>

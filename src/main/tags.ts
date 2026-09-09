@@ -1,217 +1,188 @@
 import { app } from 'electron'
-import { readFileSync } from 'fs'
-import { join } from 'path'
-import { englishKey, hangulKey, keySimilarity } from './tags-fuzzy'
+import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { getSetting, setSetting } from './db/settings'
+import type { TagSuggestion, TagUsage } from '../shared/tag-search'
 
-/**
- * 단부루 태그 자동완성 데이터 (resources/tags.json, ~30만 개).
- * NAIS2는 이걸 렌더러 번들에 넣었지만, NAIS3는 메인에서 lazy 로드 + IPC 검색으로 서빙
- * — 렌더러 메모리/번들에 28MB를 싣지 않는다.
- *
- * 한글 검색 (커스텀): resources/tags-ko.json (직접 작성한 한글 사전 + 색상×부위 조합)
- * 으로 한글 질의를 태그에 매칭하고, 결과에 한글 뜻(ko)을 붙여 내려준다.
- */
-
-export interface TagEntry {
-  tag: string
-  count: number
-  type: string
-  /** 한글 뜻 (사전에 있을 때만) */
-  ko?: string
-  /** 영어 설명 — 단보루 위키 첫 문단 (커스텀, resources/tag-wiki.json) */
-  desc?: string
-  /** 사용자가 직접 단 한글 뜻이면 true — 화면에서 구분 표시·수정 가능 */
-  userKo?: boolean
-}
-
-let tags: TagEntry[] | null = null
-let koMap: Record<string, string> | null = null
-let koEntries: { entry: TagEntry; ko: string }[] | null = null
-
-function load(): TagEntry[] {
-  if (tags) return tags
-  const raw = JSON.parse(
-    readFileSync(join(app.getAppPath(), 'resources', 'tags.json'), 'utf-8')
-  ) as { value: string; count: number; type: string }[]
-  // count 내림차순 정렬해두면 검색 결과가 자연히 인기순
-  tags = raw
-    .map((t) => ({ tag: t.value, count: t.count, type: t.type }))
-    .sort((a, b) => b.count - a.count)
-  return tags
-}
-
-function loadKo(): { map: Record<string, string>; entries: { entry: TagEntry; ko: string }[] } {
-  if (koMap && koEntries) return { map: koMap, entries: koEntries }
-  try {
-    koMap = JSON.parse(
-      readFileSync(join(app.getAppPath(), 'resources', 'tags-ko.json'), 'utf-8')
-    ) as Record<string, string>
-  } catch {
-    koMap = {} // 사전 없이도 영어 검색은 동작
-  }
-  // 인기순(전체 태그 정렬 순서)으로 한글 색인 구성 — 기본 사전 + 위키 별칭 + 사용자 사전
-  const map = koMap
-  const w = loadWiki()
-  const u = loadUserKo()
-  koEntries = load()
-    .map((t) => {
-      const parts = [u[t.tag], map[t.tag], ...(w[t.tag]?.ko ?? [])].filter(Boolean)
-      return parts.length ? { entry: t, ko: parts.join('/') } : null
-    })
-    .filter((x): x is { entry: TagEntry; ko: string } => x !== null)
-  return { map: koMap, entries: koEntries }
-}
-
-/**
- * 단보루 위키 (커스텀): resources/tag-wiki.json — 영어 설명 + 위키에 적힌 한글 별칭.
- * 출처 isek-ai/danbooru-wiki-2024 (CC BY-SA 4.0). scripts/build-tag-wiki.py로 갱신.
- */
-let wiki: Record<string, { en?: string; ko?: string[] }> | null = null
-function loadWiki(): Record<string, { en?: string; ko?: string[] }> {
-  if (wiki) return wiki
-  try {
-    wiki = JSON.parse(
-      readFileSync(join(app.getAppPath(), 'resources', 'tag-wiki.json'), 'utf-8')
-    ) as Record<string, { en?: string; ko?: string[] }>
-  } catch {
-    wiki = {}
-  }
-  return wiki
-}
-
-/** 사용자가 직접 단 한글 뜻 (커스텀) — DB settings 'tag_ko_user' JSON. 기본 사전보다 우선 */
+export type TagEntry = TagSuggestion
+let worker: Worker | null = null
+let sequence = 0
+let revision = 0
+let sentRevision = -1
+let usage: TagUsage | null = null
 let userKo: Record<string, string> | null = null
+interface Job {
+  id: number
+  method: 'search' | 'recommend' | 'lookup' | 'history'
+  args: unknown[]
+  resolve: (items: TagEntry[]) => void
+  reject: (error: Error) => void
+}
+let active: Job | null = null
+const queue: Job[] = []
+let timeout: ReturnType<typeof setTimeout> | undefined
+const keyFor = (name: string): string =>
+  name.normalize('NFC').trim().toLowerCase().replace(/_/g, ' ')
+
 function loadUserKo(): Record<string, string> {
   if (userKo) return userKo
   try {
-    userKo = JSON.parse(getSetting('tag_ko_user') ?? '{}') as Record<string, string>
+    const parsed = JSON.parse(getSetting('tag_ko_user') ?? '{}')
+    userKo =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (Object.fromEntries(
+            Object.entries(parsed).filter(([, v]) => typeof v === 'string')
+          ) as Record<string, string>)
+        : {}
   } catch {
     userKo = {}
   }
   return userKo
 }
-
+function loadUsage(): TagUsage {
+  if (usage) return usage
+  usage = {}
+  try {
+    const parsed = JSON.parse(getSetting('tag_usage_v1') ?? '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [tag, raw] of Object.entries(parsed)) {
+        const u = raw as { count?: unknown; lastUsed?: unknown }
+        if (
+          u &&
+          typeof u.count === 'number' &&
+          Number.isFinite(u.count) &&
+          u.count > 0 &&
+          typeof u.lastUsed === 'number' &&
+          Number.isFinite(u.lastUsed)
+        ) {
+          usage[tag] = { count: Math.min(1000000, Math.floor(u.count)), lastUsed: u.lastUsed }
+        }
+      }
+    }
+  } catch {
+    /* Malformed history must not break dictionary search. */
+  }
+  return usage
+}
+function fail(error: Error): void {
+  clearTimeout(timeout)
+  const old = worker
+  worker = null
+  sentRevision = -1
+  active?.reject(error)
+  active = null
+  for (const job of queue.splice(0)) job.reject(error)
+  if (old) {
+    old.removeAllListeners()
+    void old.terminate()
+  }
+}
+function startWorker(): Worker {
+  if (worker) return worker
+  // SQLite needs a real filesystem path; resources/** is unpacked by the builder.
+  const root = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked')
+  const next = new Worker(join(__dirname, 'tag-search-worker.js'), {
+    workerData: { path: join(root, 'resources', 'tag-search.sqlite') }
+  })
+  worker = next
+  next.unref()
+  next.on('error', fail)
+  next.on('exit', (code) => {
+    if (worker === next) fail(new Error(`Tag worker exited (${code})`))
+  })
+  next.on('message', (message: { id: number; result?: TagEntry[]; error?: string }) => {
+    if (message.id !== active?.id) return
+    clearTimeout(timeout)
+    const job = active
+    active = null
+    if (message.error) job.reject(new Error(message.error))
+    else job.resolve(message.result ?? [])
+    pump()
+  })
+  return next
+}
+function pump(): void {
+  if (active || !queue.length) return
+  active = queue.shift()!
+  try {
+    const w = startWorker()
+    const personal =
+      sentRevision !== revision ? { ko: loadUserKo(), usage: loadUsage() } : undefined
+    w.postMessage({ id: active.id, method: active.method, args: active.args, personal })
+    sentRevision = revision
+    timeout = setTimeout(() => fail(new Error('Tag search timed out')), 15000)
+    timeout.unref()
+  } catch (error) {
+    fail(error instanceof Error ? error : new Error(String(error)))
+  }
+}
+function request(method: Job['method'], args: unknown[]): Promise<TagEntry[]> {
+  return new Promise((resolve, reject) => {
+    // Keep a single query in flight and only the newest pending search. Lookup
+    // and history jobs keep their ordering; every discarded search settles.
+    if (method === 'search' || method === 'recommend') {
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (queue[i].method === 'search' || queue[i].method === 'recommend')
+          queue.splice(i, 1)[0].resolve([])
+      }
+    }
+    if (queue.length >= 64) {
+      reject(new Error('Tag search is busy'))
+      return
+    }
+    queue.push({ id: ++sequence, method, args, resolve, reject })
+    pump()
+  })
+}
 export function setUserTagKo(tag: string, ko: string): void {
-  const map = loadUserKo()
-  const key = tag.trim().toLowerCase().replace(/_/g, ' ')
+  const map = { ...loadUserKo() },
+    key = keyFor(tag)
   if (ko.trim()) map[key] = ko.trim()
   else delete map[key]
   setSetting('tag_ko_user', JSON.stringify(map))
-  // 한글 검색 색인을 다시 만들게
-  koEntries = null
+  userKo = map
+  revision++
 }
-
 export function listUserTagKo(): Record<string, string> {
   return { ...loadUserKo() }
 }
-
-/**
- * 한글 뜻 우선순위: 사용자 사전 > 기본 사전(tags-ko) > 위키 한글 별칭.
- * 사용자가 직접 단 게 있으면 그걸 보여주고 userKo로 표시한다.
- */
-function koFor(tag: string): { ko?: string; userKo?: boolean } {
-  const u = loadUserKo()[tag]
-  if (u) return { ko: u, userKo: true }
-  const base = loadKo().map[tag]
-  if (base) return { ko: base }
-  const w = loadWiki()[tag]?.ko
-  if (w?.length) return { ko: w.join('/') }
-  return {}
+export function lookupTags(names: string[]): Promise<TagEntry[]> {
+  return request('lookup', [names])
 }
-
-/** 결과 항목에 한글 뜻·영어 설명을 붙인다 */
-function enrich(t: TagEntry): TagEntry {
-  const k = koFor(t.tag)
-  const desc = loadWiki()[t.tag]?.en
-  return { ...t, ...k, ...(desc ? { desc } : {}) }
+export function searchTags(query: string, limit = 10): Promise<TagEntry[]> {
+  return request('search', [query, limit])
 }
-
-const HANGUL = /[가-힣]/
-
-/** 태그명 목록 → 정보 조회 (태그 탐색기용). 존재하지 않는 태그는 제외 */
-export function lookupTags(names: string[]): TagEntry[] {
-  const all = load()
-  const byTag = new Map(all.map((t) => [t.tag, t]))
-  const result: TagEntry[] = []
-  for (const name of names) {
-    const t = byTag.get(name)
-    if (!t) continue
-    result.push(enrich(t))
-  }
-  return result
+export function recommendTags(query: string, limit = 10): Promise<TagEntry[]> {
+  return request('recommend', [query, limit])
 }
-
-// 퍼지 매칭 대상 — 인기 상위 태그의 발음 키 (lazy 1회 계산)
-const FUZZY_POOL_SIZE = 60000
-let fuzzyPool: { entry: TagEntry; key: string }[] | null = null
-
-function loadFuzzyPool(): { entry: TagEntry; key: string }[] {
-  if (fuzzyPool) return fuzzyPool
-  fuzzyPool = load()
-    .slice(0, FUZZY_POOL_SIZE)
-    .map((entry) => ({ entry, key: englishKey(entry.tag) }))
-    .filter((p) => p.key.length >= 2)
-  return fuzzyPool
+export function historyTags(mode: 'recent' | 'frequent', limit = 12): Promise<TagEntry[]> {
+  return request('history', [mode, limit])
 }
-
-/** 발음 키 퍼지 매칭 — "미드리프트"→midriff, 영어 오타 보완용 */
-function fuzzySearch(queryKey: string, limit: number, excludeTags: Set<string>): TagEntry[] {
-  if (queryKey.length < 3) return []
-  const scored: { entry: TagEntry; score: number }[] = []
-  for (const { entry, key } of loadFuzzyPool()) {
-    if (excludeTags.has(entry.tag)) continue
-    if (Math.abs(key.length - queryKey.length) > 4) continue // 길이 차 크면 스킵 (성능+정확도)
-    const score = keySimilarity(queryKey, key)
-    if (score >= 0.55) scored.push({ entry, score })
-  }
-  // 유사도 → 인기순
-  scored.sort((a, b) => b.score - a.score || b.entry.count - a.entry.count)
-  return scored.slice(0, limit).map(({ entry }) => enrich(entry))
-}
-
-export function searchTags(query: string, limit = 8): TagEntry[] {
-  const q = query.trim().toLowerCase().replace(/_/g, ' ')
-  if (q.length < 1) return []
-
-  // 한글 질의 — 1) 한글 사전 뜻 매칭 (인기순, 띄어쓴 단어는 AND: "핑크 동공")
-  //           2) 부족하면 음차 퍼지 매칭으로 채움
-  if (HANGUL.test(q)) {
-    const { entries } = loadKo()
-    const words = q.split(/\s+/).filter(Boolean)
-    const hits: TagEntry[] = []
-    for (const { entry, ko } of entries) {
-      if (words.every((w) => ko.includes(w) || entry.tag.includes(w))) {
-        hits.push(enrich({ ...entry, ko }))
-        if (hits.length >= limit) break
-      }
-    }
-    if (hits.length < limit) {
-      const seen = new Set(hits.map((h) => h.tag))
-      hits.push(...fuzzySearch(hangulKey(q), limit - hits.length, seen))
-    }
-    return hits
-  }
-
-  if (q.length < 2) return []
-  const all = load()
-
-  const prefix: TagEntry[] = []
-  const substring: TagEntry[] = []
-  for (const t of all) {
-    if (t.tag.startsWith(q)) {
-      prefix.push(t)
-      if (prefix.length >= limit) break
-    } else if (substring.length < limit && t.tag.includes(q)) {
-      substring.push(t)
+export async function recordTagUse(name: string): Promise<void> {
+  const tag = keyFor(name)
+  if (!(await lookupTags([tag])).length) return
+  const previous = loadUsage()
+  const next = {
+    ...previous,
+    [tag]: {
+      count: Math.min(1000000, (previous[tag]?.count ?? 0) + 1),
+      lastUsed: Math.max(Date.now(), ...Object.values(previous).map((u) => u.lastUsed + 1))
     }
   }
-  // 영어 결과에도 한글 뜻·설명을 붙여준다
-  const results = [...prefix, ...substring].slice(0, limit).map(enrich)
-  // 정확 매칭이 부족하면 오타 등을 퍼지로 보완
-  if (results.length < Math.min(3, limit)) {
-    const seen = new Set(results.map((r) => r.tag))
-    results.push(...fuzzySearch(englishKey(q), limit - results.length, seen))
-  }
-  return results
+  const bounded = Object.fromEntries(
+    Object.entries(next)
+      .sort((a, b) => b[1].lastUsed - a[1].lastUsed)
+      .slice(0, 500)
+  )
+  setSetting('tag_usage_v1', JSON.stringify(bounded))
+  usage = bounded
+  revision++
+}
+export function clearTagUsage(): void {
+  setSetting('tag_usage_v1', '{}')
+  usage = {}
+  revision++
+}
+export function shutdownTagSearch(): void {
+  fail(new Error('Tag search stopped'))
 }

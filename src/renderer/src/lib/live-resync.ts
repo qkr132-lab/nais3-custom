@@ -3,6 +3,7 @@ import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useScenesStore } from '../stores/scenes-store'
+import { toast } from '../stores/toast-store'
 
 /**
  * 생성 중 편집 자동 반영 (커스텀).
@@ -14,13 +15,15 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 function schedule(): void {
   const items = useGenerationStore.getState().queue?.items ?? []
-  const generating = items.some((i) => i.state === 'generating')
   const hasPending = items.some((i) => i.state === 'pending')
-  if (!generating || !hasPending) return // 생성 중 + 대기 있을 때만 의미 있음
+  if (!hasPending) return
   if (timer) clearTimeout(timer)
   timer = setTimeout(() => {
     timer = null
-    void useScenesStore.getState().resyncPendingScenes()
+    void useScenesStore
+      .getState()
+      .resyncPendingScenes()
+      .catch(() => toast('대기 중인 생성에 변경을 반영하지 못했어요. 다시 적용해 주세요.', 'error'))
   }, 500)
 }
 
@@ -34,6 +37,23 @@ export function initLiveResync(): void {
   // 메인 프롬프트/설정 + i2i 소스 (queue 변경 등 무관한 갱신은 걸러낸다)
   useGenerationStore.subscribe((s, p) => {
     if (s.request !== p.request || s.source !== p.source) schedule()
+  })
+  useScenesStore.subscribe((s, p) => {
+    if (s.scenes === p.scenes) return
+    const previous = new Map(p.scenes.map((scene) => [scene.id, scene]))
+    if (
+      s.scenes.some((scene) => {
+        const old = previous.get(scene.id)
+        return (
+          old &&
+          (scene.prompt !== old.prompt ||
+            scene.negativePrompt !== old.negativePrompt ||
+            JSON.stringify(scene.censorKinds) !== JSON.stringify(old.censorKinds) ||
+            JSON.stringify(scene.censorWeights) !== JSON.stringify(old.censorWeights))
+        )
+      })
+    )
+      schedule()
   })
   // 캐릭터 탭 — 카드 프롬프트/순서
   useCharactersStore.subscribe((s, p) => {

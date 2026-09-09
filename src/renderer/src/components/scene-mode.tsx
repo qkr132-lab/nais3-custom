@@ -1,3 +1,5 @@
+import { normalizeCensors } from '@shared/censor-tags'
+import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -28,6 +30,7 @@ import {
   RotateCcw,
   Scissors,
   SlidersHorizontal,
+  ShieldCheck,
   Sparkles,
   Star,
   Trash2,
@@ -470,6 +473,7 @@ function SceneGrid(): React.JSX.Element {
   const setAdditionsEnabled = useSceneExtrasStore((s) => s.setAdditionsEnabled)
   const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [censorSceneIds, setCensorSceneIds] = useState<number[] | null>(null)
   const [additionSceneIds, setAdditionSceneIds] = useState<number[] | null>(null)
   const [hideBulkBarForPainting, setHideBulkBarForPainting] = useState(false)
 
@@ -914,6 +918,30 @@ function SceneGrid(): React.JSX.Element {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
+        <Button
+          size="sm"
+          onClick={() => {
+            if (selection.size) setCensorSceneIds([...selection])
+            else setEditMode(true)
+          }}
+          disabled={scenes.length === 0}
+        >
+          <ShieldCheck size={14} />{' '}
+          {selection.size ? `선택 ${selection.size}개 검열 설정` : '검열할 씬 선택'}
+        </Button>
+        <span className="text-muted">
+          검열 태그 적용 {scenes.filter((s) => normalizeCensors(s.censorKinds).length > 0).length}/
+          {scenes.length}개
+        </span>
+        {selectionActive && <span className="text-muted">Shift로 범위 선택</span>}
+      </div>
+      {censorSceneIds && (
+        <SceneCensorDialog
+          scenes={scenes.filter((s) => censorSceneIds.includes(s.id))}
+          onClose={() => setCensorSceneIds(null)}
+        />
+      )}
       <AnimatePresence initial={false}>
         {selectionActive && !hideBulkBarForPainting && (
           <motion.div
@@ -924,7 +952,7 @@ function SceneGrid(): React.JSX.Element {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
-            <BulkBar onOpenAddition={setAdditionSceneIds} />
+            <BulkBar onOpenAddition={setAdditionSceneIds} onOpenCensors={setCensorSceneIds} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -959,6 +987,7 @@ function SceneGrid(): React.JSX.Element {
                   live={scene.id === generatingSceneId ? previewPng : null}
                   generating={scene.id === generatingSceneId}
                   onOpenAddition={setAdditionSceneIds}
+                  onOpenCensors={setCensorSceneIds}
                   onExportFavorites={onExportSceneFavorites}
                   onClearImages={onClearSceneImages}
                   onBeginShiftSelection={beginShiftSelection}
@@ -1095,8 +1124,10 @@ function useFolderExport(): {
 
 /** 편집 모드 일괄 작업 바 */
 function BulkBar({
-  onOpenAddition
+  onOpenAddition,
+  onOpenCensors
 }: {
+  onOpenCensors: (sceneIds: number[]) => void
   onOpenAddition: (sceneIds: number[]) => void
 }): React.JSX.Element {
   const selection = useScenesStore((s) => s.selection)
@@ -1137,7 +1168,10 @@ function BulkBar({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-surface-2 px-3 py-2 text-[13px]">
-      <span className="font-medium text-fg">{n}개 선택</span>
+      <span className="font-medium text-ink">{n}개 선택</span>
+      <Button size="sm" disabled={disabled} onClick={() => onOpenCensors([...selection])}>
+        <ShieldCheck size={14} /> 검열 태그
+      </Button>
       <Button size="sm" variant="ghost" onClick={selectAll}>
         전체 선택
       </Button>
@@ -1484,7 +1518,8 @@ const SceneCard = memo(function SceneCard({
   onOpenAddition,
   onExportFavorites,
   onClearImages,
-  onBeginShiftSelection
+  onBeginShiftSelection,
+  onOpenCensors
 }: {
   scene: Scene
   live: string | null
@@ -1492,6 +1527,7 @@ const SceneCard = memo(function SceneCard({
   onOpenAddition: (sceneIds: number[]) => void
   onExportFavorites: (id: number) => void
   onClearImages: (id: number, name: string) => void
+  onOpenCensors: (sceneIds: number[]) => void
   onBeginShiftSelection: (sceneId: number, pointerId: number) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
@@ -1655,7 +1691,7 @@ const SceneCard = memo(function SceneCard({
             selectionActive && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
             sortable.isDragging && 'shadow-xl'
           )}
-          style={{ aspectRatio: CARD_ASPECT[cardOrientation], ...dndStyle(sortable) }}
+          style={dndStyle(sortable)}
           onPointerDown={(e) => {
             if (e.button === 0 && e.shiftKey) {
               suppressShiftClickRef.current = true
@@ -1693,184 +1729,191 @@ const SceneCard = memo(function SceneCard({
             }
           }}
         >
-          {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
-          {src ? (
-            <img
-              src={src}
-              className="h-full w-full cursor-pointer object-cover"
-              draggable={false}
-              alt=""
-            />
-          ) : (
-            <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
-              <ImageOff size={26} strokeWidth={1.3} />
-            </div>
-          )}
+          <div className="relative" style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}>
+            {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
+            {src ? (
+              <img
+                src={src}
+                className="h-full w-full cursor-pointer object-cover"
+                draggable={false}
+                alt=""
+              />
+            ) : (
+              <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
+                <ImageOff size={26} strokeWidth={1.3} />
+              </div>
+            )}
 
-          {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
-          {generating && !live && (
-            <div className="absolute inset-0 grid place-items-center bg-black/40">
-              <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
-            </div>
-          )}
+            {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
+            {generating && !live && (
+              <div className="absolute inset-0 grid place-items-center bg-black/40">
+                <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
+              </div>
+            )}
 
-          {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
-          {badgeCount > 0 && (
-            <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
-              {badgeCount}
-            </span>
-          )}
+            {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
+            {badgeCount > 0 && (
+              <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
+                {badgeCount}
+              </span>
+            )}
 
-          {/* 씬별 variety+ 적용 표시 (커스텀) */}
-          {scene.varietyPlus && (
-            <span
-              className={cn(
-                'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
-                badgeCount > 0 ? 'left-9' : 'left-1.5'
-              )}
-              title="이 씬은 Variety+가 적용됩니다"
-            >
-              <Sparkles size={10} /> V+
-            </span>
-          )}
+            {/* 씬별 variety+ 적용 표시 (커스텀) */}
+            {scene.varietyPlus && (
+              <span
+                className={cn(
+                  'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
+                  badgeCount > 0 ? 'left-9' : 'left-1.5'
+                )}
+                title="이 씬은 Variety+가 적용됩니다"
+              >
+                <Sparkles size={10} /> V+
+              </span>
+            )}
 
-          {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
-          {additionsEnabled && !editMode && (
-            <button
-              className={cn(
-                'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
-                badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
-                additionCount > 0
-                  ? 'bg-accent text-white hover:bg-accent/85'
-                  : 'bg-black/60 text-white/90 hover:bg-black/80'
-              )}
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenAddition([scene.id])
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
-            >
-              <UserPlus size={14} />
-              {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
-            </button>
-          )}
+            {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
+            {additionsEnabled && !editMode && (
+              <button
+                className={cn(
+                  'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
+                  badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
+                  additionCount > 0
+                    ? 'bg-accent text-white hover:bg-accent/85'
+                    : 'bg-black/60 text-white/90 hover:bg-black/80'
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onOpenAddition([scene.id])
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
+              >
+                <UserPlus size={14} />
+                {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
+              </button>
+            )}
 
-          {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
-          {selectionActive ? (
-            <span
-              className={cn(
-                'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
-                checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
-              )}
-            >
-              {checked && <span className="text-[11px] leading-none">✓</span>}
-            </span>
-          ) : (
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+            {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
+            {selectionActive ? (
+              <span
+                className={cn(
+                  'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
+                  checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
+                )}
+              >
+                {checked && <span className="text-[11px] leading-none">✓</span>}
+              </span>
+            ) : (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <MoreVertical size={14} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  className="w-40 p-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MenuItem
+                    icon={<Pencil size={13} />}
+                    label="이름 변경"
+                    onClick={() => void renameScene()}
+                  />
+                  <MenuItem
+                    icon={<Copy size={13} />}
+                    label="복제"
+                    onClick={() => void duplicate(scene.id)}
+                  />
+                  <MenuItem
+                    icon={<FolderOpen size={13} />}
+                    label="폴더 열기"
+                    onClick={() => void openFolder()}
+                  />
+                  <MenuItem
+                    icon={<Trash2 size={13} />}
+                    label="삭제"
+                    danger
+                    onClick={() => void removeScene()}
+                  />
+                </PopoverContent>
+              </Popover>
+            )}
+
+            {/* 하단 그라디언트 + 이름 + 예약 +/- */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
+              <div className="pointer-events-auto flex items-end justify-between gap-1">
+                <div className="min-w-0">
+                  {editMode ? (
+                    <input
+                      className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
+                      value={scene.name}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onChange={(e) => void update(scene.id, { name: e.target.value })}
+                    />
+                  ) : (
+                    <div className="truncate text-[13px] font-semibold text-white drop-shadow">
+                      {scene.name}
+                    </div>
+                  )}
+                  {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
+                  {(scene.imageCount > 0 || scene.exportNo != null) && (
+                    <div className="mt-1 flex items-center gap-1">
+                      {scene.exportNo != null && (
+                        <button
+                          className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
+                          title="클릭해서 씬 번호 수정"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void editSingleSceneNumber()
+                          }}
+                        >
+                          {String(scene.exportNo).padStart(2, '0')}
+                        </button>
+                      )}
+                      {scene.imageCount > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
+                          <ImageIcon size={12} />
+                          {scene.imageCount}장
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {/* 예약 +/- */}
+                <div
+                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
                   onClick={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
                 >
-                  <MoreVertical size={14} />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-40 p-1" onClick={(e) => e.stopPropagation()}>
-                <MenuItem
-                  icon={<Pencil size={13} />}
-                  label="이름 변경"
-                  onClick={() => void renameScene()}
-                />
-                <MenuItem
-                  icon={<Copy size={13} />}
-                  label="복제"
-                  onClick={() => void duplicate(scene.id)}
-                />
-                <MenuItem
-                  icon={<FolderOpen size={13} />}
-                  label="폴더 열기"
-                  onClick={() => void openFolder()}
-                />
-                <MenuItem
-                  icon={<Trash2 size={13} />}
-                  label="삭제"
-                  danger
-                  onClick={() => void removeScene()}
-                />
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* 하단 그라디언트 + 이름 + 예약 +/- */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
-            <div className="pointer-events-auto flex items-end justify-between gap-1">
-              <div className="min-w-0">
-                {editMode ? (
-                  <input
-                    className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
-                    value={scene.name}
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onChange={(e) => void update(scene.id, { name: e.target.value })}
-                  />
-                ) : (
-                  <div className="truncate text-[13px] font-semibold text-white drop-shadow">
-                    {scene.name}
-                  </div>
-                )}
-                {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
-                {(scene.imageCount > 0 || scene.exportNo != null) && (
-                  <div className="mt-1 flex items-center gap-1">
-                    {scene.exportNo != null && (
-                      <button
-                        className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
-                        title="클릭해서 씬 번호 수정"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void editSingleSceneNumber()
-                        }}
-                      >
-                        {String(scene.exportNo).padStart(2, '0')}
-                      </button>
-                    )}
-                    {scene.imageCount > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
-                        <ImageIcon size={12} />
-                        {scene.imageCount}장
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-              {/* 예약 +/- */}
-              <div
-                className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <button
-                  className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
-                  // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
-                  disabled={scene.reserveCount + queueRemaining === 0}
-                  onClick={() => void adjustReserve(scene.id, -1)}
-                >
-                  <Minus size={13} />
-                </button>
-                <span className="min-w-4 text-center text-[12px] font-medium text-white">
-                  {scene.reserveCount}
-                </span>
-                <button
-                  className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
-                  onClick={() => void adjustReserve(scene.id, 1)}
-                >
-                  <Plus size={13} />
-                </button>
+                  <button
+                    className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
+                    // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
+                    disabled={scene.reserveCount + queueRemaining === 0}
+                    onClick={() => void adjustReserve(scene.id, -1)}
+                  >
+                    <Minus size={13} />
+                  </button>
+                  <span className="min-w-4 text-center text-[12px] font-medium text-white">
+                    {scene.reserveCount}
+                  </span>
+                  <button
+                    className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
+                    onClick={() => void adjustReserve(scene.id, 1)}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+          <CensorStatus scene={scene} onEdit={() => onOpenCensors([scene.id])} />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>

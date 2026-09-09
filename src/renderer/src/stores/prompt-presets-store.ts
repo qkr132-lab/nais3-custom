@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { GenerationRequest, PresetParams, PromptPreset } from '@shared/types'
 import { useGenerationStore } from './generation-store'
+import { toast } from './toast-store'
+import { normalizePromptParts } from '@shared/prompt-state'
 
 /** 프리셋에 함께 저장/복원되는 파라미터 (시드·캐릭터 제외) */
 export function pickPresetParams(req: GenerationRequest): PresetParams {
@@ -27,7 +29,25 @@ export function presetPromptParts(p: Pick<PromptPreset, 'prompt' | 'params'>): {
   additional: string
   detail: string
 } {
-  return p.params?.promptParts ?? { base: p.prompt, additional: '', detail: '' }
+  return normalizePromptParts(p.params?.promptParts, p.prompt)
+}
+
+/** Snapshot before changing preset ownership; pending debounce must not lose edits. */
+export function saveActivePromptPreset(): void {
+  const state = usePromptPresetsStore.getState()
+  const preset = state.presets.find((p) => p.id === state.activeId)
+  if (!state.loaded || !preset) return
+  const request = useGenerationStore.getState().request
+  const params = pickPresetParams(request)
+  if (
+    preset.prompt === request.prompt &&
+    preset.negativePrompt === request.negativePrompt &&
+    JSON.stringify(preset.params) === JSON.stringify(params)
+  )
+    return
+  void state
+    .update(preset.id, { prompt: request.prompt, negativePrompt: request.negativePrompt, params })
+    .catch(() => toast('프롬프트 프리셋을 저장하지 못했어요.', 'error'))
 }
 
 interface PromptPresetsState {
@@ -57,6 +77,7 @@ export const usePromptPresetsStore = create<PromptPresetsState>((set, get) => ({
   loaded: false,
   activeId: Number(localStorage.getItem('prompt_preset_active')) || null,
   setActive: (activeId) => {
+    if (get().activeId !== activeId) saveActivePromptPreset()
     set({ activeId })
     if (activeId == null) localStorage.removeItem('prompt_preset_active')
     else localStorage.setItem('prompt_preset_active', String(activeId))
@@ -100,6 +121,7 @@ export const usePromptPresetsStore = create<PromptPresetsState>((set, get) => ({
       const next = rest[Math.max(0, idx - 1)]
       get().setActive(next.id)
       useGenerationStore.getState().patchRequest({
+        ...next.params,
         prompt: next.prompt,
         negativePrompt: next.negativePrompt,
         promptParts: presetPromptParts(next)

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "snapshotDate": "2026-04-08",
+  "wikiDate": "2026-03-10",
+  "tags": 1008238,
+  "koreanTags": 14712,
+  "koreanAliases": 23332,
+  "englishAliases": 38207,
+  "terms": 162328,
+  "composedForms": 4818,
+  "curatedEntries": 172,
+  "relatedMappings": 473,
+  "legacyTags": 4432,
+  "excludedCurated": [],
+  "sourceHashes": {
+    "data_aliases.json": "2358ae9ab70d28a89c8b6713a4946111e13fb98dbe43a6384e546ae5ff079aed",
+    "data_all-tags.json": "6fea97620451629897dc9a4f5bb3dca6917bea762c00885e028f033647c420da",
+    "snapshot.sqlite": "62d8075cbeecda7225cb3f4b29551ad4ebc85682d79551e97afdd2066eecbbd9",
+    "wiki.parquet": "eb4107e68654b7196d431ab5d7cf7ecd333f03a5d9637bd81219728507e0921a"
+  },
+  "databaseSha256": "fa1449195bdadd3df871cab13375362beb1ed4b23e90d7d938618f1518b17cf3",
+  "databaseBytes": 205434880
+}

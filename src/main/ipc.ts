@@ -1,3 +1,4 @@
+import { setSceneCensors } from './scenes/repo'
 import {
   app,
   BrowserWindow,
@@ -153,7 +154,15 @@ import {
   reorderRefs,
   updateRefImage
 } from './refs/repo'
-import { lookupTags, searchTags, listUserTagKo, setUserTagKo } from './tags'
+import {
+  lookupTags,
+  recommendTags,
+  listUserTagKo,
+  setUserTagKo,
+  recordTagUse,
+  historyTags,
+  clearTagUsage
+} from './tags'
 import {
   cancelUpload,
   clearUploadHistory,
@@ -394,6 +403,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     updateScene(id, patch)
     if (patch.name !== undefined) scheduleSyncForScenes([id])
   })
+  handle('scenes:setCensors', ({ ids, changes }) => ({ items: setSceneCensors(ids, changes) }))
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
   handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
   handle('scenes:bulkCopy', ({ ids, presetId }) => {
@@ -609,8 +619,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     deleteFragmentFolder(id)
   })
 
-  handle('tags:search', ({ query, limit }) => ({ items: searchTags(query, limit) }))
-  handle('tags:lookup', ({ tags }) => ({ items: lookupTags(tags) }))
+  handle('tags:search', async ({ query, limit }) => ({ items: await recommendTags(query, limit) }))
+  handle('tags:recordUse', ({ tag }) => recordTagUse(tag))
+  handle('tags:history', async ({ mode, limit }) => ({ items: await historyTags(mode, limit) }))
+  handle('tags:clearHistory', () => clearTagUsage())
+  handle('tags:lookup', async ({ tags }) => ({ items: await lookupTags(tags) }))
   handle('tags:setKo', ({ tag, ko }) => {
     setUserTagKo(tag, ko)
   })

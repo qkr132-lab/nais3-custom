@@ -85,7 +85,7 @@ export const useMetadataStore = create<MetadataState>((set, get) => ({
           detail: m.promptParts.detail
         }
         patch.prompt = mergePromptParts(promptParts)
-        if (gen.promptSplitEnabled) patch.promptParts = promptParts
+        patch.promptParts = promptParts
       } else {
         const prompt = q ? stripQuality(m.prompt) : m.prompt
         if (gen.promptSplitEnabled) {

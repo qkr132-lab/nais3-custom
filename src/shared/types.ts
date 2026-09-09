@@ -123,6 +123,8 @@ export interface GenerationRequest {
   sceneBaseNegativePrompt?: string
   /** 분할 프롬프트 사용 시 예약 당시 가변(additional) 원문 */
   sceneBaseAdditionalPrompt?: string
+  /** Original split fields, before generation-time censor normalization. */
+  sceneBasePromptParts?: PromptParts
   /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
@@ -287,14 +289,7 @@ export const FOLDER_COLORS = [
 export type CharacterCardPatch = Partial<
   Pick<
     CharacterCard,
-    | 'name'
-    | 'prompt'
-    | 'negativePrompt'
-    | 'enabled'
-    | 'center'
-    | 'charRefId'
-    | 'role'
-    | 'slotNo'
+    'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId' | 'role' | 'slotNo'
   >
 >
 
@@ -420,6 +415,11 @@ export interface PromptPreset {
 
 /** 씬 (미리 저장한 프롬프트+해상도. 예약 수만큼 생성) */
 export interface Scene {
+  /** Separate generation-time censor controls. Missing in older exports = off. */
+  censorKinds?: import('./censor-tags').CensorKind[]
+  censorWeights?: import('./censor-tags').CensorWeights
+  /** Independent negative-prompt suppression. Missing in older scenes = off. */
+  suppressAnal?: boolean
   id: number
   presetId: number
   name: string
@@ -590,19 +590,14 @@ export interface IpcInvokeMap {
   'frags:folderDelete': { req: { id: number }; res: void }
   'tags:search': {
     req: { query: string; limit?: number }
-    res: {
-      items: {
-        tag: string
-        count: number
-        type: string
-        ko?: string
-        /** 단보루 위키 영어 설명 (커스텀) */
-        desc?: string
-        /** 사용자가 직접 단 한글 뜻 */
-        userKo?: boolean
-      }[]
-    }
+    res: { items: import('./tag-search').TagSuggestion[] }
   }
+  'tags:recordUse': { req: { tag: string }; res: void }
+  'tags:history': {
+    req: { mode: 'recent' | 'frequent'; limit?: number }
+    res: { items: import('./tag-search').TagSuggestion[] }
+  }
+  'tags:clearHistory': { req: void; res: void }
   /** 사용자 한글 뜻 달기 (커스텀) — 빈 문자열이면 지운다 */
   'tags:setKo': { req: { tag: string; ko: string }; res: void }
   'tags:listUserKo': { req: void; res: { entries: Record<string, string> } }
@@ -726,6 +721,9 @@ export interface IpcInvokeMap {
           | 'sourcePos'
           | 'targetPos'
           | 'exportNo'
+          | 'censorKinds'
+          | 'censorWeights'
+          | 'suppressAnal'
         >
       >
     }
@@ -733,6 +731,17 @@ export interface IpcInvokeMap {
   }
   /** 씬 내보내기 번호 일괄 부여 (커스텀) — ids 순서대로 start부터 순번. start=null이면 번호 제거 */
   'scenes:assignExportNumbers': { req: { ids: number[]; start: number | null }; res: void }
+  'scenes:setCensors': {
+    req: { ids: number[]; changes: import('./censor-tags').CensorChanges }
+    res: {
+      items: {
+        id: number
+        censorKinds: import('./censor-tags').CensorKind[]
+        censorWeights: import('./censor-tags').CensorWeights
+        suppressAnal: boolean
+      }[]
+    }
+  }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
   /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
   'scenes:duplicatePreset': { req: { id: number }; res: { id: number } }

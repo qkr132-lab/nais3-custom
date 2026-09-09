@@ -3,9 +3,10 @@ import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   pickPresetParams,
   presetPromptParts,
+  saveActivePromptPreset,
   usePromptPresetsStore
 } from '../stores/prompt-presets-store'
-import { mergePromptParts, useGenerationStore } from '../stores/generation-store'
+import { useGenerationStore } from '../stores/generation-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { SortableList, SortableRow } from './sortable-list'
@@ -27,8 +28,6 @@ export function PromptPresetBar(): React.JSX.Element {
   const remove = usePromptPresetsStore((s) => s.remove)
   const reorder = usePromptPresetsStore((s) => s.reorder)
   const request = useGenerationStore((s) => s.request)
-  const currentPrompt = request.prompt
-  const currentNegative = request.negativePrompt
   const patch = useGenerationStore((s) => s.patchRequest)
   const [open, setOpen] = useState(false)
 
@@ -43,37 +42,38 @@ export function PromptPresetBar(): React.JSX.Element {
     if (!loaded || activeId == null) return
     clearTimeout(syncTimer.current)
     syncTimer.current = setTimeout(() => {
-      const p = usePromptPresetsStore.getState().presets.find((x) => x.id === activeId)
-      if (!p) return
-      const params = pickPresetParams(useGenerationStore.getState().request)
-      if (
-        p.prompt !== currentPrompt ||
-        p.negativePrompt !== currentNegative ||
-        JSON.stringify(p.params) !== JSON.stringify(params)
-      ) {
-        void update(activeId, { prompt: currentPrompt, negativePrompt: currentNegative, params })
-      }
+      if (usePromptPresetsStore.getState().activeId === activeId) saveActivePromptPreset()
     }, 500)
     return () => clearTimeout(syncTimer.current)
-  }, [request, currentPrompt, currentNegative, activeId, loaded, update])
+  }, [request, activeId, loaded])
+  useEffect(
+    () => () => {
+      saveActivePromptPreset()
+    },
+    []
+  )
 
   const active = presets.find((p) => p.id === activeId)
 
   const apply = (id: number): void => {
+    if (id === activeId) {
+      saveActivePromptPreset()
+      setOpen(false)
+      return
+    }
     const p = presets.find((x) => x.id === id)
     if (!p) return
     setOpen(false) // 먼저 닫기 (B9)
     // 파라미터 + 3분할(고정/가변/디테일)도 함께 복원 (커스텀).
     // 분할 사용 중엔 합쳐진 prompt가 분할 내용과 어긋나지 않게 분할에서 다시 합친다.
     const promptParts = presetPromptParts(p)
-    const split = useGenerationStore.getState().promptSplitEnabled
+    setActive(id)
     patch({
       ...(p.params ?? {}),
       negativePrompt: p.negativePrompt,
       promptParts,
-      prompt: split ? mergePromptParts(promptParts) : p.prompt
+      prompt: p.prompt
     })
-    setActive(id)
   }
 
   return (
@@ -141,8 +141,8 @@ export function PromptPresetBar(): React.JSX.Element {
               promptParts: emptyParts
             })
             // 빈 칸으로 시작 (3분할도 비움) — 이후 편집이 이 프리셋에 자동 저장
-            patch({ prompt: '', negativePrompt: '', promptParts: emptyParts })
             setActive(id)
+            patch({ prompt: '', negativePrompt: '', promptParts: emptyParts })
             setOpen(false)
           }}
         >

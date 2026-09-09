@@ -10,6 +10,13 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
+import { mergePromptParts } from '@shared/scene-request'
+import {
+  patchPromptRequest,
+  restorePromptRequest,
+  requestForPromptMode
+} from '@shared/prompt-state'
+export { mergePromptParts } from '@shared/scene-request'
 
 /**
  * UI 상태 전용 스토어 — persist 금지 (NAIS3 원칙).
@@ -39,10 +46,6 @@ export const DEFAULT_REQUEST: GenerationRequest = {
 /** 모델이 바뀔 때 모델 의존 상한을 다른 스토어에 반영 (순환 참조 방지 — 단방향 주입) */
 function syncModelLimits(model: string): void {
   setMaxCharacters(modelCaps(model).maxCharacters)
-}
-
-export function mergePromptParts(parts: PromptParts): string {
-  return [parts.base, parts.additional, parts.detail].filter((p) => p.trim()).join(', ')
 }
 
 function withoutTransientSource(request: GenerationRequest): GenerationRequest {
@@ -147,7 +150,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   lastAnlasDelta: null,
 
   patchRequest: (patch) => {
-    const request = withoutTransientSource({ ...get().request, ...patch })
+    const request = withoutTransientSource(patchPromptRequest(get().request, patch))
     set({ request })
     if (patch.model) syncModelLimits(request.model)
     // 편집도 즉시 영속(디바운스) — 생성 안 하고 재시작해도 롤백되지 않게
@@ -167,16 +170,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     localStorage.setItem('batch_count', String(clamped))
   },
   setPromptSplitEnabled: (promptSplitEnabled) => {
-    const request = get().request
-    const promptParts =
-      request.promptParts ??
-      ({ base: request.prompt, additional: '', detail: '' } satisfies PromptParts)
-    set({ promptSplitEnabled, request: { ...request, promptParts } })
+    const request = restorePromptRequest(get().request, promptSplitEnabled)
+    set({ promptSplitEnabled, request })
     void window.nais.invoke('settings:set', {
       key: 'prompt_split_enabled',
       value: promptSplitEnabled ? '1' : '0'
     })
-    persistParams({ ...request, promptParts })
+    persistParams(request)
   },
   patchPromptParts: (patch) => {
     const prev = get().request.promptParts ?? {
@@ -198,7 +198,12 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const { value } = await window.nais.invoke('settings:get', { key: 'main_params' })
     if (value) {
       try {
-        set({ request: withoutTransientSource({ ...DEFAULT_REQUEST, ...JSON.parse(value) }) })
+        set({
+          request: restorePromptRequest(
+            withoutTransientSource({ ...DEFAULT_REQUEST, ...JSON.parse(value) }),
+            split === '1'
+          )
+        })
       } catch {
         // 손상된 저장값은 기본값으로
       }
@@ -237,7 +242,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           ]
         : undefined
     const finalRequest = {
-      ...baseRequest,
+      ...requestForPromptMode(baseRequest, get().promptSplitEnabled),
       characterPrompts,
       charRefIds,
       source: src

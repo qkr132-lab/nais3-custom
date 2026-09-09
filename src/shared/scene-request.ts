@@ -1,4 +1,34 @@
 import type { CharRole, GenerationRequest, PromptParts } from './types'
+import { commentStart } from './nai-presets'
+import {
+  withCensorTags,
+  withoutCensorDuplicates,
+  withAnalSuppression,
+  type CensorKind,
+  type CensorWeights
+} from './censor-tags'
+
+export function scenePositivePrompt(
+  base: string,
+  scene: { prompt: string; censorKinds?: CensorKind[]; censorWeights?: CensorWeights },
+  parts?: PromptParts
+): { prompt: string; promptParts?: PromptParts } {
+  if (!parts)
+    return {
+      prompt: withCensorTags(
+        appendPrompt(base, scene.prompt),
+        scene.censorKinds,
+        scene.censorWeights
+      )
+    }
+  const merged = mergeSceneIntoPromptParts(parts, scene.prompt)
+  const result = {
+    base: withoutCensorDuplicates(merged.base, scene.censorKinds, scene.censorWeights),
+    additional: withCensorTags(merged.additional, scene.censorKinds, scene.censorWeights),
+    detail: withoutCensorDuplicates(merged.detail, scene.censorKinds, scene.censorWeights)
+  }
+  return { prompt: mergePromptParts(result), promptParts: result }
+}
 
 /** 기본 프롬프트 뒤에 씬 프롬프트를 붙이되 경계의 중복 콤마만 정리한다. */
 export function appendPrompt(base: string, add: string): string {
@@ -6,7 +36,16 @@ export function appendPrompt(base: string, add: string): string {
   const a = add.trim().replace(/^,\s*/, '')
   if (!b) return a
   if (!a) return b
+  if (commentStart(b.slice(b.lastIndexOf('\n') + 1)) !== -1) return `${b}\n${a}`
   return `${b}, ${a}`
+}
+
+/** Always rebuild managed negatives from the raw fields so switching off restores them. */
+export function sceneNegativePrompt(
+  base: string,
+  scene: { negativePrompt: string; suppressAnal?: boolean }
+): string {
+  return withAnalSuppression(appendPrompt(base, scene.negativePrompt), scene.suppressAnal)
 }
 
 /** NAI 상호작용(mutual) 태그 — 행위 태그 필드에 접두사 없이 쓰면 source#/target#을 자동으로 붙인다.
@@ -106,7 +145,7 @@ export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: strin
 
 /** 3분할을 전송 프롬프트 한 줄로 (고정, 가변, 디테일 순 — 빈 칸은 건너뜀) */
 export function mergePromptParts(parts: PromptParts): string {
-  return [parts.base, parts.additional, parts.detail].filter((p) => p.trim()).join(', ')
+  return [parts.base, parts.additional, parts.detail].reduce(appendPrompt, '')
 }
 
 /** 씬에서 고른 순서를 우선하고, 나머지 기본 캐릭터를 뒤에 중복 없이 붙인다. */
@@ -204,28 +243,31 @@ export function seatSlots(
  */
 export function refreshScenePrompts(
   request: GenerationRequest,
-  latestScene: { prompt: string; negativePrompt: string }
+  latestScene: {
+    prompt: string
+    negativePrompt: string
+    censorKinds?: CensorKind[]
+    censorWeights?: CensorWeights
+    suppressAnal?: boolean
+  }
 ): GenerationRequest {
   if (request.sceneId == null || request.sceneBasePrompt == null) return request
 
-  const negativePrompt = appendPrompt(
-    request.sceneBaseNegativePrompt ?? '',
-    latestScene.negativePrompt
-  )
+  const negativePrompt = sceneNegativePrompt(request.sceneBaseNegativePrompt ?? '', latestScene)
 
   // 분할 사용 시: 씬 프롬프트를 가변 뒤·디테일 앞에 끼워 전송 프롬프트를 파츠에서 재조립.
   // (전체 병합문 끝에 붙이면 디테일 뒤 꼬리가 되어 긴 디테일에 묻힌다 — 적용 약해지던 버그)
   if (request.promptParts && request.sceneBaseAdditionalPrompt != null) {
-    const parts = mergeSceneIntoPromptParts(
-      { ...request.promptParts, additional: request.sceneBaseAdditionalPrompt },
-      latestScene.prompt
-    )
-    return { ...request, prompt: mergePromptParts(parts), negativePrompt, promptParts: parts }
+    const positive = scenePositivePrompt(request.sceneBasePrompt, latestScene, {
+      ...(request.sceneBasePromptParts ?? request.promptParts),
+      additional: request.sceneBaseAdditionalPrompt
+    })
+    return { ...request, ...positive, negativePrompt }
   }
 
   return {
     ...request,
-    prompt: appendPrompt(request.sceneBasePrompt, latestScene.prompt),
+    prompt: scenePositivePrompt(request.sceneBasePrompt, latestScene).prompt,
     negativePrompt,
     promptParts: request.promptParts
   }

@@ -370,6 +370,18 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 자동으로 간다. 씬별 명시 배정(slotOf)이 있으면 그쪽이 우선.
   (db) => {
     db.exec(`ALTER TABLE character_prompts ADD COLUMN slot_no INTEGER;`)
+  },
+  // v25: Per-scene censor options, independent from user-authored prompt text.
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN censor_kinds TEXT NOT NULL DEFAULT '[]';`)
+  },
+  // v26: Adjustable per-scene censor weights; absent values retain the original defaults.
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN censor_weights TEXT NOT NULL DEFAULT '{}';`)
+  },
+  // v27: Optional negative-prompt suppression, separate from white censor styling.
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN suppress_anal INTEGER NOT NULL DEFAULT 0;`)
   }
 ]
 
@@ -396,6 +408,9 @@ export function reconcileSchema(db: Database.Database): void {
   }
   // 커스텀 마이그레이션(v12~v17)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
   ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
+  ensureColumn('gen_scenes', 'censor_kinds', "censor_kinds TEXT NOT NULL DEFAULT '[]'")
+  ensureColumn('gen_scenes', 'censor_weights', "censor_weights TEXT NOT NULL DEFAULT '{}'")
+  ensureColumn('gen_scenes', 'suppress_anal', 'suppress_anal INTEGER NOT NULL DEFAULT 0')
   ensureColumn('character_prompts', 'char_ref_id', 'char_ref_id INTEGER')
   ensureColumn('gen_scenes', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')

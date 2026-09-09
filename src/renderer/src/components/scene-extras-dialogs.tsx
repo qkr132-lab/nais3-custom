@@ -34,10 +34,11 @@ import { useScenesStore } from '../stores/scenes-store'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { ScenePlacementDialog } from './scene-placement-dialog'
+import { PlacementMode } from './placement-mode'
+import { seatSlots } from '@shared/scene-request'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
-import { Switch } from './ui/switch'
 
 /**
  * 씬 모드 커스텀 확장 다이얼로그 (NAIS2 Custom 이식):
@@ -446,7 +447,9 @@ function SelectionPanel({
   slotTags,
   slotChars,
   charTags,
-  baseCharacterIds}: {
+  baseCharacterIds,
+  sceneId
+}: {
   characterIds: number[]
   charRefIds: number[]
   vibeIds: number[]
@@ -462,6 +465,7 @@ function SelectionPanel({
   charTags?: Record<number, string>
   /** 캐릭터 창에서 켜져 이 씬에 함께 나가는 카드 (씬별 추가에서만 씀) */
   baseCharacterIds?: number[]
+  sceneId?: number
 }): React.JSX.Element {
   const vibes = useVibesStore((s) => s.items)
   const vibeFolders = useVibesStore((s) => s.folders)
@@ -506,6 +510,7 @@ function SelectionPanel({
       </div>
       <RolePanel characterIds={characterIds} roles={roles} onPatch={onPatch} />
       <PositionPanel
+        sceneId={sceneId}
         characterIds={characterIds}
         useCoords={useCoords}
         positions={positions}
@@ -626,6 +631,7 @@ function PositionPanel({
   charTags,
   baseCharacterIds,
   roles,
+  sceneId,
   onPatch
 }: {
   characterIds: number[]
@@ -639,12 +645,18 @@ function PositionPanel({
   charTags?: Record<number, string>
   baseCharacterIds?: number[]
   roles?: CharRoles
+  sceneId?: number
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element {
   const items = useCharactersStore((s) => s.items)
-  const chars = characterIds
+  const scene = useScenesStore((s) => s.scenes.find((item) => item.id === sceneId))
+  const chars = [...new Set([...characterIds, ...(baseCharacterIds ?? [])])]
     .map((id) => items.find((c) => c.id === id))
-    .filter((c): c is CharacterCard => !!c)
+    .filter((c): c is CharacterCard => !!c && !!c.prompt.trim())
+  const seating = seatSlots(
+    chars.map((c) => ({ id: c.id, slotNo: c.slotNo, role: roles?.[c.id] ?? c.role })),
+    { slots, slotOf, slotChars, slotRoles }
+  )
 
   const [boardOpen, setBoardOpen] = useState(false)
 
@@ -658,10 +670,12 @@ function PositionPanel({
 
   return (
     <div className="rounded-md border border-line bg-paper p-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Crosshair size={13} className="text-muted" />
         <span className="text-[12px] font-medium text-muted">위치 적용</span>
-        <span className="text-[11px] text-faint">캐릭터 배치 좌표 (NAI 다중 캐릭터)</span>
+        <span className="text-[11px] text-faint">
+          {scene ? `${scene.width}×${scene.height}` : '큐 배치 — 실제 비율은 각 씬 해상도에 따름'}
+        </span>
         <div className="flex-1" />
         <Button
           size="sm"
@@ -672,8 +686,8 @@ function PositionPanel({
         >
           <Maximize2 size={12} /> 넓게 배치
         </Button>
-        <Switch checked={!!useCoords} onCheckedChange={(v) => onPatch({ useCoords: v })} />
       </div>
+      <PlacementMode value={useCoords} onChange={(v) => onPatch({ useCoords: v })} />
       <ScenePlacementDialog
         open={boardOpen}
         onOpenChange={setBoardOpen}
@@ -688,9 +702,11 @@ function PositionPanel({
         charTags={charTags}
         baseCharacterIds={baseCharacterIds}
         roles={roles}
+        sceneSize={scene ? { width: scene.width, height: scene.height } : undefined}
+        rolePositions={scene ? { source: scene.sourcePos, target: scene.targetPos } : undefined}
         onPatch={onPatch}
       />
-      {useCoords &&
+      {useCoords !== false &&
         (chars.length === 0 ? (
           <p className="mt-2 text-[11.5px] text-faint">
             캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.
@@ -700,7 +716,14 @@ function PositionPanel({
             {chars.map((c, i) => {
               const pos = positions?.[c.id]
               // 미지정은 0.5 — 카드 기본 좌표는 씬 생성에 쓰이지 않는다
-              const center = pos ?? { x: 0.5, y: 0.5 }
+              const role = roles?.[c.id] ?? c.role
+              const center = pos ??
+                (role === 'source'
+                  ? scene?.sourcePos
+                  : role === 'target'
+                    ? scene?.targetPos
+                    : undefined) ?? { x: 0.5, y: 0.5 }
+              const seats = seating.bySlots.get(c.id) ?? []
               return (
                 <div
                   key={c.id}
@@ -718,27 +741,39 @@ function PositionPanel({
                     </span>
                   )}
                   <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
-                        title="위치 지정"
-                      >
-                        <Crosshair size={11} />
-                        {center.x},{center.y}
-                        {!pos && <span className="text-faint">(미지정)</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto">
-                      <PositionPicker center={center} onPick={(nc) => setPos(c.id, nc)} />
-                    </PopoverContent>
-                  </Popover>
-                  {pos && (
+                  {seats.length ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-[10.5px]"
+                      onClick={() => setBoardOpen(true)}
+                      title="자리 좌표가 적용 중입니다. 넓게 배치에서 자리를 편집하세요."
+                    >
+                      자리 {seats.map((s) => s + 1).join('·')} 편집
+                    </Button>
+                  ) : (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
+                          title="위치 지정"
+                        >
+                          <Crosshair size={11} />
+                          {center.x.toFixed(3)},{center.y.toFixed(3)}
+                          {!pos && <span className="text-faint">(미지정)</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto">
+                        <PositionPicker center={center} onPick={(nc) => setPos(c.id, nc)} />
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                  {pos && !seats.length && (
                     <button
                       className="grid size-5 place-items-center rounded text-faint hover:text-fg"
-                      title="카드 기본 위치로"
+                      title="이 캐릭터의 개별 위치 지정 지우기"
                       onClick={() => resetPos(c.id)}
                     >
                       <RotateCcw size={11} />
@@ -949,8 +984,26 @@ export function AdditionDialog({
   )
   const patch = (p: Partial<SceneAddition>): void => {
     if (!sceneIds) return
-    const next = { ...current, ...p }
-    for (const id of sceneIds) updateAddition(presetId, id, next)
+    // 자리 번호로 묶인 필드는 일괄 편집에서도 같은 대표 배치를 통째로 복사한다.
+    const layoutKeys = ['slots', 'slotChars', 'slotOf', 'slotRoles', 'slotTags'] as const
+    const layoutChanged = layoutKeys.some((key) => Object.hasOwn(p, key))
+    const representative =
+      firstId == null
+        ? current
+        : (useSceneExtrasStore.getState().additions[presetId]?.[firstId] ?? current)
+    const layoutPatch = layoutChanged
+      ? Object.fromEntries(
+          layoutKeys.map((key) => [key, Object.hasOwn(p, key) ? p[key] : representative[key]])
+        )
+      : {}
+    for (const id of sceneIds) {
+      const latest = useSceneExtrasStore.getState().additions[presetId]?.[id] ?? {
+        characterIds: [],
+        charRefIds: [],
+        vibeIds: []
+      }
+      updateAddition(presetId, id, { ...latest, ...p, ...layoutPatch })
+    }
   }
 
   return (
@@ -1008,6 +1061,8 @@ export function AdditionDialog({
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           <SelectionPanel
+            key={firstId}
+            sceneId={firstId ?? undefined}
             characterIds={current.characterIds}
             charRefIds={current.charRefIds}
             vibeIds={current.vibeIds}

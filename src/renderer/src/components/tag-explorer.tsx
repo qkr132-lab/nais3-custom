@@ -64,6 +64,7 @@ export function TagExplorer({
       gen.patchRequest({ prompt: appendPrompt(gen.request.prompt, tag) })
     }
     toast(`프롬프트에 추가: ${tag}`, 'success')
+    void window.nais.invoke('tags:recordUse', { tag }).catch(() => {})
   }
 
   const groups = useMemo(
