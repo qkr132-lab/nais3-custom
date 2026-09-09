@@ -252,18 +252,28 @@ export function reorderCharacters(order: CharacterOrderEntry[]): void {
   })()
 }
 
-export function createFolder(name: string): number {
+export function createFolder(name: string, parentId: number | null = null): number {
   const db = getDb()
-  const max = db
-    .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders')
-    .get() as {
-    m: number
-  }
-  return Number(
-    db
-      .prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)')
-      .run(name, max.m + 1).lastInsertRowid
-  )
+  return db.transaction(() => {
+    if (parentId !== null) {
+      const parent = db
+        .prepare('SELECT parent_id FROM character_folders WHERE id = ? AND deleted_at IS NULL')
+        .get(parentId) as { parent_id: number | null } | undefined
+      if (!parent) throw new Error('상위 폴더가 없어요. 목록을 새로 열고 다시 시도해 주세요.')
+      if (parent.parent_id !== null) throw new Error('폴더는 2단계까지만 만들 수 있어요.')
+    }
+    const max = db
+      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders')
+      .get() as { m: number }
+    const id = Number(
+      db
+        .prepare('INSERT INTO character_folders (name, sort_order, parent_id) VALUES (?, ?, ?)')
+        .run(name, max.m + 1, parentId).lastInsertRowid
+    )
+    if (parentId !== null)
+      db.prepare('UPDATE character_folders SET collapsed = 0 WHERE id = ?').run(parentId)
+    return id
+  })()
 }
 
 export function renameFolder(id: number, name: string): void {

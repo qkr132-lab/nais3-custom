@@ -550,7 +550,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('chars:reorder', ({ order }) => {
     reorderCharacters(order)
   })
-  handle('chars:folderCreate', ({ name }) => ({ id: createFolder(name) }))
+  handle('chars:folderCreate', ({ name, parentId }) => ({ id: createFolder(name, parentId) }))
   handle('chars:folderRename', ({ id, name }) => {
     renameFolder(id, name)
   })

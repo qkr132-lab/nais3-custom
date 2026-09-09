@@ -68,6 +68,23 @@ export function CharacterOverlay(): React.JSX.Element {
   const patch = useGenerationStore((s) => s.patchRequest)
 
   const [search, setSearch] = useState('')
+  const addFolder = async (parentId: number | null): Promise<void> => {
+    const parent = folders.find((folder) => folder.id === parentId)
+    const name = await askText(
+      parent ? `${parent.name} 안에 하위 폴더 만들기` : '폴더 만들기',
+      '새 폴더'
+    )
+    if (!name?.trim()) return
+    try {
+      const id = await createFolder(name.trim(), parentId)
+      setSearch('')
+      requestAnimationFrame(() =>
+        document.querySelector(`[data-folder-id="${id}"]`)?.scrollIntoView({ block: 'nearest' })
+      )
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '폴더를 만들지 못했어요.', 'error')
+    }
+  }
   const [expandedId, setExpandedId] = useState<number | null>(null)
   // 레퍼런스 연결 다이얼로그 — 카드 서브트리가 아니라 오버레이 최상단에서 단 하나만 렌더 (커스텀)
   const [linkCharId, setLinkCharId] = useState<number | null>(null)
@@ -601,10 +618,11 @@ export function CharacterOverlay(): React.JSX.Element {
         <Button
           size="sm"
           variant="ghost"
-          title="폴더 추가"
-          onClick={() => void createFolder('새 폴더')}
+          title="폴더 만들기"
+          className="shrink-0 gap-1"
+          onClick={() => void addFolder(null)}
         >
-          <FolderPlus size={14} />
+          <FolderPlus size={14} /> 폴더
         </Button>
         <Button size="sm" variant="accent" className="gap-1" onClick={() => void createCard(null)}>
           <Plus size={13} /> 캐릭터
@@ -675,7 +693,8 @@ export function CharacterOverlay(): React.JSX.Element {
             exportFolder: (folderId) => void exportCharacters(folderId),
             setParent: (folderId, parentId) => void setFolderParent(folderId, parentId),
             importToFolder: (folderId) => void importCharacters(folderId),
-            addItem: (folderId) => void createCard(folderId)
+            addItem: (folderId) => void createCard(folderId),
+            addFolder: (parentId) => void addFolder(parentId)
           }}
           onMove={move}
           itemClassName={(char) =>

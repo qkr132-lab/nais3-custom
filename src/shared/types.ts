@@ -563,7 +563,7 @@ export interface IpcInvokeMap {
   'chars:pickThumbnail': { req: { id: number }; res: { thumbnail: string | null } }
   'chars:clearThumbnail': { req: { id: number }; res: void }
   'chars:reorder': { req: { order: CharacterOrderEntry[] }; res: void }
-  'chars:folderCreate': { req: { name: string }; res: { id: number } }
+  'chars:folderCreate': { req: { name: string; parentId?: number | null }; res: { id: number } }
   'chars:folderRename': { req: { id: number; name: string }; res: void }
   'chars:folderCollapse': { req: { id: number; collapsed: boolean }; res: void }
   'chars:folderColor': { req: { id: number; color: string | null }; res: void }

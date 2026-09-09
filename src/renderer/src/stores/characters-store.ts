@@ -28,7 +28,7 @@ interface CharactersState {
   duplicateCard: (id: number) => Promise<void>
   pickThumbnail: (id: number) => Promise<void>
   clearThumbnail: (id: number) => Promise<void>
-  createFolder: (name: string) => Promise<void>
+  createFolder: (name: string, parentId?: number | null) => Promise<number>
   renameFolder: (id: number, name: string) => void
   toggleCollapse: (id: number) => void
   setFolderColor: (id: number, color: string | null) => void
@@ -158,9 +158,17 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
     await window.nais.invoke('chars:clearThumbnail', { id })
   },
 
-  createFolder: async (name) => {
-    const { id } = await window.nais.invoke('chars:folderCreate', { name })
-    set({ folders: [...get().folders, { id, name, collapsed: false, color: null }] })
+  createFolder: async (name, parentId = null) => {
+    const { id } = await window.nais.invoke('chars:folderCreate', { name, parentId })
+    set({
+      folders: [
+        ...get().folders.map((folder) =>
+          folder.id === parentId ? { ...folder, collapsed: false } : folder
+        ),
+        { id, name, parentId, collapsed: false, color: null }
+      ]
+    })
+    return id
   },
 
   renameFolder: (id, name) => {

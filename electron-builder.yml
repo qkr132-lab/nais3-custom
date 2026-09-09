@@ -4,22 +4,21 @@ productName: NAIS3 Custom
 directories:
   buildResources: build
 files:
-  - '!resources/tag-search.sqlite.gz'
-  - '!resources/tag-search.sqlite.*.tmp'
-  - '!.superloopy/**'
-  - '!DESIGN.md'
-  - '!dist/**'
-  - '!tests/**'
-  - '!docs/**'
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!docs/*'
-  - '!tests/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!vitest.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,RESEARCH.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # Explicit release inputs: never include workspace files or personal databases.
+  - out/**
+  - LICENSE
+  - NOTICE-tag-search.md
+  - NOTICE-tag-wiki.md
+  - NOTICE-tokenizers.md
+  - resources/icon.png
+  - resources/qwen35_tokenizer.def
+  - resources/t5_tokenizer.json
+  - resources/tag-search-manifest.json
+  - resources/tag-search.sqlite
+  - resources/tag-wiki.json
+  - resources/tags-ko.json
+  - resources/tags.json
+afterPack: scripts/audit-release.cjs
 asarUnpack:
   - resources/**
 win:

@@ -72,3 +72,14 @@ height, 12px labels, 12px padding and existing borders/radii; keep footer visibl
 while the settings body scrolls. Reset weights is separate from enabling options.
 Tag suggestions use a single list: relevance first, then recent/frequent history,
 deduplicated by canonical tag. Remove the search/recent/frequent tab navigation.
+
+## Character subfolder actions
+Keep the compact native NAIS3 layout (variance 2, motion 1, density 7).
+Root toolbar shows a labelled FolderPlus button. Each root folder row has an
+always-visible 28px-high, 12px-label subfolder button beside its item action.
+Use 14px icons, 4px gap, 8px horizontal padding and existing ghost Button tokens.
+Stop pointer propagation so creation cannot start dragging the parent folder.
+Use the existing text dialog to name the folder; cancel makes no changes.
+Creation opens the parent and clears the search so the new row is visible.
+Retain the current two-level hierarchy; subfolder rows do not offer a third level.
+No new colors, animation, font family or decorative assets.

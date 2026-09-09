@@ -21,6 +21,7 @@ import {
   Download,
   FolderInput,
   FolderOutput,
+  FolderPlus,
   Palette,
   Pencil,
   Plus,
@@ -76,6 +77,8 @@ export interface FolderActions {
   /** 폴더를 다른 폴더 안으로 넣거나(부모 id) 밖으로 빼기(null) — 주면 메뉴에 뜬다 */
   setParent?: (id: number, parentId: number | null) => void
   addItem: (folderId: number) => void
+  /** Create a child directly, without dragging a root folder into place. */
+  addFolder?: (parentId: number) => void
 }
 
 /** dnd 변환. 리스트 모드는 y만(찌부 방지), 그리드 모드는 x·y 모두 */
@@ -158,6 +161,7 @@ function FolderRow({
         <div
           ref={sortable.setNodeRef}
           data-folder-row
+          data-folder-id={folder.id}
           style={{ ...dndStyle(sortable, false), ...tintStyle }}
           className={cn(
             'group flex h-10 items-center gap-1.5 rounded-lg px-1.5',
@@ -194,6 +198,19 @@ function FolderRow({
               {folder.name}
               <span className="ml-1.5 font-mono text-[10.5px] font-normal text-faint">{count}</span>
             </button>
+          )}
+          {actions.addFolder && depth === 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 shrink-0 gap-1 px-2 text-[12px]"
+              title={`${folder.name} 안에 하위 폴더 만들기`}
+              aria-label={`${folder.name} 안에 하위 폴더 만들기`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => actions.addFolder?.(folder.id)}
+            >
+              <FolderPlus size={14} /> 하위 폴더
+            </Button>
           )}
           {/* opacity로 숨김(display 아님) — 팝오버 열 때 트리거가 언마운트돼 앵커를 잃는 문제 방지 */}
           <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
@@ -271,6 +288,11 @@ function FolderRow({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        {actions.addFolder && depth === 0 && (
+          <ContextMenuItem onSelect={() => actions.addFolder?.(folder.id)}>
+            <FolderPlus size={14} /> 하위 폴더 만들기
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={() => actions.addItem(folder.id)}>
           <Plus size={13} /> 이 폴더에 추가
         </ContextMenuItem>
