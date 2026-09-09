@@ -188,6 +188,31 @@ export function useTagCompletion(
     }
     if (dismissActive && dismissActive.owner !== owner) dismissActive.close()
     dismissActive = { owner, close }
+    const latest = ready.current
+    if (
+      latest?.chosen &&
+      latest.range.text === text &&
+      latest.range.cursor === cursor &&
+      latest.range.start === range.start &&
+      latest.range.end === range.end &&
+      latest.range.kind === range.kind &&
+      latest.range.query === range.query
+    ) {
+      // A native IME commit can emit input/compositionend without changing the
+      // query. Retain the row chosen with arrows instead of selecting row one.
+      const enter = pendingEnter.current
+      if (enter && !enter.waitingForComposition) {
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => {
+          if (ready.current !== latest || pendingEnter.current !== enter || composing.current)
+            return
+          pendingEnter.current = null
+          const item = latest.items[latest.selected]
+          if (item) insertSuggestion(item, latest.range)
+        }, 0)
+      }
+      return
+    }
     clearTimeout(timer.current)
     const generation = ++seq.current
     context.current = range
@@ -448,7 +473,8 @@ export function useTagCompletion(
     if (arrow && latest?.items.length && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault()
       e.stopPropagation()
-      if (!finishComposition()) return
+      // Moving the highlight must not blur/commit the IME: its queued commit
+      // would otherwise append the last Korean syllable a second time.
       choose(
         arrow === 'down'
           ? (latest.selected + 1) % latest.items.length
