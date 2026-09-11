@@ -35,9 +35,22 @@ describe('씬 검열 태그', () => {
     expect(censorPrompt(['penis'])).toBe(
       '2::completely white penis censor::, -2::veiny penis, pink penis, red penis, white skin, pale skin, white nipples::'
     )
-    expect(censorPrompt(['vulva'])).toBe('2::white pussy censor::, -2::white nipples::')
-    expect(censorPrompt(['anal'])).toBe('2::white censored anal::')
-    expect(censorPrompt(['testicles'])).toBe('2::white censored testicles::, -2::white skin::')
+    expect(censorPrompt(['vulva'])).toBe('2::completely white pussy censor::, -2::white nipples::')
+    expect(censorPrompt(['anal'])).toBe('2::completely white censored anal::')
+    expect(censorPrompt(['testicles'])).toBe(
+      '2::completely white censored testicles::, -2::white skin::'
+    )
+  })
+  it('replaces older selected censor spellings without changing unselected or scoped tags', () => {
+    const original =
+      '3::white pussy censor, clouds::, white censored anal, target#white pussy censor'
+    const result = withCensorTags(original, ['vulva'])
+    expect(result).toContain('3:: clouds::')
+    expect(result).toContain('2::completely white pussy censor::')
+    expect(result).toContain('white censored anal')
+    expect(result).toContain('target#white pussy censor')
+    expect(withCensorTags(result, ['vulva'])).toBe(result)
+    expect(withCensorTags(original, [])).toBe(original)
   })
   for (let mask = 0; mask < 16; mask++) {
     it(`deduplicates combination ${mask} and repeated application`, () => {
@@ -204,7 +217,7 @@ describe('adjustable censor weights', () => {
         censorWeights: normalizeCensorWeights({ anal: 0.7 })
       }
     )
-    expect(result.prompt).toContain('0.7::white censored anal::')
+    expect(result.prompt).toContain('0.7::completely white censored anal::')
     expect(original.additional).toBe('smile')
   })
 })

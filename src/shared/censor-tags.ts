@@ -10,15 +10,15 @@ export const CENSOR_OPTIONS = [
     id: 'vulva',
     label: '외음부',
     weight: 2,
-    tag: 'white pussy censor',
+    tag: 'completely white pussy censor',
     suppress: ['white nipples']
   },
-  { id: 'anal', label: '항문', weight: 2, tag: 'white censored anal', suppress: [] },
+  { id: 'anal', label: '항문', weight: 2, tag: 'completely white censored anal', suppress: [] },
   {
     id: 'testicles',
     label: '고환',
     weight: 2,
-    tag: 'white censored testicles',
+    tag: 'completely white censored testicles',
     suppress: ['white skin']
   }
 ] as const
@@ -136,6 +136,10 @@ export function censorPrompt(value: unknown, weights?: unknown): string {
 export function withoutCensorDuplicates(prompt: string, value: unknown, weights?: unknown): string {
   const tags = censorWeights(value, weights)
   if (!tags.size) return prompt
+  // Selected controls replace their older spelling in request copies as well.
+  for (const [tag, weight] of tags) {
+    if (tag.startsWith('completely ')) tags.set(tag.slice('completely '.length), weight)
+  }
   const strip = (text: string): string =>
     text
       .split(',')
