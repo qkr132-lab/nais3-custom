@@ -61,14 +61,42 @@ window.nais = {
         }
         break
       case 'settings:get':
-        result = { value: null }
+        result = { value: localStorage.getItem(`fixture-setting-${(req as { key: string }).key}`) }
         break
       case 'r2sync:getConfig':
         result = null
         break
       case 'settings:set':
+        localStorage.setItem(
+          `fixture-setting-${(req as { key: string }).key}`,
+          (req as { value: string }).value
+        )
         break
+      case 'scenes:setBackground': {
+        if (failNext) {
+          failNext = false
+          throw new Error('테스트 저장 실패')
+        }
+        const { ids, background } = req as IpcInvokeMap['scenes:setBackground']['req']
+        records = records.map((s) => (ids.includes(s.id) ? { ...s, background } : s))
+        persist()
+        break
+      }
+      case 'scenes:duplicate': {
+        const source = records.find((s) => s.id === (req as { id: number }).id)!
+        const id = Math.max(...records.map((s) => s.id)) + 1
+        records.push({
+          ...structuredClone(source),
+          id,
+          name: `${source.name} 복제`,
+          reserveCount: 0
+        })
+        persist()
+        result = { id }
+        break
+      }
       case 'scenes:images':
+      case 'queue:pending':
         result = { items: [], total: 0 }
         break
       case 'tokens:count':

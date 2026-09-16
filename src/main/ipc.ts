@@ -1,4 +1,4 @@
-import { setSceneCensors } from './scenes/repo'
+import { setSceneCensors, setSceneBackground } from './scenes/repo'
 import {
   app,
   BrowserWindow,
@@ -403,6 +403,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     updateScene(id, patch)
     if (patch.name !== undefined) scheduleSyncForScenes([id])
   })
+  handle('scenes:setBackground', ({ ids, background }) => setSceneBackground(ids, background))
   handle('scenes:setCensors', ({ ids, changes }) => ({ items: setSceneCensors(ids, changes) }))
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
   handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))

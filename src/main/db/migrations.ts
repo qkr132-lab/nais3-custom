@@ -382,6 +382,10 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // v27: Optional negative-prompt suppression, separate from white censor styling.
   (db) => {
     db.exec(`ALTER TABLE gen_scenes ADD COLUMN suppress_anal INTEGER NOT NULL DEFAULT 0;`)
+  },
+  // v28: Separate, portable per-scene background controls.
+  (db) => {
+    db.exec(`ALTER TABLE gen_scenes ADD COLUMN background TEXT NOT NULL DEFAULT '{}';`)
   }
 ]
 
@@ -408,6 +412,7 @@ export function reconcileSchema(db: Database.Database): void {
   }
   // 커스텀 마이그레이션(v12~v17)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
   ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
+  ensureColumn('gen_scenes', 'background', "background TEXT NOT NULL DEFAULT '{}'")
   ensureColumn('gen_scenes', 'censor_kinds', "censor_kinds TEXT NOT NULL DEFAULT '[]'")
   ensureColumn('gen_scenes', 'censor_weights', "censor_weights TEXT NOT NULL DEFAULT '{}'")
   ensureColumn('gen_scenes', 'suppress_anal', 'suppress_anal INTEGER NOT NULL DEFAULT 0')

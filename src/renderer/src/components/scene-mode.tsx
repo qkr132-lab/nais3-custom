@@ -1,3 +1,4 @@
+import { SceneBackgroundDialog } from './scene-background-dialog'
 import { normalizeCensors } from '@shared/censor-tags'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import {
@@ -473,6 +474,7 @@ function SceneGrid(): React.JSX.Element {
   const setAdditionsEnabled = useSceneExtrasStore((s) => s.setAdditionsEnabled)
   const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [backgroundSceneIds, setBackgroundSceneIds] = useState<number[] | null>(null)
   const [censorSceneIds, setCensorSceneIds] = useState<number[] | null>(null)
   const [additionSceneIds, setAdditionSceneIds] = useState<number[] | null>(null)
   const [hideBulkBarForPainting, setHideBulkBarForPainting] = useState(false)
@@ -934,8 +936,27 @@ function SceneGrid(): React.JSX.Element {
           검열 태그 적용 {scenes.filter((s) => normalizeCensors(s.censorKinds).length > 0).length}/
           {scenes.length}개
         </span>
+        <Button
+          size="sm"
+          disabled={!scenes.length}
+          onClick={() => {
+            if (selection.size) setBackgroundSceneIds([...selection])
+            else setEditMode(true)
+          }}
+        >
+          {selection.size ? `선택 ${selection.size}개 배경 설정` : '배경 설정할 씬 선택'}
+        </Button>
+        <span className="text-muted">
+          배경 적용 {scenes.filter((s) => s.background?.prompt.trim()).length}/{scenes.length}개
+        </span>
         {selectionActive && <span className="text-muted">Shift로 범위 선택</span>}
       </div>
+      {backgroundSceneIds && (
+        <SceneBackgroundDialog
+          scenes={scenes.filter((s) => backgroundSceneIds.includes(s.id))}
+          onClose={() => setBackgroundSceneIds(null)}
+        />
+      )}
       {censorSceneIds && (
         <SceneCensorDialog
           scenes={scenes.filter((s) => censorSceneIds.includes(s.id))}

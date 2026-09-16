@@ -541,6 +541,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         height: patch.height,
         reserveCount: patch.reserveCount,
         varietyPlus: patch.varietyPlus,
+        background: patch.background,
         censorKinds: patch.censorKinds,
         censorWeights: patch.censorWeights,
         suppressAnal: patch.suppressAnal,

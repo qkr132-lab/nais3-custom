@@ -10,6 +10,7 @@ import {
   getScene,
   listScenes,
   setSceneCensors,
+  setSceneBackground,
   duplicateScene,
   duplicatePreset,
   bulkCopyScenes,
@@ -32,6 +33,19 @@ async function main(): Promise<void> {
   assert.deepEqual(getScene(old)?.censorKinds, [])
   assert.equal(getScene(old)?.suppressAnal, false)
   const ids = Array.from({ length: 30 }, (_, i) => createScene(1, `scene-${i}`))
+  const background = {
+    prompt: 'forest, sunlight',
+    placement: 'before-scene' as const,
+    replaceSimple: true
+  }
+  setSceneBackground(ids.slice(0, 15), background)
+  assert.equal(listScenes(1).filter((s) => s.background?.prompt).length, 15)
+  assert.throws(() => setSceneBackground([ids[0], -999], { ...background, prompt: 'beach' }))
+  assert.deepEqual(getScene(ids[0])?.background, background)
+  assert.deepEqual(getScene(duplicateScene(ids[0]))?.background, background)
+  // Remove this extra fixture copy so the existing censor-count checks stay meaningful.
+  const bgCopy = listScenes(1).find((s) => s.name === 'scene-0 복제')!
+  deleteScene(bgCopy.id)
   setSceneCensors(ids.slice(0, 15), { penis: true, testicles: true })
   assert.equal(listScenes(1).filter((s) => s.censorKinds?.length).length, 15)
   setSceneCensors([ids[0], ids[15]], { vulva: true })
@@ -61,6 +75,8 @@ async function main(): Promise<void> {
   assert.equal(listScenes(copyPreset).find((s) => s.name === 'scene-0')?.suppressAnal, true)
   const dest = createPreset('destination')
   const copied = bulkCopyScenes([ids[0]], dest)
+  assert.deepEqual(getScene(copied[0])?.background, background)
+  assert.deepEqual(listScenes(copyPreset).find((s) => s.name === 'scene-0')?.background, background)
   assert.deepEqual(getScene(copied[0])?.censorKinds, ['penis', 'vulva', 'testicles'])
   assert.equal(getScene(copied[0])?.censorWeights?.penis, 1.2)
   assert.equal(getScene(copied[0])?.suppressAnal, true)
@@ -80,6 +96,9 @@ async function main(): Promise<void> {
   ])
   const imported = createPreset('imported')
   await importScenesJson(imported)
+  assert.ok(
+    listScenes(imported).every((s) => JSON.stringify(s.background) === JSON.stringify(background))
+  )
   assert.ok(listScenes(imported).every((s) => s.suppressAnal === true))
   assert.ok(
     listScenes(imported).every(

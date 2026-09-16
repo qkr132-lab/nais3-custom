@@ -416,6 +416,7 @@ export interface PromptPreset {
 
 /** 씬 (미리 저장한 프롬프트+해상도. 예약 수만큼 생성) */
 export interface Scene {
+  background?: import('./background-tags').SceneBackground
   /** Separate generation-time censor controls. Missing in older exports = off. */
   censorKinds?: import('./censor-tags').CensorKind[]
   censorWeights?: import('./censor-tags').CensorWeights
@@ -730,6 +731,7 @@ export interface IpcInvokeMap {
           | 'sourcePos'
           | 'targetPos'
           | 'exportNo'
+          | 'background'
           | 'censorKinds'
           | 'censorWeights'
           | 'suppressAnal'
@@ -750,6 +752,10 @@ export interface IpcInvokeMap {
         suppressAnal: boolean
       }[]
     }
+  }
+  'scenes:setBackground': {
+    req: { ids: number[]; background: import('./background-tags').SceneBackground }
+    res: void
   }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
   /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */

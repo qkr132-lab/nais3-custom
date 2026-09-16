@@ -1,3 +1,4 @@
+import { SceneBackgroundDialog } from './scene-background-dialog'
 import { promptTokenRequest } from '@shared/nai-tokens'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import { ArrowLeft, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
@@ -20,6 +21,7 @@ import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
 
 export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
+  const [backgroundOpen, setBackgroundOpen] = useState(false)
   const [censorOpen, setCensorOpen] = useState(false)
   const select = useScenesStore((s) => s.select)
   const activePresetId = useScenesStore((s) => s.activePresetId)
@@ -155,6 +157,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
       <CensorStatus scene={scene} onEdit={() => setCensorOpen(true)} />
       {censorOpen && <SceneCensorDialog scenes={[scene]} onClose={() => setCensorOpen(false)} />}
+      {backgroundOpen && (
+        <SceneBackgroundDialog scenes={[scene]} onClose={() => setBackgroundOpen(false)} />
+      )}
       {/* 헤더 */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <Button size="sm" variant="ghost" className="gap-1" onClick={() => select(null)}>
@@ -212,6 +217,15 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       {/* 스크롤 영역: 프롬프트 + 생성 이미지. scrollbar-gutter로 스크롤바 등장/소멸 시 밀림 방지 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar">
         <div className="grid gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span>씬 태그</span>
+            <Button size="sm" onClick={() => setBackgroundOpen(true)}>
+              배경 태그 설정
+            </Button>
+            <span className="min-w-0 truncate text-xs text-muted" title={scene.background?.prompt}>
+              {scene.background?.prompt || '별도 배경 없음'}
+            </span>
+          </div>
           {/* resize-y: 우하단 핸들로 세로 크기 조절 (F10) */}
           <PromptEditor
             value={scene.prompt}

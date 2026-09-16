@@ -1,3 +1,8 @@
+import {
+  normalizeBackground,
+  stripSimpleBackgrounds,
+  type SceneBackground
+} from './background-tags'
 import type { CharRole, GenerationRequest, PromptParts } from './types'
 import { commentStart } from './nai-presets'
 import {
@@ -10,18 +15,33 @@ import {
 
 export function scenePositivePrompt(
   base: string,
-  scene: { prompt: string; censorKinds?: CensorKind[]; censorWeights?: CensorWeights },
+  scene: {
+    prompt: string
+    background?: SceneBackground
+    censorKinds?: CensorKind[]
+    censorWeights?: CensorWeights
+  },
   parts?: PromptParts
 ): { prompt: string; promptParts?: PromptParts } {
+  const background = normalizeBackground(scene.background)
+  const clean = (value: string): string =>
+    background.prompt.trim() && background.replaceSimple ? stripSimpleBackgrounds(value) : value
+  const scenePrompt =
+    background.placement === 'before-scene'
+      ? appendPrompt(background.prompt, clean(scene.prompt))
+      : appendPrompt(clean(scene.prompt), background.prompt)
   if (!parts)
     return {
       prompt: withCensorTags(
-        appendPrompt(base, scene.prompt),
+        appendPrompt(clean(base), scenePrompt),
         scene.censorKinds,
         scene.censorWeights
       )
     }
-  const merged = mergeSceneIntoPromptParts(parts, scene.prompt)
+  const merged = mergeSceneIntoPromptParts(
+    { base: clean(parts.base), additional: clean(parts.additional), detail: clean(parts.detail) },
+    scenePrompt
+  )
   const result = {
     base: withoutCensorDuplicates(merged.base, scene.censorKinds, scene.censorWeights),
     additional: withCensorTags(merged.additional, scene.censorKinds, scene.censorWeights),
@@ -245,6 +265,7 @@ export function refreshScenePrompts(
   request: GenerationRequest,
   latestScene: {
     prompt: string
+    background?: SceneBackground
     negativePrompt: string
     censorKinds?: CensorKind[]
     censorWeights?: CensorWeights
