@@ -375,6 +375,7 @@ export interface ImageMetadata {
 
 /** 씬 프리셋 (씬들의 그룹) */
 export interface ScenePreset {
+  kind?: 'scene' | 'background'
   id: number
   name: string
   /** 새 씬 기본 해상도 (null = 832×1216) */
@@ -416,6 +417,7 @@ export interface PromptPreset {
 
 /** 씬 (미리 저장한 프롬프트+해상도. 예약 수만큼 생성) */
 export interface Scene {
+  kind?: 'scene' | 'background'
   background?: import('./background-tags').SceneBackground
   /** Separate generation-time censor controls. Missing in older exports = off. */
   censorKinds?: import('./censor-tags').CensorKind[]
@@ -656,8 +658,14 @@ export interface IpcInvokeMap {
     req: { filePath?: string; base64?: string }
     res: { meta: ImageMetadata } | { error: string }
   }
-  'scenePresets:list': { req: void; res: { items: ScenePreset[] } }
-  'scenePresets:create': { req: { name: string }; res: { id: number } }
+  'scenePresets:list': {
+    req: { kind?: 'scene' | 'background' } | void
+    res: { items: ScenePreset[] }
+  }
+  'scenePresets:create': {
+    req: { name: string; kind?: 'scene' | 'background' }
+    res: { id: number }
+  }
   'scenePresets:rename': { req: { id: number; name: string }; res: void }
   'scenePresets:delete': { req: { id: number }; res: void }
   'scenePresets:reorder': { req: { ids: number[] }; res: void }
@@ -704,7 +712,7 @@ export interface IpcInvokeMap {
   'scenes:list': { req: { presetId: number }; res: { items: Scene[] } }
   /** 휴지통(소프트삭제) 씬 목록 (커스텀 — 복원용) */
   'scenes:trash': {
-    req: void
+    req: { kind?: 'scene' | 'background' } | void
     res: { items: (Scene & { deletedAt: string; presetName: string })[] }
   }
   /** 휴지통 씬 복원 */

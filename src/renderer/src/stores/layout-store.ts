@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 
 export type CenterMode =
-  'main' | 'scene' | 'composition' | 'director' | 'library' | 'web' | 'upload'
+  'main' | 'scene' | 'background' | 'composition' | 'director' | 'library' | 'web' | 'upload'
 
 interface LayoutState {
   leftOpen: boolean

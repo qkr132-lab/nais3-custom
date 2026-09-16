@@ -9,6 +9,8 @@ import {
   createPreset,
   getScene,
   listScenes,
+  listPresets,
+  deletePreset,
   setSceneCensors,
   setSceneBackground,
   duplicateScene,
@@ -27,11 +29,36 @@ async function main(): Promise<void> {
   Object.assign(globalThis, { censorTestDb: db })
   for (const migration of migrations.slice(0, -1)) db.transaction(() => migration(db))()
   const old = createScene(1, 'legacy')
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
+    'scene_background_library',
+    JSON.stringify([
+      {
+        id: 'legacy-background',
+        name: 'Forest',
+        background: { prompt: 'forest, sunlight', placement: 'before-scene', replaceSimple: true }
+      }
+    ])
+  )
   db.transaction(() => migrations.at(-1)!(db))()
   reconcileSchema(db)
   reconcileSchema(db)
   assert.deepEqual(getScene(old)?.censorKinds, [])
   assert.equal(getScene(old)?.suppressAnal, false)
+  const backgroundPresets = listPresets('background')
+  assert.equal(backgroundPresets.length, 1)
+  assert.ok(listPresets().every((p) => p.kind === 'scene'))
+  const migratedBackground = listScenes(backgroundPresets[0].id)[0]
+  assert.equal(migratedBackground.prompt, 'forest, sunlight')
+  assert.equal(migratedBackground.kind, 'background')
+  assert.equal(migratedBackground.background?.prompt, '')
+  assert.equal(migratedBackground.background?.replaceSimple, true)
+  deletePreset(backgroundPresets[0].id)
+  assert.equal(listPresets('background').length, 1)
+  assert.equal(listPresets('background')[0].id, backgroundPresets[0].id)
+  const copiedBackgroundPreset = duplicatePreset(backgroundPresets[0].id)
+  assert.equal(listPresets('background').length, 2)
+  assert.equal(listScenes(copiedBackgroundPreset)[0].kind, 'background')
+  deletePreset(copiedBackgroundPreset)
   const ids = Array.from({ length: 30 }, (_, i) => createScene(1, `scene-${i}`))
   const background = {
     prompt: 'forest, sunlight',

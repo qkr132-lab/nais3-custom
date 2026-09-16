@@ -76,7 +76,8 @@ export function PromptPanel(): React.JSX.Element {
   const sceneCount = useScenesStore((s) => s.scenes.length)
   const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const generateReserved = useScenesStore((s) => s.generateReserved)
-  const isScene = centerMode === 'scene'
+  const isScene = centerMode === 'scene' || centerMode === 'background'
+  const scopeReady = useScenesStore((s) => !s.libraryLoading && s.libraryKind === centerMode)
   // 예약 총비용 계산용 (커스텀) — 씬 해상도·큐 반복·씬별 추가·연결 레퍼까지 반영
   const scenes = useScenesStore((s) => s.scenes)
   const activePresetId = useScenesStore((s) => s.activePresetId)
@@ -444,7 +445,7 @@ export function PromptPanel(): React.JSX.Element {
               variant="default"
               size="lg"
               className="shrink-0 gap-1.5 px-3 text-[12px]"
-              disabled={sceneCount === 0}
+              disabled={!scopeReady || sceneCount === 0}
               title={`현재 모듈의 모든 씬에 ${batchCount}장씩 예약 추가 (총 ${sceneCount * batchCount}장)`}
               onClick={() => void adjustReserveAll(1)}
             >
@@ -454,7 +455,7 @@ export function PromptPanel(): React.JSX.Element {
               variant="accent"
               size="lg"
               className="flex-1 gap-2"
-              disabled={sceneReserved === 0}
+              disabled={!scopeReady || sceneReserved === 0}
               title={
                 sceneReserved === 0
                   ? '씬에 예약(+)을 걸어야 생성할 수 있습니다'
@@ -464,7 +465,7 @@ export function PromptPanel(): React.JSX.Element {
               }
               onClick={() => void generateReserved()}
             >
-              씬 생성
+              {centerMode === 'background' ? '배경 생성' : '씬 생성'}
               {sceneReserved > 0 && (
                 // 한글 '장'이 mono 폴백(Windows Consolas)에서 깨져 보여 기본 폰트(Pretendard) 사용
                 // 총 장수(큐 반복 회차 반영) + 예상 Anlas — "다 뽑으면 얼마" 미리보기 (커스텀)

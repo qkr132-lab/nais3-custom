@@ -184,8 +184,8 @@ export default function App(): React.JSX.Element {
               </motion.div>
             )}
           </AnimatePresence>
-          {centerMode === 'scene' ? (
-            <SceneMode />
+          {centerMode === 'scene' || centerMode === 'background' ? (
+            <SceneMode key={centerMode} kind={centerMode} />
           ) : centerMode === 'composition' ? (
             <CompositionMode />
           ) : centerMode === 'director' ? (

@@ -1,5 +1,9 @@
 import { createRoot } from 'react-dom/client'
-import type { IpcInvokeMap, Scene } from '../../src/shared/types'
+import type { GenerationRequest, IpcInvokeMap, Scene, SceneImage } from '../../src/shared/types'
+import { PageNav } from '../../src/renderer/src/components/page-nav'
+import { useLayoutStore } from '../../src/renderer/src/stores/layout-store'
+import { useCharactersStore } from '../../src/renderer/src/stores/characters-store'
+import { useVibesStore, useCharRefsStore } from '../../src/renderer/src/stores/refs-store'
 import {
   changeCensors,
   changeCensorWeights,
@@ -15,6 +19,7 @@ import { tokenFixtureInvoke } from './token-fixture'
 const initial: Scene[] = Array.from({ length: 30 }, (_, i) => ({
   id: i + 1,
   presetId: 1,
+  kind: 'scene',
   name: `씬 ${String(i + 1).padStart(2, '0')}`,
   prompt: 'landscape, blue sky',
   negativePrompt: '',
@@ -35,6 +40,12 @@ const initial: Scene[] = Array.from({ length: 30 }, (_, i) => ({
 let records: Scene[] = JSON.parse(localStorage.getItem('censor-ui-fixture') ?? 'null') ?? initial
 const persist = (): void => localStorage.setItem('censor-ui-fixture', JSON.stringify(records))
 let failNext = false
+const queued: GenerationRequest[] = []
+const generated: (SceneImage & { sceneId: number })[] = []
+useCharactersStore.setState({ loaded: true })
+useVibesStore.setState({ loaded: true })
+useCharRefsStore.setState({ loaded: true })
+useLayoutStore.setState({ centerMode: 'scene' })
 window.nais = {
   invoke: async <C extends keyof IpcInvokeMap>(
     channel: C,
@@ -44,13 +55,16 @@ window.nais = {
     switch (channel) {
       case 'scenePresets:list':
         result = {
-          items: [1, 2].map((id) => ({
-            id,
-            name: `프리셋 ${id}`,
-            defaultWidth: 832,
-            defaultHeight: 1216,
-            sceneCount: records.filter((s) => s.presetId === id).length
-          }))
+          items: ((req as { kind?: string } | undefined)?.kind === 'background' ? [3] : [1, 2]).map(
+            (id) => ({
+              id,
+              kind: id === 3 ? 'background' : 'scene',
+              name: `프리셋 ${id}`,
+              defaultWidth: 832,
+              defaultHeight: 1216,
+              sceneCount: records.filter((s) => s.presetId === id).length
+            })
+          )
         }
         break
       case 'scenes:list':
@@ -60,6 +74,40 @@ window.nais = {
           )
         }
         break
+      case 'scenes:create': {
+        const { name, presetId } = req as IpcInvokeMap['scenes:create']['req']
+        const id = Math.max(...records.map((s) => s.id)) + 1
+        records.push({
+          ...initial[0],
+          id,
+          name,
+          presetId,
+          kind: presetId === 3 ? 'background' : 'scene',
+          prompt: ''
+        })
+        persist()
+        result = { id }
+        break
+      }
+      case 'scenes:delete':
+        records = records.filter((s) => s.id !== (req as { id: number }).id)
+        persist()
+        break
+      case 'scenes:setReserveAll': {
+        const { presetId, count } = req as IpcInvokeMap['scenes:setReserveAll']['req']
+        records = records.map((s) => (s.presetId === presetId ? { ...s, reserveCount: count } : s))
+        persist()
+        break
+      }
+      case 'queue:enqueueMany':
+        queued.push(...(req as IpcInvokeMap['queue:enqueueMany']['req']).requests)
+        break
+      case 'images:setFavorite': {
+        const { id, favorite } = req as IpcInvokeMap['images:setFavorite']['req']
+        const image = generated.find((i) => i.id === id)
+        if (image) image.favorite = favorite
+        break
+      }
       case 'settings:get':
         result = { value: localStorage.getItem(`fixture-setting-${(req as { key: string }).key}`) }
         break
@@ -95,7 +143,14 @@ window.nais = {
         result = { id }
         break
       }
-      case 'scenes:images':
+      case 'scenes:images': {
+        const { sceneId, favoritesOnly } = req as IpcInvokeMap['scenes:images']['req']
+        const items = generated.filter(
+          (i) => i.sceneId === sceneId && (!favoritesOnly || i.favorite)
+        )
+        result = { items, total: items.length }
+        break
+      }
       case 'queue:pending':
         result = { items: [], total: 0 }
         break
@@ -173,13 +228,41 @@ Object.assign(window, {
       failNext = true
     },
     preset: (id: number) => useScenesStore.getState().setActivePreset(id),
-    request: () => useGenerationStore.getState().request
+    request: () => useGenerationStore.getState().request,
+    queued: () => queued,
+    complete: async (sceneId: number) => {
+      generated.push({
+        id: generated.length + 1,
+        sceneId,
+        filePath: 'fixture-background.png',
+        thumbnail: '',
+        seed: 123,
+        favorite: false
+      })
+      const scene = records.find((s) => s.id === sceneId)!
+      scene.imageCount++
+      persist()
+      await useScenesStore.getState().load()
+      await useScenesStore.getState().loadImages(sceneId, true)
+    }
   }
 })
+function Workspace(): React.JSX.Element {
+  const mode = useLayoutStore((s) => s.centerMode)
+  const workspace = new URLSearchParams(location.search).has('workspace')
+  return (
+    <main className="flex h-full flex-col">
+      {workspace && (
+        <div className="flex justify-center p-2">
+          <PageNav />
+        </div>
+      )}
+      <SceneMode key={mode} kind={mode === 'background' ? 'background' : 'scene'} />
+    </main>
+  )
+}
 createRoot(document.getElementById('root')!).render(
   <TooltipProvider>
-    <main className="h-full">
-      <SceneMode />
-    </main>
+    <Workspace />
   </TooltipProvider>
 )

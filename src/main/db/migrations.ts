@@ -386,6 +386,39 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // v28: Separate, portable per-scene background controls.
   (db) => {
     db.exec(`ALTER TABLE gen_scenes ADD COLUMN background TEXT NOT NULL DEFAULT '{}';`)
+  },
+  // v29: A separate background workspace, using the same tested scene/image pipeline.
+  (db) => {
+    db.exec(`ALTER TABLE scene_presets ADD COLUMN kind TEXT NOT NULL DEFAULT 'scene';`)
+    const id = db
+      .prepare(
+        "INSERT INTO scene_presets (name, sort_order, kind) VALUES ('배경', 0, 'background')"
+      )
+      .run().lastInsertRowid
+    const raw = db
+      .prepare("SELECT value FROM settings WHERE key = 'scene_background_library'")
+      .get() as { value: string } | undefined
+    let items: unknown = []
+    try {
+      items = JSON.parse(raw?.value ?? '[]')
+    } catch {
+      /* Keep malformed legacy data untouched. */
+    }
+    if (Array.isArray(items)) {
+      const insert = db.prepare(
+        'INSERT INTO gen_scenes (preset_id, name, prompt, sort_order, background) VALUES (?, ?, ?, ?, ?)'
+      )
+      for (const [index, item] of items.entries()) {
+        if (typeof item?.name !== 'string' || typeof item?.background?.prompt !== 'string') continue
+        insert.run(
+          id,
+          item.name,
+          item.background.prompt,
+          index,
+          JSON.stringify({ ...item.background, prompt: '' })
+        )
+      }
+    }
   }
 ]
 
@@ -413,6 +446,7 @@ export function reconcileSchema(db: Database.Database): void {
   // 커스텀 마이그레이션(v12~v17)이 추가하는 컬럼들 — 충돌로 누락됐으면 여기서 복구
   ensureColumn('gen_scenes', 'variety_plus', 'variety_plus INTEGER NOT NULL DEFAULT 0')
   ensureColumn('gen_scenes', 'background', "background TEXT NOT NULL DEFAULT '{}'")
+  ensureColumn('scene_presets', 'kind', "kind TEXT NOT NULL DEFAULT 'scene'")
   ensureColumn('gen_scenes', 'censor_kinds', "censor_kinds TEXT NOT NULL DEFAULT '[]'")
   ensureColumn('gen_scenes', 'censor_weights', "censor_weights TEXT NOT NULL DEFAULT '{}'")
   ensureColumn('gen_scenes', 'suppress_anal', 'suppress_anal INTEGER NOT NULL DEFAULT 0')

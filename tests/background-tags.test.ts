@@ -4,6 +4,24 @@ import { scenePositivePrompt, refreshScenePrompts } from '../src/shared/scene-re
 import type { GenerationRequest } from '../src/shared/types'
 
 describe('scene backgrounds', () => {
+  it('uses background cards as background content in both preview and live queue refresh', () => {
+    const card = {
+      kind: 'background' as const,
+      prompt: 'forest, sunlight',
+      negativePrompt: '',
+      background: { prompt: '', placement: 'after-scene' as const, replaceSimple: true }
+    }
+    const request = {
+      sceneId: 99,
+      sceneBasePrompt: '1girl, white background',
+      prompt: '',
+      negativePrompt: ''
+    } as GenerationRequest
+    expect(scenePositivePrompt(request.sceneBasePrompt!, card).prompt).toBe(
+      '1girl, forest, sunlight'
+    )
+    expect(refreshScenePrompts(request, card).prompt).toBe('1girl, forest, sunlight')
+  })
   const background = {
     prompt: 'forest, sunlight',
     placement: 'after-scene' as const,

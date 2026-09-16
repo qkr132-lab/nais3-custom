@@ -10,6 +10,7 @@ import { useScenesStore } from '../stores/scenes-store'
 interface View {
   mode: CenterMode
   sceneId: number | null
+  presetId: number
 }
 
 const MAX = 50
@@ -20,12 +21,13 @@ let applying = false // 뒤로/앞으로 적용 중의 상태 변경은 기록�
 function snapshot(): View {
   return {
     mode: useLayoutStore.getState().centerMode,
-    sceneId: useScenesStore.getState().selectedId
+    sceneId: useScenesStore.getState().selectedId,
+    presetId: useScenesStore.getState().activePresetId
   }
 }
 
 function sameView(a: View, b: View): boolean {
-  return a.mode === b.mode && a.sceneId === b.sceneId
+  return a.mode === b.mode && a.sceneId === b.sceneId && a.presetId === b.presetId
 }
 
 /** 뷰가 바뀌기 "직전"에 호출 — setCenterMode/씬 select에서 */
@@ -39,11 +41,15 @@ export function recordNav(): void {
   fwdStack = []
 }
 
-function apply(v: View): void {
+async function apply(v: View): Promise<void> {
   applying = true
   try {
-    useLayoutStore.getState().setCenterMode(v.mode)
+    if (v.mode === 'scene' || v.mode === 'background') {
+      await useScenesStore.getState().activateLibrary(v.mode)
+      await useScenesStore.getState().setActivePreset(v.presetId)
+    }
     useScenesStore.getState().select(v.sceneId)
+    useLayoutStore.getState().setCenterMode(v.mode)
   } finally {
     applying = false
   }
@@ -53,14 +59,14 @@ export function goBack(): void {
   const v = backStack.pop()
   if (!v) return
   fwdStack.push(snapshot())
-  apply(v)
+  void apply(v)
 }
 
 export function goForward(): void {
   const v = fwdStack.pop()
   if (!v) return
   backStack.push(snapshot())
-  apply(v)
+  void apply(v)
 }
 
 /** 마우스 4/5번 버튼 바인딩 (App 마운트 시 1회) */

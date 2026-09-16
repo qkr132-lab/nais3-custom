@@ -5,6 +5,7 @@ import {
   Image,
   Images,
   LayoutGrid,
+  Mountain,
   Wand2,
   type LucideIcon
 } from 'lucide-react'
@@ -14,7 +15,8 @@ import { useLayoutStore, type CenterMode } from '../stores/layout-store'
 
 const PAGES: { id: CenterMode; label: string; icon: LucideIcon }[] = [
   { id: 'main', label: '메인', icon: Image },
-  { id: 'scene', label: '씬', icon: LayoutGrid },
+  { id: 'scene', label: '씬 태그', icon: LayoutGrid },
+  { id: 'background', label: '배경 태그', icon: Mountain },
   { id: 'composition', label: '배치', icon: Crosshair },
   { id: 'director', label: '디렉터', icon: Wand2 },
   { id: 'library', label: '라이브러리', icon: Images },

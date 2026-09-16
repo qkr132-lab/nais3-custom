@@ -271,8 +271,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('images:list', ({ limit, offset }) => listImages(limit, offset))
   handle('images:payload', ({ id }) => ({ payloadJson: getImagePayload(id) }))
 
-  handle('scenePresets:list', () => ({ items: listPresets() }))
-  handle('scenePresets:create', ({ name }) => ({ id: createPreset(name) }))
+  handle('scenePresets:list', (req) => ({ items: listPresets(req?.kind) }))
+  handle('scenePresets:create', ({ name, kind }) => ({ id: createPreset(name, kind) }))
   handle('scenePresets:rename', ({ id, name }) => {
     renamePreset(id, name)
   })
@@ -387,7 +387,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
 
   handle('scenes:list', ({ presetId }) => ({ items: listScenes(presetId) }))
-  handle('scenes:trash', () => ({ items: listTrashedScenes() }))
+  handle('scenes:trash', (req) => ({ items: listTrashedScenes(req?.kind) }))
   handle('scenes:restore', ({ ids }) => {
     restoreScenes(ids)
     scheduleSyncForScenes(ids)

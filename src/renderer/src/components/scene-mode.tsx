@@ -1,4 +1,5 @@
 import { SceneBackgroundDialog } from './scene-background-dialog'
+import { BackgroundUseDialog } from './background-use-dialog'
 import { normalizeCensors } from '@shared/censor-tags'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
 import {
@@ -93,16 +94,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
-export function SceneMode(): React.JSX.Element {
+export function SceneMode({
+  kind = 'scene'
+}: {
+  kind?: 'scene' | 'background'
+}): React.JSX.Element {
   const scenes = useScenesStore((s) => s.scenes)
   const selectedId = useScenesStore((s) => s.selectedId)
-  const loadPresets = useScenesStore((s) => s.loadPresets)
+  const activateLibrary = useScenesStore((s) => s.activateLibrary)
+  const libraryKind = useScenesStore((s) => s.libraryKind)
+  const loading = useScenesStore((s) => s.libraryLoading)
+  const [error, setError] = useState('')
   const loadExtras = useSceneExtrasStore((s) => s.load)
 
   useEffect(() => {
-    void loadPresets()
+    void activateLibrary(kind).catch((e) => setError(String(e)))
     void loadExtras()
-  }, [loadPresets, loadExtras])
+  }, [activateLibrary, kind, loadExtras])
+
+  if (error)
+    return (
+      <div role="alert" className="p-4 text-danger">
+        {error}
+      </div>
+    )
+  if (loading || libraryKind !== kind)
+    return <div className="p-4 text-muted">목록을 불러오는 중…</div>
 
   const selected = scenes.find((s) => s.id === selectedId) ?? null
   if (selected) return <SceneDetail scene={selected} />
@@ -202,7 +219,7 @@ function PresetDropdown(): React.JSX.Element {
             )}
             {active && (
               <span className="shrink-0 rounded-full bg-accent/12 px-2 py-0.5 text-[12px] font-medium text-accent">
-                씬 {active.sceneCount ?? 0}
+                {active.kind === 'background' ? '배경' : '씬'} {active.sceneCount ?? 0}
               </span>
             )}
             <ChevronDown size={14} className="shrink-0 text-muted" />
@@ -259,7 +276,7 @@ function PresetDropdown(): React.JSX.Element {
                                   : 'bg-surface-2 text-muted'
                               )}
                             >
-                              씬 {p.sceneCount ?? 0}
+                              {p.kind === 'background' ? '배경' : '씬'} {p.sceneCount ?? 0}
                             </span>
                           </div>
                           <button
@@ -445,6 +462,8 @@ async function askStartNumber(count: number): Promise<number | null> {
 }
 
 function SceneGrid(): React.JSX.Element {
+  const isBackground = useScenesStore((s) => s.libraryKind === 'background')
+  const [useBackground, setUseBackground] = useState<Scene | null>(null)
   const scenes = useScenesStore((s) => s.scenes)
   const activePresetId = useScenesStore((s) => s.activePresetId)
   const create = useScenesStore((s) => s.create)
@@ -921,36 +940,61 @@ function SceneGrid(): React.JSX.Element {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
-        <Button
-          size="sm"
-          onClick={() => {
-            if (selection.size) setCensorSceneIds([...selection])
-            else setEditMode(true)
-          }}
-          disabled={scenes.length === 0}
-        >
-          <ShieldCheck size={14} />{' '}
-          {selection.size ? `선택 ${selection.size}개 검열 설정` : '검열할 씬 선택'}
-        </Button>
-        <span className="text-muted">
-          검열 태그 적용 {scenes.filter((s) => normalizeCensors(s.censorKinds).length > 0).length}/
-          {scenes.length}개
-        </span>
-        <Button
-          size="sm"
-          disabled={!scenes.length}
-          onClick={() => {
-            if (selection.size) setBackgroundSceneIds([...selection])
-            else setEditMode(true)
-          }}
-        >
-          {selection.size ? `선택 ${selection.size}개 배경 설정` : '배경 설정할 씬 선택'}
-        </Button>
-        <span className="text-muted">
-          배경 적용 {scenes.filter((s) => s.background?.prompt.trim()).length}/{scenes.length}개
-        </span>
-        {selectionActive && <span className="text-muted">Shift로 범위 선택</span>}
+        {isBackground ? (
+          <>
+            <span className="font-medium">배경 태그</span>
+            <span className="text-muted">
+              카드에 태그를 적고 예약·생성해서 비교한 뒤 씬에 사용하세요.
+            </span>
+            <Button
+              size="sm"
+              disabled={selection.size !== 1}
+              onClick={() => setUseBackground(scenes.find((s) => selection.has(s.id)) ?? null)}
+            >
+              선택한 배경을 씬에 사용
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (selection.size) setCensorSceneIds([...selection])
+                else setEditMode(true)
+              }}
+              disabled={scenes.length === 0}
+            >
+              <ShieldCheck size={14} />{' '}
+              {selection.size ? `선택 ${selection.size}개 검열 설정` : '검열할 씬 선택'}
+            </Button>
+            <span className="text-muted">
+              검열 태그 적용{' '}
+              {scenes.filter((s) => normalizeCensors(s.censorKinds).length > 0).length}/
+              {scenes.length}개
+            </span>
+            <Button
+              size="sm"
+              disabled={!scenes.length}
+              onClick={() => {
+                if (selection.size) setBackgroundSceneIds([...selection])
+                else setEditMode(true)
+              }}
+            >
+              {selection.size ? `선택 ${selection.size}개 배경 설정` : '배경 설정할 씬 선택'}
+            </Button>
+            <span className="text-muted">
+              배경 적용 {scenes.filter((s) => s.background?.prompt.trim()).length}/{scenes.length}개
+            </span>
+            {selectionActive && <span className="text-muted">Shift로 범위 선택</span>}
+          </>
+        )}
       </div>
+      {useBackground && (
+        <BackgroundUseDialog
+          backgroundScene={useBackground}
+          onClose={() => setUseBackground(null)}
+        />
+      )}
       {backgroundSceneIds && (
         <SceneBackgroundDialog
           scenes={scenes.filter((s) => backgroundSceneIds.includes(s.id))}
@@ -1009,18 +1053,19 @@ function SceneGrid(): React.JSX.Element {
                   generating={scene.id === generatingSceneId}
                   onOpenAddition={setAdditionSceneIds}
                   onOpenCensors={setCensorSceneIds}
+                  onUseBackground={setUseBackground}
                   onExportFavorites={onExportSceneFavorites}
                   onClearImages={onClearSceneImages}
                   onBeginShiftSelection={beginShiftSelection}
                 />
               ))}
               <button
-                onClick={() => void create('새 씬')}
+                onClick={() => void create(isBackground ? '새 배경' : '새 씬')}
                 className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-faint transition hover:text-accent"
                 style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
               >
                 <Plus size={22} />
-                <span className="text-[12px]">씬 추가</span>
+                <span className="text-[12px]">{isBackground ? '배경 추가' : '씬 추가'}</span>
               </button>
             </div>
           </SortableContext>
@@ -1540,7 +1585,8 @@ const SceneCard = memo(function SceneCard({
   onExportFavorites,
   onClearImages,
   onBeginShiftSelection,
-  onOpenCensors
+  onOpenCensors,
+  onUseBackground
 }: {
   scene: Scene
   live: string | null
@@ -1549,6 +1595,7 @@ const SceneCard = memo(function SceneCard({
   onExportFavorites: (id: number) => void
   onClearImages: (id: number, name: string) => void
   onOpenCensors: (sceneIds: number[]) => void
+  onUseBackground: (scene: Scene) => void
   onBeginShiftSelection: (sceneId: number, pointerId: number) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
@@ -1934,7 +1981,22 @@ const SceneCard = memo(function SceneCard({
               </div>
             </div>
           </div>
-          <CensorStatus scene={scene} onEdit={() => onOpenCensors([scene.id])} />
+          {scene.kind === 'background' ? (
+            <button
+              type="button"
+              className="h-8 w-full border-t border-line bg-accent-soft text-xs text-accent"
+              disabled={!scene.prompt.trim()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onUseBackground(scene)
+              }}
+            >
+              이 배경을 씬에 사용
+            </button>
+          ) : (
+            <CensorStatus scene={scene} onEdit={() => onOpenCensors([scene.id])} />
+          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>

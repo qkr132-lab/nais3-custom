@@ -31,6 +31,7 @@ import { trashFile } from '../trash'
 import { assignExportName, safeName } from './export-name'
 
 interface Row {
+  kind?: 'scene' | 'background'
   id: number
   preset_id: number
   name: string
@@ -68,6 +69,7 @@ function toScene(
 ): Scene {
   return {
     id: r.id,
+    kind: r.kind ?? 'scene',
     presetId: r.preset_id,
     name: r.name,
     prompt: r.prompt,
@@ -92,14 +94,14 @@ function toScene(
 }
 
 // ── 프리셋 ──────────────────────────────────────────────
-export function listPresets(): ScenePreset[] {
+export function listPresets(kind: 'scene' | 'background' = 'scene'): ScenePreset[] {
   return getDb()
     .prepare(
-      `SELECT id, name, default_width AS defaultWidth, default_height AS defaultHeight,
+      `SELECT id, name, kind, default_width AS defaultWidth, default_height AS defaultHeight,
               (SELECT COUNT(*) FROM gen_scenes WHERE preset_id = scene_presets.id AND deleted_at IS NULL) AS sceneCount
-       FROM scene_presets ORDER BY sort_order, id`
+       FROM scene_presets WHERE kind = ? ORDER BY sort_order, id`
     )
-    .all() as ScenePreset[]
+    .all(kind) as ScenePreset[]
 }
 
 /** 프리셋의 새 씬 기본 해상도 설정 */
@@ -109,14 +111,15 @@ export function setPresetDefaultResolution(id: number, width: number, height: nu
     .run(width, height, id)
 }
 
-export function createPreset(name: string): number {
+export function createPreset(name: string, kind: 'scene' | 'background' = 'scene'): number {
   const db = getDb()
   const max = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM scene_presets').get() as {
     m: number
   }
   return Number(
-    db.prepare('INSERT INTO scene_presets (name, sort_order) VALUES (?, ?)').run(name, max.m + 1)
-      .lastInsertRowid
+    db
+      .prepare('INSERT INTO scene_presets (name, sort_order, kind) VALUES (?, ?, ?)')
+      .run(name, max.m + 1, kind).lastInsertRowid
   )
 }
 
@@ -127,7 +130,13 @@ export function renamePreset(id: number, name: string): void {
 /** 프리셋 삭제 — 마지막 하나는 못 지움. 안의 씬도 함께 삭제(이미지는 scene_id만 끊김) */
 export function deletePreset(id: number): void {
   const db = getDb()
-  const count = (db.prepare('SELECT COUNT(*) AS c FROM scene_presets').get() as { c: number }).c
+  const count = (
+    db
+      .prepare(
+        'SELECT COUNT(*) AS c FROM scene_presets WHERE kind = (SELECT kind FROM scene_presets WHERE id = ?)'
+      )
+      .get(id) as { c: number }
+  ).c
   if (count <= 1) return
   db.transaction(() => {
     db.prepare('DELETE FROM gen_scenes WHERE preset_id = ?').run(id)
@@ -140,7 +149,7 @@ export function deletePreset(id: number): void {
 export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weights, s.suppress_anal, s.background,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weights, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
@@ -155,18 +164,20 @@ export function listScenes(presetId: number): Scene[] {
 }
 
 /** 휴지통에 있는(소프트삭제된) 씬 목록 — 최근 삭제 순. 프리셋 무관 전체 */
-export function listTrashedScenes(): (Scene & { deletedAt: string; presetName: string })[] {
+export function listTrashedScenes(
+  kind: 'scene' | 'background' = 'scene'
+): (Scene & { deletedAt: string; presetName: string })[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weights, s.suppress_anal, s.background,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weights, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
-       FROM gen_scenes s WHERE s.deleted_at IS NOT NULL ORDER BY s.deleted_at DESC`
+       FROM gen_scenes s WHERE s.deleted_at IS NOT NULL AND (SELECT kind FROM scene_presets WHERE id = s.preset_id) = ? ORDER BY s.deleted_at DESC`
     )
-    .all() as (Row & {
+    .all(kind) as (Row & {
     deleted_at: string
     preset_name: string | null
     image_count: number
@@ -248,7 +259,7 @@ export function getPresetName(id: number): string | null {
 export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
-      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weights, suppress_anal, background,
+      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weights, suppress_anal, background, (SELECT kind FROM scene_presets WHERE id = preset_id) AS kind,
               (SELECT COUNT(*) FROM images WHERE scene_id = ? AND deleted_at IS NULL) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
@@ -328,10 +339,15 @@ export function duplicatePreset(id: number): number {
     newId = Number(
       db
         .prepare(
-          'INSERT INTO scene_presets (name, sort_order, default_width, default_height) VALUES (?, ?, ?, ?)'
+          'INSERT INTO scene_presets (name, sort_order, default_width, default_height, kind) VALUES (?, ?, ?, ?, ?)'
         )
-        .run(`${p.name} 복제`, maxOrder + 1, p.default_width ?? null, p.default_height ?? null)
-        .lastInsertRowid
+        .run(
+          `${p.name} 복제`,
+          maxOrder + 1,
+          p.default_width ?? null,
+          p.default_height ?? null,
+          p.kind ?? 'scene'
+        ).lastInsertRowid
     )
     const scenes = db
       .prepare(

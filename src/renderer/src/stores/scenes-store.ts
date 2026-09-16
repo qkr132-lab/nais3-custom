@@ -31,6 +31,9 @@ let loadSeq = 0 // load() 비동기 응답 순서 보장용
 let imagesSeq = 0 // loadImages() 비동기 응답 순서 보장용
 
 interface ScenesState {
+  libraryKind: 'scene' | 'background'
+  libraryLoading: boolean
+  activateLibrary: (kind: 'scene' | 'background') => Promise<void>
   presets: ScenePreset[]
   activePresetId: number
   scenes: Scene[]
@@ -387,7 +390,51 @@ function registerImageDeleteUndo(get: () => ScenesState, ids: number[]): void {
   })
 }
 
+const libraryViews = new Map<string, { presetId: number; selectedId: number | null }>()
+let librarySeq = 0
+
 export const useScenesStore = create<ScenesState>((set, get) => ({
+  libraryKind: 'scene',
+  libraryLoading: false,
+  activateLibrary: async (kind) => {
+    const activation = ++librarySeq
+    const previous = get()
+    if (previous.libraryKind !== kind) {
+      libraryViews.set(previous.libraryKind, {
+        presetId: previous.activePresetId,
+        selectedId: previous.selectedId
+      })
+      const saved = libraryViews.get(kind)
+      ++loadSeq
+      ++imagesSeq
+      set({
+        libraryKind: kind,
+        libraryLoading: true,
+        presets: [],
+        scenes: [],
+        images: [],
+        imagesTotal: 0,
+        activePresetId: saved?.presetId ?? 0,
+        selectedId: saved?.selectedId ?? null,
+        selection: new Set(),
+        lastSelectedId: null,
+        editMode: false,
+        sceneClipboard: null
+      })
+    } else set({ libraryLoading: true })
+    try {
+      await get().refreshPresetCounts()
+      if (activation !== librarySeq || get().libraryKind !== kind) return
+      await get().load()
+      if (activation !== librarySeq || get().libraryKind !== kind) return
+      const selected = get().selectedId
+      if (selected != null && get().scenes.some((s) => s.id === selected))
+        await get().loadImages(selected, true)
+      else set({ selectedId: null })
+    } finally {
+      if (activation === librarySeq && get().libraryKind === kind) set({ libraryLoading: false })
+    }
+  },
   presets: [],
   activePresetId: 1,
   scenes: [],
@@ -410,7 +457,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   refreshPresetCounts: async () => {
     const seq = ++presetsSeq
-    const { items } = await window.nais.invoke('scenePresets:list', undefined)
+    const { items } = await window.nais.invoke('scenePresets:list', { kind: get().libraryKind })
     if (seq !== presetsSeq) return
     const currentId = get().activePresetId
     const activePresetId = items.some((p) => p.id === currentId)
@@ -423,7 +470,10 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     await get().load()
   },
   createPreset: async (name) => {
-    const { id } = await window.nais.invoke('scenePresets:create', { name })
+    const { id } = await window.nais.invoke('scenePresets:create', {
+      name,
+      kind: get().libraryKind
+    })
     await get().loadPresets()
     await get().setActivePreset(id)
   },
@@ -511,7 +561,9 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   clearSelection: () => set({ selection: new Set(), lastSelectedId: null }),
 
   loadTrash: async () => {
-    const { items } = await window.nais.invoke('scenes:trash', undefined)
+    const kind = get().libraryKind
+    const { items } = await window.nais.invoke('scenes:trash', { kind })
+    if (get().libraryKind !== kind) return
     set({ trashed: items })
   },
   restoreScenes: async (ids) => {
@@ -874,7 +926,15 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
 
   generateReserved: async () => {
+    const { activePresetId, libraryKind, libraryLoading } = get()
+    if (libraryLoading) return
     await ensureExtrasData()
+    if (
+      get().activePresetId !== activePresetId ||
+      get().libraryKind !== libraryKind ||
+      get().libraryLoading
+    )
+      return
     const reserved = get().scenes.filter((s) => s.reserveCount > 0)
     // 예약을 큐에 넣는 즉시 예약 수는 소진(0) — 예약이란 게 "뽑을 대기열"이므로
     set({ scenes: get().scenes.map((s) => (s.reserveCount > 0 ? { ...s, reserveCount: 0 } : s)) })

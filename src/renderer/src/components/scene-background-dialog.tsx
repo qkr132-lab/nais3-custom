@@ -8,13 +8,7 @@ import { useGenerationStore } from '../stores/generation-store'
 import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
-
-interface BackgroundPreset {
-  id: string
-  name: string
-  background: SceneBackground
-}
-const KEY = 'scene_background_library'
+import { loadBackgroundLibrary, type BackgroundLibraryItem } from '../lib/background-library'
 
 export function SceneBackgroundDialog({
   scenes,
@@ -24,7 +18,8 @@ export function SceneBackgroundDialog({
   onClose: () => void
 }): React.JSX.Element {
   const [background, setBackground] = useState(() => normalizeBackground(scenes[0]?.background))
-  const [library, setLibrary] = useState<BackgroundPreset[]>([])
+  const [library, setLibrary] = useState<BackgroundLibraryItem[]>([])
+  const [libraryPresetId, setLibraryPresetId] = useState(0)
   const [loaded, setLoaded] = useState(false)
   const [name, setName] = useState('')
   const [selected, setSelected] = useState('')
@@ -42,17 +37,11 @@ export function SceneBackgroundDialog({
 
   useEffect(() => {
     let live = true
-    void window.nais
-      .invoke('settings:get', { key: KEY })
-      .then(({ value }) => {
+    void loadBackgroundLibrary()
+      .then(({ presetId, items }) => {
         if (!live) return
-        const items: unknown = value ? JSON.parse(value) : []
-        if (!Array.isArray(items)) throw new Error('배경 보관함 형식이 올바르지 않습니다.')
-        setLibrary(
-          items
-            .filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string')
-            .map((p) => ({ id: p.id, name: p.name, background: normalizeBackground(p.background) }))
-        )
+        setLibraryPresetId(presetId)
+        setLibrary(items)
         setLoaded(true)
       })
       .catch((e) => {
@@ -75,8 +64,8 @@ export function SceneBackgroundDialog({
       setBusy(false)
     }
   }
-  async function saveLibrary(items: BackgroundPreset[]): Promise<void> {
-    await window.nais.invoke('settings:set', { key: KEY, value: JSON.stringify(items) })
+  async function refreshLibrary(): Promise<void> {
+    const { items } = await loadBackgroundLibrary()
     setLibrary(items)
   }
   async function apply(): Promise<void> {
@@ -131,6 +120,13 @@ export function SceneBackgroundDialog({
                     setBackground(item.background)
                   }}
                 >
+                  {item.thumbnail && (
+                    <img
+                      src={`data:image/webp;base64,${item.thumbnail}`}
+                      alt=""
+                      className="mb-2 aspect-video w-full rounded object-cover"
+                    />
+                  )}
                   <span className="block text-sm font-medium">{item.name}</span>
                   <span className="line-clamp-3 break-words text-xs text-muted">
                     {item.background.prompt}
@@ -161,15 +157,27 @@ export function SceneBackgroundDialog({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={!loaded || !name.trim() || !background.prompt.trim()}
+                disabled={!loaded || !libraryPresetId || !name.trim() || !background.prompt.trim()}
                 onClick={() =>
                   void run(async () => {
-                    const id = selected || crypto.randomUUID()
-                    const item = { id, name: name.trim(), background }
-                    await saveLibrary(
-                      selected ? library.map((p) => (p.id === id ? item : p)) : [...library, item]
-                    )
-                    setSelected(id)
+                    const id = selected
+                      ? Number(selected)
+                      : (
+                          await window.nais.invoke('scenes:create', {
+                            presetId: libraryPresetId,
+                            name: name.trim()
+                          })
+                        ).id
+                    await window.nais.invoke('scenes:update', {
+                      id,
+                      patch: {
+                        name: name.trim(),
+                        prompt: background.prompt,
+                        background: { ...background, prompt: '' }
+                      }
+                    })
+                    await refreshLibrary()
+                    setSelected(String(id))
                     setMessage('배경 보관함에 저장했어요.')
                   })
                 }
@@ -181,7 +189,8 @@ export function SceneBackgroundDialog({
                 disabled={!loaded || !selected}
                 onClick={() =>
                   void run(async () => {
-                    await saveLibrary(library.filter((p) => p.id !== selected))
+                    await window.nais.invoke('scenes:delete', { id: Number(selected) })
+                    await refreshLibrary()
                     setSelected('')
                     setMessage('보관함에서 삭제했어요. 씬에 적용된 태그는 유지됩니다.')
                   })

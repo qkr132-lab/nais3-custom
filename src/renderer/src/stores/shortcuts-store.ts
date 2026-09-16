@@ -92,7 +92,9 @@ function runAction(action: ShortcutAction): void {
   const layout = useLayoutStore.getState()
   switch (action) {
     case 'generate': {
-      if (layout.centerMode === 'scene') {
+      if (layout.centerMode === 'scene' || layout.centerMode === 'background') {
+        const store = useScenesStore.getState()
+        if (store.libraryLoading || store.libraryKind !== layout.centerMode) break
         const scenes = useScenesStore.getState().scenes
         if (totalReserved(scenes) > 0) void useScenesStore.getState().generateReserved()
       } else {

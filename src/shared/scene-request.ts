@@ -17,6 +17,7 @@ export function scenePositivePrompt(
   base: string,
   scene: {
     prompt: string
+    kind?: 'scene' | 'background'
     background?: SceneBackground
     censorKinds?: CensorKind[]
     censorWeights?: CensorWeights
@@ -24,12 +25,15 @@ export function scenePositivePrompt(
   parts?: PromptParts
 ): { prompt: string; promptParts?: PromptParts } {
   const background = normalizeBackground(scene.background)
+  // A background card's prompt is the background itself, with no scene action tags.
+  if (scene.kind === 'background') background.prompt = scene.prompt
+  const actionPrompt = scene.kind === 'background' ? '' : scene.prompt
   const clean = (value: string): string =>
     background.prompt.trim() && background.replaceSimple ? stripSimpleBackgrounds(value) : value
   const scenePrompt =
     background.placement === 'before-scene'
-      ? appendPrompt(background.prompt, clean(scene.prompt))
-      : appendPrompt(clean(scene.prompt), background.prompt)
+      ? appendPrompt(background.prompt, clean(actionPrompt))
+      : appendPrompt(clean(actionPrompt), background.prompt)
   if (!parts)
     return {
       prompt: withCensorTags(
@@ -265,6 +269,7 @@ export function refreshScenePrompts(
   request: GenerationRequest,
   latestScene: {
     prompt: string
+    kind?: 'scene' | 'background'
     background?: SceneBackground
     negativePrompt: string
     censorKinds?: CensorKind[]

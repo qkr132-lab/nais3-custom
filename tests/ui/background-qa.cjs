@@ -61,14 +61,17 @@ const fs = require('node:fs')
     )
     assert.ok(
       await page.evaluate(() =>
-        window.censorFixture.records().every((s) => s.prompt === 'landscape, blue sky')
+        window.censorFixture
+          .records()
+          .filter((s) => s.kind !== 'background')
+          .every((s) => s.prompt === 'landscape, blue sky')
       )
     )
     await page.evaluate(() => window.censorFixture.state().select(1))
     await page.getByRole('button', { name: '배경 태그 설정', exact: true }).click()
     await page.getByRole('button', { name: '테스트 씬 만들기', exact: true }).click()
     await page.getByRole('dialog').waitFor({ state: 'hidden' })
-    assert.equal(await page.evaluate(() => window.censorFixture.state().selectedId), 31)
+    assert.equal(await page.evaluate(() => window.censorFixture.state().selectedId), 32)
     assert.equal(
       await page.evaluate(() => window.censorFixture.records().at(-1).background.prompt),
       'forest, sunlight'
