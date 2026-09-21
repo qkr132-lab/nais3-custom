@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   ImageUp,
+  ImageOff,
   Info,
   Layers,
   Minus,
@@ -16,13 +17,14 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { estimateAnlas } from '@shared/anlas'
+import { modelCaps } from '@shared/nai-models'
 import { promptTokenLimit, promptTokenRequest } from '@shared/nai-tokens'
 import { requestForPromptMode } from '@shared/prompt-state'
 import type { SequenceEntry } from '@shared/types'
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from '../stores/characters-store'
 import { hasAddition, useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useFragmentsStore } from '../stores/fragments-store'
-import { useGenerationStore } from '../stores/generation-store'
+import { useGenerationStore, withTransparentBackground } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import { totalReserved, useScenesStore } from '../stores/scenes-store'
@@ -43,6 +45,8 @@ export function PromptPanel(): React.JSX.Element {
   const patch = useGenerationStore((s) => s.patchRequest)
   const patchPromptParts = useGenerationStore((s) => s.patchPromptParts)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
+  const transparentBackground = useGenerationStore((s) => s.transparentBackground)
+  const setTransparentBackground = useGenerationStore((s) => s.setTransparentBackground)
   const queue = useGenerationStore((s) => s.queue)
   const batchCount = useGenerationStore((s) => s.batchCount)
   const setBatchCount = useGenerationStore((s) => s.setBatchCount)
@@ -126,7 +130,10 @@ export function PromptPanel(): React.JSX.Element {
   const tokenPreview = usePromptTokens('tokens:preview', {
     requests: [
       promptTokenRequest({
-        ...requestForPromptMode(request, promptSplitEnabled),
+        ...withTransparentBackground(
+          requestForPromptMode(request, promptSplitEnabled),
+          transparentBackground
+        ),
         characterPrompts: charItems
           .filter((c) => c.enabled && c.prompt.trim())
           .map((c) => ({ prompt: c.prompt, negativePrompt: c.negativePrompt, enabled: true }))
@@ -224,6 +231,8 @@ export function PromptPanel(): React.JSX.Element {
     else if (target === 'vibe') setVibeOverlayOpen(true)
     else setCrefOpen(true)
   }
+
+  const canUseTransparentBackground = modelCaps(request.model).transparency
 
   return (
     <aside className="relative flex h-full w-full flex-col gap-3 rounded-xl border border-line bg-surface p-3">
@@ -394,6 +403,24 @@ export function PromptPanel(): React.JSX.Element {
           onClick={() => only('cref')}
         />
       </div>
+
+      {canUseTransparentBackground && (
+        <button
+          type="button"
+          data-testid="transparent-bg-toggle"
+          aria-pressed={transparentBackground}
+          onClick={() => setTransparentBackground(!transparentBackground)}
+          className={
+            'flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors ' +
+            (transparentBackground
+              ? 'border-accent bg-accent/15 text-accent'
+              : 'border-line text-muted hover:border-accent/60 hover:text-ink')
+          }
+          title="V5 전용: 전송 프롬프트에 transparent background를 추가하고 알파 PNG를 요청합니다."
+        >
+          <ImageOff size={13} /> Transparent BG
+        </button>
+      )}
 
       {/* 생성 행: 파라미터 / 배치 / 생성 */}
       <div className="flex items-center gap-2">

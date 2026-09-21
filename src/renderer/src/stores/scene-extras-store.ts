@@ -51,6 +51,13 @@ export interface SceneAddition {
   charTags?: Record<number, string>
 }
 
+export interface SceneAdditionTransfer {
+  sourcePresetId: number
+  sourceSceneId: number
+  targetPresetId: number
+  targetSceneId: number
+}
+
 /** presetId → sceneId → 추가 선택 */
 type AdditionsMap = Record<number, Record<number, SceneAddition>>
 
@@ -72,6 +79,9 @@ interface SceneExtrasState {
   setAdditionsEnabled: (v: boolean) => void
   updateAddition: (presetId: number, sceneId: number, addition: SceneAddition) => void
   clearAddition: (presetId: number, sceneId: number) => void
+  /** 씬 복사/이동 때 본문과 함께 씬별 캐릭터 구성도 옮긴다. */
+  copyAdditions: (transfers: SceneAdditionTransfer[]) => void
+  moveAdditions: (transfers: SceneAdditionTransfer[]) => void
   /**
    * 씬별 추가·큐 반복에 저장된 '위치 적용' 오버라이드를 전부 지운다 (커스텀).
    * 이 오버라이드는 전역 위치 지정 스위치보다 우선이라, 남아 있으면 전역을 꺼도
@@ -116,6 +126,49 @@ export function hasAddition(a: SceneAddition | undefined | null): a is SceneAddi
       Object.keys(a.roles ?? {}).length > 0 ||
       Object.keys(a.charTags ?? {}).length > 0)
   )
+}
+
+function cloneAddition(a: SceneAddition): SceneAddition {
+  return {
+    ...a,
+    characterIds: [...a.characterIds],
+    charRefIds: [...a.charRefIds],
+    vibeIds: [...a.vibeIds],
+    positions: a.positions ? { ...a.positions } : undefined,
+    roles: a.roles ? { ...a.roles } : undefined,
+    slots: a.slots?.map((slot) => ({ ...slot })),
+    slotOf: a.slotOf ? { ...a.slotOf } : undefined,
+    slotRoles: a.slotRoles ? { ...a.slotRoles } : undefined,
+    slotTags: a.slotTags ? { ...a.slotTags } : undefined,
+    slotChars: a.slotChars ? { ...a.slotChars } : undefined,
+    charTags: a.charTags ? { ...a.charTags } : undefined
+  }
+}
+
+function transferAdditions(
+  state: SceneExtrasState,
+  transfers: SceneAdditionTransfer[],
+  mode: 'copy' | 'move'
+): AdditionsMap {
+  const next: AdditionsMap = {}
+  for (const [presetId, scenes] of Object.entries(state.additions)) {
+    next[Number(presetId)] = { ...scenes }
+  }
+  for (const transfer of transfers) {
+    const source = next[transfer.sourcePresetId]?.[transfer.sourceSceneId]
+    if (!source) continue
+    const targetPreset = (next[transfer.targetPresetId] ??= {})
+    targetPreset[transfer.targetSceneId] = cloneAddition(source)
+    if (
+      mode === 'move' &&
+      (transfer.sourcePresetId !== transfer.targetPresetId ||
+        transfer.sourceSceneId !== transfer.targetSceneId)
+    ) {
+      const sourcePreset = next[transfer.sourcePresetId]
+      if (sourcePreset) delete sourcePreset[transfer.sourceSceneId]
+    }
+  }
+  return next
 }
 
 /** 활성 항목들 (큐 반복 실행 대상) */
@@ -205,6 +258,16 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({ additions: { ...get().additions, [presetId]: preset } })
     persist()
   },
+  copyAdditions: (transfers) => {
+    if (transfers.length === 0) return
+    set({ additions: transferAdditions(get(), transfers, 'copy') })
+    persist()
+  },
+  moveAdditions: (transfers) => {
+    if (transfers.length === 0) return
+    set({ additions: transferAdditions(get(), transfers, 'move') })
+    persist()
+  },
 
   clearCoordOverrides: () => {
     const { entries, additions } = get()
@@ -251,15 +314,13 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       return next
     }
     // 자리에 앉아 있던 캐릭터가 지워지면 그 자리는 비운다 (유령이 앉아 있지 않게)
-    const stripSlotChars = (
-      map?: Record<number, number>
-    ): Record<number, number> | undefined => {
+    const stripSlotChars = (map?: Record<number, number>): Record<number, number> | undefined => {
       if (!map) return map
       const next: Record<number, number> = {}
       for (const [at, id] of Object.entries(map)) if (!cSet.has(id)) next[Number(at)] = id
       return next
     }
-    const stripKeyed = <V,>(map?: Record<number, V>): Record<number, V> | undefined => {
+    const stripKeyed = <V>(map?: Record<number, V>): Record<number, V> | undefined => {
       if (!map) return map
       const next: Record<number, V> = {}
       for (const [id, v] of Object.entries(map)) if (!cSet.has(Number(id))) next[Number(id)] = v

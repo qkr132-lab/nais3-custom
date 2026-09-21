@@ -10,7 +10,7 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
-import { mergePromptParts } from '@shared/scene-request'
+import { appendPrompt, mergePromptParts } from '@shared/scene-request'
 import {
   patchPromptRequest,
   restorePromptRequest,
@@ -59,6 +59,8 @@ interface GenerationState {
   seedLocked: boolean
   batchCount: number
   promptSplitEnabled: boolean
+  transparentBackground: boolean
+  setTransparentBackground: (enabled: boolean) => void
   /** paper | tablet | scroll | opus — Anlas 추정용 */
   subscriptionTier: string | null
   setSubscriptionTier: (tier: string) => void
@@ -119,6 +121,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   seedLocked: localStorage.getItem('seed_locked') === '1',
   batchCount: Number(localStorage.getItem('batch_count')) || 1,
   promptSplitEnabled: false,
+  transparentBackground: localStorage.getItem('transparent_background') === '1',
+  setTransparentBackground: (transparentBackground) => {
+    set({ transparentBackground })
+    localStorage.setItem('transparent_background', transparentBackground ? '1' : '0')
+  },
   subscriptionTier: null,
   setSubscriptionTier: (tier) => {
     set({ subscriptionTier: tier })
@@ -216,7 +223,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
 
   generate: async () => {
-    const { request, seedLocked, batchCount } = get()
+    const { request, seedLocked, batchCount, transparentBackground } = get()
     const seed = seedLocked && request.seed >= 0 ? request.seed : randomSeed()
     const baseRequest = withoutTransientSource({ ...request, seed })
     // 캐릭터는 라이브러리의 enabled 카드에서 구성 (리스트 순서 = v4 use_order 순서)
@@ -242,7 +249,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           ]
         : undefined
     const finalRequest = {
-      ...requestForPromptMode(baseRequest, get().promptSplitEnabled),
+      ...withTransparentBackground(
+        requestForPromptMode(baseRequest, get().promptSplitEnabled),
+        transparentBackground
+      ),
       characterPrompts,
       charRefIds,
       source: src
@@ -343,6 +353,23 @@ export async function setI2iSource(filePath: string): Promise<void> {
     width: res.width,
     height: res.height
   })
+}
+
+/** V5 웹 UI의 Transparent BG 토글과 같은 동작. 원본 입력은 보존하고 전송본에만 태그를 붙인다. */
+export function withTransparentBackground(
+  request: GenerationRequest,
+  enabled: boolean
+): GenerationRequest {
+  if (!enabled || !modelCaps(request.model).transparency) return request
+  if (/\btransparent\s+background\b/i.test(request.prompt)) return request
+  if (request.promptParts) {
+    const promptParts = {
+      ...request.promptParts,
+      detail: appendPrompt(request.promptParts.detail, 'transparent background')
+    }
+    return { ...request, prompt: mergePromptParts(promptParts), promptParts }
+  }
+  return { ...request, prompt: appendPrompt(request.prompt, 'transparent background') }
 }
 
 export function randomSeed(): number {
