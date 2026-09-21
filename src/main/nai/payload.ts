@@ -145,7 +145,9 @@ export function buildGenerateImagePayload(
     input: prompt,
     model: req.model,
     parameters: {
-      params_version: 3,
+      // NovelAI's current web client uses params_version 4 for V5. The V5
+      // transparent-background fields are ignored by the older v3 schema.
+      params_version: isV5(req.model) ? 4 : 3,
       width: req.width,
       height: req.height,
       scale: req.cfgScale,
