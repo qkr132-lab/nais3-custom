@@ -119,6 +119,12 @@ describe('V5 payload', () => {
   })
 
   it('모델 id가 그대로 실린다', () => {
+    expect(params({ ...v5Request, transparentBackground: true }).straight_alpha).toBe(true)
+    expect(
+      params({ ...v5Request, transparentBackground: true }).tag_hint_transparent_background
+    ).toBe(true)
+    expect(params(v5Request).straight_alpha).toBeNull()
+    expect(params(v5Request).tag_hint_transparent_background).toBeNull()
     expect(buildGenerateImagePayload(v5Request).model).toBe('nai-diffusion-5-full')
   })
 

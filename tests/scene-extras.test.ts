@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { hasAddition, type SceneAddition } from '../src/renderer/src/stores/scene-extras-store'
+import {
+  hasAddition,
+  useSceneExtrasStore,
+  type SceneAddition
+} from '../src/renderer/src/stores/scene-extras-store'
 
 const addition = (patch: Partial<SceneAddition> = {}): SceneAddition => ({
   characterIds: [],
@@ -39,5 +43,32 @@ describe('씬별 설정 적용 여부', () => {
     expect(hasAddition(addition({ characterIds: [19] }))).toBe(true)
     expect(hasAddition(addition({ charRefIds: [7] }))).toBe(true)
     expect(hasAddition(addition({ vibeIds: [5] }))).toBe(true)
+  })
+
+  it('씬별 Transparent BG override도 씬 복사·이동과 함께 보존한다', () => {
+    useSceneExtrasStore.setState({
+      loaded: false,
+      transparentBackgrounds: { 1: { 10: false } }
+    })
+    useSceneExtrasStore
+      .getState()
+      .copyAdditions([
+        { sourcePresetId: 1, sourceSceneId: 10, targetPresetId: 2, targetSceneId: 20 }
+      ])
+    expect(useSceneExtrasStore.getState().transparentBackgrounds).toEqual({
+      1: { 10: false },
+      2: { 20: false }
+    })
+
+    useSceneExtrasStore
+      .getState()
+      .moveAdditions([
+        { sourcePresetId: 2, sourceSceneId: 20, targetPresetId: 3, targetSceneId: 30 }
+      ])
+    expect(useSceneExtrasStore.getState().transparentBackgrounds).toEqual({
+      1: { 10: false },
+      2: {},
+      3: { 30: false }
+    })
   })
 })

@@ -60,6 +60,7 @@ export interface SceneAdditionTransfer {
 
 /** presetId → sceneId → 추가 선택 */
 type AdditionsMap = Record<number, Record<number, SceneAddition>>
+type SceneTransparentBackgroundMap = Record<number, Record<number, boolean>>
 
 interface SceneExtrasState {
   loaded: boolean
@@ -67,6 +68,7 @@ interface SceneExtrasState {
   entries: SequenceEntry[]
   additionsEnabled: boolean
   additions: AdditionsMap
+  transparentBackgrounds: SceneTransparentBackgroundMap
 
   load: () => Promise<void>
   setSequenceEnabled: (v: boolean) => void
@@ -79,6 +81,11 @@ interface SceneExtrasState {
   setAdditionsEnabled: (v: boolean) => void
   updateAddition: (presetId: number, sceneId: number, addition: SceneAddition) => void
   clearAddition: (presetId: number, sceneId: number) => void
+  setSceneTransparentBackground: (
+    presetId: number,
+    sceneId: number,
+    enabled: boolean | undefined
+  ) => void
   /** 씬 복사/이동 때 본문과 함께 씬별 캐릭터 구성도 옮긴다. */
   copyAdditions: (transfers: SceneAdditionTransfer[]) => void
   moveAdditions: (transfers: SceneAdditionTransfer[]) => void
@@ -107,7 +114,8 @@ function persist(): void {
       sequenceEnabled: s.sequenceEnabled,
       entries: s.entries,
       additionsEnabled: s.additionsEnabled,
-      additions: s.additions
+      additions: s.additions,
+      transparentBackgrounds: s.transparentBackgrounds
     })
   })
 }
@@ -171,6 +179,36 @@ function transferAdditions(
   return next
 }
 
+function transferTransparentBackgrounds(
+  state: SceneExtrasState,
+  transfers: SceneAdditionTransfer[],
+  mode: 'copy' | 'move'
+): SceneTransparentBackgroundMap {
+  const next: SceneTransparentBackgroundMap = {}
+  for (const [presetId, scenes] of Object.entries(state.transparentBackgrounds)) {
+    next[Number(presetId)] = { ...scenes }
+  }
+  for (const transfer of transfers) {
+    const sourcePreset = next[transfer.sourcePresetId]
+    if (
+      !sourcePreset ||
+      !Object.prototype.hasOwnProperty.call(sourcePreset, transfer.sourceSceneId)
+    ) {
+      continue
+    }
+    const targetPreset = (next[transfer.targetPresetId] ??= {})
+    targetPreset[transfer.targetSceneId] = sourcePreset[transfer.sourceSceneId]
+    if (
+      mode === 'move' &&
+      (transfer.sourcePresetId !== transfer.targetPresetId ||
+        transfer.sourceSceneId !== transfer.targetSceneId)
+    ) {
+      delete sourcePreset[transfer.sourceSceneId]
+    }
+  }
+  return next
+}
+
 /** 활성 항목들 (큐 반복 실행 대상) */
 export function enabledEntries(): SequenceEntry[] {
   const s = useSceneExtrasStore.getState()
@@ -183,6 +221,7 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
   entries: [],
   additionsEnabled: false,
   additions: {},
+  transparentBackgrounds: {},
 
   load: async () => {
     if (get().loaded) return
@@ -194,7 +233,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
           sequenceEnabled: !!parsed.sequenceEnabled,
           entries: Array.isArray(parsed.entries) ? parsed.entries : [],
           additionsEnabled: !!parsed.additionsEnabled,
-          additions: parsed.additions ?? {}
+          additions: parsed.additions ?? {},
+          transparentBackgrounds: parsed.transparentBackgrounds ?? {}
         })
       } catch {
         // 손상된 설정은 무시하고 기본값으로 시작
@@ -258,14 +298,27 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({ additions: { ...get().additions, [presetId]: preset } })
     persist()
   },
+  setSceneTransparentBackground: (presetId, sceneId, enabled) => {
+    const preset = { ...(get().transparentBackgrounds[presetId] ?? {}) }
+    if (enabled === undefined) delete preset[sceneId]
+    else preset[sceneId] = enabled
+    set({ transparentBackgrounds: { ...get().transparentBackgrounds, [presetId]: preset } })
+    persist()
+  },
   copyAdditions: (transfers) => {
     if (transfers.length === 0) return
-    set({ additions: transferAdditions(get(), transfers, 'copy') })
+    set({
+      additions: transferAdditions(get(), transfers, 'copy'),
+      transparentBackgrounds: transferTransparentBackgrounds(get(), transfers, 'copy')
+    })
     persist()
   },
   moveAdditions: (transfers) => {
     if (transfers.length === 0) return
-    set({ additions: transferAdditions(get(), transfers, 'move') })
+    set({
+      additions: transferAdditions(get(), transfers, 'move'),
+      transparentBackgrounds: transferTransparentBackgrounds(get(), transfers, 'move')
+    })
     persist()
   },
 

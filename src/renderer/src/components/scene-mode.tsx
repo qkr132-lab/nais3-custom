@@ -62,6 +62,7 @@ import {
   type CSSProperties
 } from 'react'
 import type { R2SyncConfig, Scene, ScenePreset } from '@shared/types'
+import { modelCaps } from '@shared/nai-models'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
@@ -1619,6 +1620,14 @@ const SceneCard = memo(function SceneCard({
   // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
   const addition = useSceneExtrasStore((s) => s.additions[scene.presetId]?.[scene.id])
+  const transparentBackground = useGenerationStore((s) => s.transparentBackground)
+  const model = useGenerationStore((s) => s.request.model)
+  const transparentOverride = useSceneExtrasStore(
+    (s) => s.transparentBackgrounds[scene.presetId]?.[scene.id]
+  )
+  const setSceneTransparentBackground = useSceneExtrasStore((s) => s.setSceneTransparentBackground)
+  const transparentEnabled = transparentOverride ?? transparentBackground
+  const canUseTransparentBackground = modelCaps(model).transparency
   const additionCount = hasAddition(addition)
     ? addition.characterIds.length + addition.charRefIds.length + addition.vibeIds.length
     : 0
@@ -1629,6 +1638,13 @@ const SceneCard = memo(function SceneCard({
     (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingSceneId === scene.id ? 1 : 0)
   )
   const badgeCount = scene.reserveCount + queueRemaining
+
+  const toggleSceneTransparentBackground = (): void => {
+    setSceneTransparentBackground(scene.presetId, scene.id, !transparentEnabled)
+  }
+  const inheritTransparentBackground = (): void => {
+    setSceneTransparentBackground(scene.presetId, scene.id, undefined)
+  }
 
   const checked = selection.has(scene.id)
   // 이미지 우선순위: 생성 중 스트리밍 > 저장 썸네일(가벼움, 드래그 렉 방지) > 원본 > 없음.
@@ -1862,6 +1878,36 @@ const SceneCard = memo(function SceneCard({
             )}
 
             {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
+            {canUseTransparentBackground && !editMode && (
+              <button
+                type="button"
+                data-testid={`scene-transparent-bg-${scene.id}`}
+                aria-pressed={transparentEnabled}
+                className={cn(
+                  'absolute right-1.5 top-9 z-10 grid size-7 place-items-center rounded-full text-white shadow transition',
+                  transparentEnabled
+                    ? 'bg-accent hover:bg-accent/85'
+                    : 'bg-black/60 text-white/80 hover:bg-black/80'
+                )}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleSceneTransparentBackground()
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  inheritTransparentBackground()
+                }}
+                title={
+                  transparentOverride === undefined
+                    ? `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (click to override)`
+                    : `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (double-click to use global)`
+                }
+              >
+                <ImageOff size={14} />
+              </button>
+            )}
+
             {selectionActive ? (
               <span
                 className={cn(

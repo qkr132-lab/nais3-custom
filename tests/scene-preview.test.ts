@@ -94,6 +94,21 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(invoke).not.toHaveBeenCalled()
   })
 
+  it('uses a scene Transparent BG override independently of the global toggle', () => {
+    useGenerationStore.setState({ transparentBackground: false })
+    useSceneExtrasStore.setState({
+      transparentBackgrounds: { 1: { 4: true } }
+    })
+    const request = buildSceneRequest(scene)
+    expect(request.transparentBackground).toBe(true)
+    expect(request.prompt).toContain('transparent background')
+
+    useSceneExtrasStore.setState({
+      transparentBackgrounds: { 1: { 4: false } }
+    })
+    expect(buildSceneRequest(scene).transparentBackground).toBe(false)
+  })
+
   it('includes each active queue entry, scene additions, duplicate seats and their role/tag overrides', () => {
     const entries = [
       entry('round A', [2]),

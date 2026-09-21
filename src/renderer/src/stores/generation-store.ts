@@ -360,16 +360,35 @@ export function withTransparentBackground(
   request: GenerationRequest,
   enabled: boolean
 ): GenerationRequest {
-  if (!enabled || !modelCaps(request.model).transparency) return request
-  if (/\btransparent\s+background\b/i.test(request.prompt)) return request
+  if (!modelCaps(request.model).transparency) {
+    if (request.transparentBackground === undefined) return request
+    const rest = { ...request }
+    delete rest.transparentBackground
+    return rest
+  }
+  if (!enabled) {
+    return { ...request, transparentBackground: false }
+  }
+  if (/\btransparent\s+background\b/i.test(request.prompt)) {
+    return { ...request, transparentBackground: true }
+  }
   if (request.promptParts) {
     const promptParts = {
       ...request.promptParts,
       detail: appendPrompt(request.promptParts.detail, 'transparent background')
     }
-    return { ...request, prompt: mergePromptParts(promptParts), promptParts }
+    return {
+      ...request,
+      prompt: mergePromptParts(promptParts),
+      promptParts,
+      transparentBackground: true
+    }
   }
-  return { ...request, prompt: appendPrompt(request.prompt, 'transparent background') }
+  return {
+    ...request,
+    prompt: appendPrompt(request.prompt, 'transparent background'),
+    transparentBackground: true
+  }
 }
 
 export function randomSeed(): number {

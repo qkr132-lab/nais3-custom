@@ -167,6 +167,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     ? extras.additions[scene.presetId]?.[scene.id]
     : undefined
   const add = hasAddition(rawAddition) ? rawAddition : null
+  const sceneTransparentBackground = extras.transparentBackgrounds[scene.presetId]?.[scene.id]
 
   /**
    * 자리 묶음은 통째로 한쪽만 쓴다 — 씬별 추가에 자리가 있으면 그것, 없으면 큐 항목 것.
@@ -351,7 +352,10 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
         }
       : undefined
   }
-  return withTransparentBackground(result, useGenerationStore.getState().transparentBackground)
+  return withTransparentBackground(
+    result,
+    sceneTransparentBackground ?? generation.transparentBackground
+  )
 }
 
 /** Read-only preview of each actual queue combination, without reserving or drawing images. */

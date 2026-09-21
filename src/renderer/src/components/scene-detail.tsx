@@ -3,9 +3,10 @@ import { BackgroundUseDialog } from './background-use-dialog'
 import { normalizeBackground } from '@shared/background-tags'
 import { promptTokenRequest } from '@shared/nai-tokens'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
-import { ArrowLeft, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, ImageOff, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
+import { modelCaps } from '@shared/nai-models'
 import { imageUrl } from '../lib/constants'
 import { imageDragOutProps } from '../lib/drag-out'
 import { ResolutionPicker } from './resolution-picker'
@@ -44,12 +45,19 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
 
   const source = useGenerationStore((s) => s.source)
   const request = useGenerationStore((s) => s.request)
+  const transparentBackground = useGenerationStore((s) => s.transparentBackground)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const charItems = useCharactersStore((s) => s.items)
   const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
   const sequenceEntries = useSceneExtrasStore((s) => s.entries)
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
   const additions = useSceneExtrasStore((s) => s.additions)
+  const transparentOverride = useSceneExtrasStore(
+    (s) => s.transparentBackgrounds[scene.presetId]?.[scene.id]
+  )
+  const setSceneTransparentBackground = useSceneExtrasStore((s) => s.setSceneTransparentBackground)
+  const effectiveTransparentBackground = transparentOverride ?? transparentBackground
+  const canUseTransparentBackground = modelCaps(request.model).transparency
   const previewPng = useGenerationStore((s) => s.previewPng)
   const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
   const streaming = generatingSceneId === scene.id
@@ -184,6 +192,29 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           height={scene.height}
           onPick={(width, height) => void update(scene.id, { width, height })}
         />
+        {canUseTransparentBackground && (
+          <Button
+            size="sm"
+            variant={effectiveTransparentBackground ? 'accent' : 'ghost'}
+            className="gap-1"
+            aria-pressed={effectiveTransparentBackground}
+            onClick={() =>
+              setSceneTransparentBackground(
+                scene.presetId,
+                scene.id,
+                !effectiveTransparentBackground
+              )
+            }
+            onDoubleClick={() => setSceneTransparentBackground(scene.presetId, scene.id, undefined)}
+            title={
+              transparentOverride === undefined
+                ? 'Scene Transparent BG: click to override the global setting'
+                : 'Scene Transparent BG: double-click to use the global setting'
+            }
+          >
+            <ImageOff size={13} /> BG
+          </Button>
+        )}
         {/* 생성 — 메인 "씬 생성"과 동일한 예약 생성 흐름 (예약 0이면 이 씬 1개 예약 후) */}
         <Button
           size="sm"

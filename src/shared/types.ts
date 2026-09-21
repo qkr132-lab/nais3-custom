@@ -112,6 +112,8 @@ export interface GenerationRequest {
   ucPreset: UcPresetIndex
   characterPrompts: CharacterPromptInput[]
   useCoords: boolean
+  /** V5 native alpha output requested by the Transparent BG toggle. */
+  transparentBackground?: boolean
   /** i2i/인페인트 강도·노이즈 (소스가 있을 때 사용) */
   i2iStrength?: number
   i2iNoise?: number

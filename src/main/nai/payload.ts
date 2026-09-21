@@ -281,7 +281,10 @@ export function buildGenerateImagePayload(
         ? {
             tag_hint_qt: req.qualityToggle ? 1 : 0,
             tag_hint_uc_preset: req.ucPreset,
-            tag_hint_transparent_background: null
+            // The prompt tag guides the model, while these native V5 fields
+            // are what make the response an actual RGBA PNG.
+            straight_alpha: req.transparentBackground === true ? true : null,
+            tag_hint_transparent_background: req.transparentBackground === true ? true : null
           }
         : {}),
       deliberate_euler_ancestral_bug: false,
