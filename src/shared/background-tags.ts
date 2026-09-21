@@ -39,8 +39,8 @@ function splitTopLevelPrompt(prompt: string): string[] {
       i++
       continue
     }
-    if ('{[('.includes(prompt[i])) depth++
-    if ('}])'.includes(prompt[i])) depth--
+    if ('{['.includes(prompt[i])) depth++
+    if ('}]'.includes(prompt[i])) depth--
     if (prompt[i] === ',' && !weighted && depth === 0) {
       parts.push(prompt.slice(start, i))
       start = i + 1
@@ -73,16 +73,28 @@ export function stripSimpleBackgrounds(prompt: string): string {
 export function stripBackgroundTags(prompt: string): string {
   const clean = removeComments(prompt)
   const parts = splitTopLevelPrompt(clean)
-  const keep = parts.filter((part) => {
-    const tag = part
-      .trim()
-      .replace(/^[-+]?\d+(?:\.\d+)?::\s*/, '')
-      .replace(/\s*::$/, '')
-      .replace(/_/g, ' ')
-    return tag.length > 0 && !BACKGROUND_TAG.test(tag)
-  })
-  return keep
-    .map((part) => part.trim())
-    .filter(Boolean)
+  const cleanToken = (part: string): string | null => {
+    const tag = part.trim()
+    if (!tag) return null
+
+    const weighted = tag.match(/^([-+]?\d+(?:\.\d+)?::\s*)([\s\S]*?)(\s*::)$/)
+    if (weighted) {
+      const inner = cleanToken(weighted[2])
+      return inner ? `${weighted[1]}${inner}${weighted[3]}` : null
+    }
+
+    const grouped =
+      (tag.startsWith('{') && tag.endsWith('}')) || (tag.startsWith('[') && tag.endsWith(']'))
+    if (grouped) {
+      const inner = stripBackgroundTags(tag.slice(1, -1))
+      return inner ? `${tag[0]}${inner}${tag[tag.length - 1]}` : null
+    }
+
+    return BACKGROUND_TAG.test(tag.replace(/_/g, ' ')) ? null : tag
+  }
+
+  return parts
+    .map(cleanToken)
+    .filter((part): part is string => part != null)
     .join(', ')
 }

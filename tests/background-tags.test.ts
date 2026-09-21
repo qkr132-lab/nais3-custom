@@ -47,6 +47,9 @@ describe('scene backgrounds', () => {
         '1girl, rural background, 1.5::white background::, transparent_background, blue eyes, smile'
       )
     ).toBe('1girl, blue eyes, smile')
+    expect(stripBackgroundTags('{white background, dress}, 1.5::{rural background, smile}::')).toBe(
+      '{dress}, 1.5::{smile}::'
+    )
   })
   it('inserts the background before detail and only cleans the generation copy', () => {
     const parts = {
