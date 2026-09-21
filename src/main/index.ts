@@ -22,6 +22,7 @@ import { processWildcards } from './fragments/processor'
 import type { FragmentTrace } from './fragments/processor'
 import { removeComments } from '../shared/nai-presets'
 import { refreshScenePrompts } from '../shared/scene-request'
+import { withTransparentBackground } from '../shared/transparent-background'
 import type { FragmentPromptMetadata } from '../shared/types'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
@@ -178,7 +179,12 @@ app.whenReady().then(async () => {
     // 주석 제거가 반드시 먼저 — 주석 줄이 조각을 소모하거나(순차 카운터),
     // 와일드카드 처리의 재조립이 개행을 지워 주석 범위가 전체로 번지는 것 방지 (NAIS2와 동일 순서)
     const latestScene = rawRequest.sceneId ? getScene(rawRequest.sceneId) : null
-    const queuedRequest = latestScene ? refreshScenePrompts(rawRequest, latestScene) : rawRequest
+    const refreshedRequest = latestScene ? refreshScenePrompts(rawRequest, latestScene) : rawRequest
+    // Scene refresh rebuilds authored prompt text; reapply the send-only tag after it.
+    const queuedRequest =
+      refreshedRequest.transparentBackground === true
+        ? withTransparentBackground(refreshedRequest, true)
+        : refreshedRequest
     const fragSource = fragmentSource()
     const fragmentPrompts: FragmentPromptMetadata[] = []
     const sub = (text: string, location: string): string => {

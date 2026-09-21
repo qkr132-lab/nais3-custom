@@ -10,14 +10,15 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
-import { appendPrompt, mergePromptParts } from '@shared/scene-request'
-import { stripBackgroundTags } from '@shared/background-tags'
+import { mergePromptParts } from '@shared/scene-request'
+import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
   restorePromptRequest,
   requestForPromptMode
 } from '@shared/prompt-state'
 export { mergePromptParts } from '@shared/scene-request'
+export { withTransparentBackground } from '@shared/transparent-background'
 
 /**
  * UI 상태 전용 스토어 — persist 금지 (NAIS3 원칙).
@@ -354,40 +355,6 @@ export async function setI2iSource(filePath: string): Promise<void> {
     width: res.width,
     height: res.height
   })
-}
-
-/** V5 웹 UI의 Transparent BG 토글과 같은 동작. 원본 입력은 보존하고 전송본에만 태그를 붙인다. */
-export function withTransparentBackground(
-  request: GenerationRequest,
-  enabled: boolean
-): GenerationRequest {
-  if (!modelCaps(request.model).transparency) {
-    if (request.transparentBackground === undefined) return request
-    const rest = { ...request }
-    delete rest.transparentBackground
-    return rest
-  }
-  if (!enabled) {
-    return { ...request, transparentBackground: false }
-  }
-  if (request.promptParts) {
-    const promptParts = {
-      base: stripBackgroundTags(request.promptParts.base),
-      additional: stripBackgroundTags(request.promptParts.additional),
-      detail: stripBackgroundTags(request.promptParts.detail)
-    }
-    return {
-      ...request,
-      prompt: appendPrompt(mergePromptParts(promptParts), 'transparent background'),
-      promptParts,
-      transparentBackground: true
-    }
-  }
-  return {
-    ...request,
-    prompt: appendPrompt(stripBackgroundTags(request.prompt), 'transparent background'),
-    transparentBackground: true
-  }
 }
 
 export function randomSeed(): number {

@@ -12,7 +12,11 @@ const { invoke } = vi.hoisted(() => {
 })
 
 import { buildSceneRequest, previewSceneRequests } from '../src/renderer/src/stores/scenes-store'
-import { DEFAULT_REQUEST, useGenerationStore } from '../src/renderer/src/stores/generation-store'
+import {
+  DEFAULT_REQUEST,
+  useGenerationStore,
+  withTransparentBackground
+} from '../src/renderer/src/stores/generation-store'
 import { useCharactersStore } from '../src/renderer/src/stores/characters-store'
 import { useSceneExtrasStore } from '../src/renderer/src/stores/scene-extras-store'
 
@@ -119,6 +123,15 @@ describe('scene token preview uses the actual generation request builder', () =>
       transparentBackgrounds: { 1: { 4: false } }
     })
     expect(buildSceneRequest(scene).transparentBackground).toBe(false)
+  })
+
+  it('reapplies the scene tag after the main-process scene refresh rebuilds prompt text', async () => {
+    const request = buildSceneRequest(scene)
+    const { refreshScenePrompts } = await import('../src/shared/scene-request')
+    const refreshed = refreshScenePrompts(request, scene)
+    expect(refreshed.prompt).not.toContain('transparent background')
+    const queued = withTransparentBackground(refreshed, true)
+    expect(queued.prompt).toContain('transparent background')
   })
 
   it('includes each active queue entry, scene additions, duplicate seats and their role/tag overrides', () => {
