@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeBackground, stripSimpleBackgrounds } from '../src/shared/background-tags'
+import {
+  normalizeBackground,
+  stripBackgroundTags,
+  stripSimpleBackgrounds
+} from '../src/shared/background-tags'
 import { scenePositivePrompt, refreshScenePrompts } from '../src/shared/scene-request'
 import type { GenerationRequest } from '../src/shared/types'
 
@@ -36,6 +40,13 @@ describe('scene backgrounds', () => {
     expect(stripSimpleBackgrounds('smile, {white background, dress}, blue eyes')).toBe(
       'smile, {white background, dress}, blue eyes'
     )
+  })
+  it('removes every NAI tag containing background, including weighted and underscore forms', () => {
+    expect(
+      stripBackgroundTags(
+        '1girl, rural background, 1.5::white background::, transparent_background, blue eyes, smile'
+      )
+    ).toBe('1girl, blue eyes, smile')
   })
   it('inserts the background before detail and only cleans the generation copy', () => {
     const parts = {

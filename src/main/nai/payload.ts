@@ -30,7 +30,6 @@ export {
   removeComments
 } from '../../shared/nai-presets'
 import { preparePromptCaptions } from '../../shared/nai-prompts'
-import { appendPrompt } from '../../shared/scene-request'
 import { effectiveNoiseSchedule, isV5, modelCaps } from '../../shared/nai-models'
 
 /**
@@ -133,15 +132,9 @@ export function buildGenerateImagePayload(
   opts: BuildOptions = {}
 ): NaiImagePayload {
   const captions = preparePromptCaptions(req)
-  // The web client makes the prompt tag authoritative for alpha transparency.
-  // Keep this invariant at the payload boundary so scene rebuilds, wildcard
-  // expansion, and every queue path cannot accidentally drop it.
-  const prompt =
-    isV5(req.model) && req.transparentBackground === true
-      ? /\btransparent\s+background\b/i.test(captions.positive.base)
-        ? captions.positive.base
-        : appendPrompt(captions.positive.base, 'transparent background')
-      : captions.positive.base
+  // The renderer prepares the send copy, removing other `* background` tags
+  // before adding NAI's `transparent background` tag.
+  const prompt = captions.positive.base
   const negative = captions.negative.base
   const activeChars = captions.activeCharacters
   const center = (c: (typeof activeChars)[number]): { x: number; y: number } =>
@@ -154,8 +147,7 @@ export function buildGenerateImagePayload(
     input: prompt,
     model: req.model,
     parameters: {
-      // NovelAI's current web client uses params_version 4 for V5. The V5
-      // transparent-background fields are ignored by the older v3 schema.
+      // NovelAI's current web client uses params_version 4 for V5.
       params_version: isV5(req.model) ? 4 : 3,
       width: req.width,
       height: req.height,
@@ -291,11 +283,7 @@ export function buildGenerateImagePayload(
       ...(isV5(req.model)
         ? {
             tag_hint_qt: req.qualityToggle ? 1 : 0,
-            tag_hint_uc_preset: req.ucPreset,
-            // The prompt tag guides the model, while these native V5 fields
-            // are what make the response an actual RGBA PNG.
-            straight_alpha: req.transparentBackground === true ? true : null,
-            tag_hint_transparent_background: req.transparentBackground === true ? true : null
+            tag_hint_uc_preset: req.ucPreset
           }
         : {}),
       deliberate_euler_ancestral_bug: false,

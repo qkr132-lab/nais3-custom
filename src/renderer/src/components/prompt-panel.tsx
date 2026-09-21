@@ -416,7 +416,7 @@ export function PromptPanel(): React.JSX.Element {
               ? 'border-accent bg-accent/15 text-accent'
               : 'border-line text-muted hover:border-accent/60 hover:text-ink')
           }
-          title="V5 전용: 전송 프롬프트에 transparent background를 추가하고 알파 PNG를 요청합니다."
+          title="V5: ?? ?? ??? ????? ???? transparent background? ?????."
         >
           <ImageOff size={13} /> Transparent BG
         </button>

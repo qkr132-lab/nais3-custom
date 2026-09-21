@@ -11,6 +11,7 @@ import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './charact
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 import { appendPrompt, mergePromptParts } from '@shared/scene-request'
+import { stripBackgroundTags } from '@shared/background-tags'
 import {
   patchPromptRequest,
   restorePromptRequest,
@@ -369,24 +370,22 @@ export function withTransparentBackground(
   if (!enabled) {
     return { ...request, transparentBackground: false }
   }
-  if (/\btransparent\s+background\b/i.test(request.prompt)) {
-    return { ...request, transparentBackground: true }
-  }
   if (request.promptParts) {
     const promptParts = {
-      ...request.promptParts,
-      detail: appendPrompt(request.promptParts.detail, 'transparent background')
+      base: stripBackgroundTags(request.promptParts.base),
+      additional: stripBackgroundTags(request.promptParts.additional),
+      detail: stripBackgroundTags(request.promptParts.detail)
     }
     return {
       ...request,
-      prompt: mergePromptParts(promptParts),
+      prompt: appendPrompt(mergePromptParts(promptParts), 'transparent background'),
       promptParts,
       transparentBackground: true
     }
   }
   return {
     ...request,
-    prompt: appendPrompt(request.prompt, 'transparent background'),
+    prompt: appendPrompt(stripBackgroundTags(request.prompt), 'transparent background'),
     transparentBackground: true
   }
 }

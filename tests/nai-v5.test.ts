@@ -111,30 +111,21 @@ describe('V5 payload', () => {
     const v5 = params(v5Request)
     expect(v5.tag_hint_qt).toBe(1)
     expect(v5.tag_hint_uc_preset).toBe(2)
-    expect(v5).toHaveProperty('tag_hint_transparent_background')
+    expect(v5).not.toHaveProperty('tag_hint_transparent_background')
     // 퀄리티 태그를 끄면 0
     expect(params({ ...v5Request, qualityToggle: false }).tag_hint_qt).toBe(0)
     // V4.5에는 없다 (웹 패리티)
     expect(params({ ...v5Request, model: 'nai-diffusion-4-5-full' }).tag_hint_qt).toBeUndefined()
   })
 
-  it('모델 id가 그대로 실린다', () => {
+  it('Transparent BG remains a prompt-only toggle at the payload boundary', () => {
     expect(params(v5Request).params_version).toBe(4)
-    expect(params({ ...v5Request, transparentBackground: true }).straight_alpha).toBe(true)
-    expect(
-      params({ ...v5Request, transparentBackground: true }).tag_hint_transparent_background
-    ).toBe(true)
-    expect(params({ ...v5Request, transparentBackground: true }).v4_prompt).toMatchObject({
-      caption: { base_caption: expect.stringContaining('transparent background') }
-    })
-    expect(
-      buildGenerateImagePayload({ ...v5Request, transparentBackground: true }).input
-    ).toContain('transparent background')
-    expect(params(v5Request).straight_alpha).toBeNull()
-    expect(params(v5Request).tag_hint_transparent_background).toBeNull()
+    const payload = buildGenerateImagePayload({ ...v5Request, transparentBackground: true })
+    expect(payload.input).toBe('1girl, silver hair, very aesthetic, masterpiece, no text')
+    expect(payload.parameters).not.toHaveProperty('straight_alpha')
+    expect(payload.parameters).not.toHaveProperty('tag_hint_transparent_background')
     expect(buildGenerateImagePayload(v5Request).model).toBe('nai-diffusion-5-full')
   })
-
   it('캐릭터 좌표는 연속값을 반올림 없이 그대로 보낸다 (V5 자유 배치)', () => {
     const req: GenerationRequest = {
       ...v5Request,

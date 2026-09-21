@@ -25,10 +25,10 @@ export function normalizeBackground(raw: unknown): SceneBackground {
 const SIMPLE =
   /^(?:simple|white|pink|black|grey|gray|red|blue|green|yellow|orange|purple|brown|beige|solid|plain|transparent) background$/i
 
-/** Conservative: never split a weighted group or alter negative emphasis / free prose. */
-export function stripSimpleBackgrounds(prompt: string): string {
-  prompt = removeComments(prompt)
-  // Track all emphasis delimiters so commas inside a group remain untouched.
+/** Remove NAI background tags from a generation copy. */
+const BACKGROUND_TAG = /(^|\s)background(\s|$)/i
+
+function splitTopLevelPrompt(prompt: string): string[] {
   const parts: string[] = []
   let start = 0
   let weighted = false
@@ -39,14 +39,21 @@ export function stripSimpleBackgrounds(prompt: string): string {
       i++
       continue
     }
-    if ('{['.includes(prompt[i])) depth++
-    if ('}]'.includes(prompt[i])) depth--
+    if ('{[('.includes(prompt[i])) depth++
+    if ('}])'.includes(prompt[i])) depth--
     if (prompt[i] === ',' && !weighted && depth === 0) {
       parts.push(prompt.slice(start, i))
       start = i + 1
     }
   }
   parts.push(prompt.slice(start))
+  return parts
+}
+
+/** Conservative: never split a weighted group or alter negative emphasis / free prose. */
+export function stripSimpleBackgrounds(prompt: string): string {
+  prompt = removeComments(prompt)
+  const parts = splitTopLevelPrompt(prompt)
   const keep = parts.filter((part) => {
     const t = part.trim().replace(/_/g, ' ')
     if (SIMPLE.test(t)) return false
@@ -60,4 +67,22 @@ export function stripSimpleBackgrounds(prompt: string): string {
         .map((p) => p.trim())
         .filter(Boolean)
         .join(', ')
+}
+
+/** Remove every comma-delimited NAI tag whose name identifies a background. */
+export function stripBackgroundTags(prompt: string): string {
+  const clean = removeComments(prompt)
+  const parts = splitTopLevelPrompt(clean)
+  const keep = parts.filter((part) => {
+    const tag = part
+      .trim()
+      .replace(/^[-+]?\d+(?:\.\d+)?::\s*/, '')
+      .replace(/\s*::$/, '')
+      .replace(/_/g, ' ')
+    return tag.length > 0 && !BACKGROUND_TAG.test(tag)
+  })
+  return keep
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(', ')
 }

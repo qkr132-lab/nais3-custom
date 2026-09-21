@@ -96,12 +96,24 @@ describe('scene token preview uses the actual generation request builder', () =>
 
   it('uses a scene Transparent BG override independently of the global toggle', () => {
     useGenerationStore.setState({ transparentBackground: false })
+    useGenerationStore.setState({
+      request: {
+        ...useGenerationStore.getState().request,
+        prompt: 'sky, rural background, white background',
+        promptParts: {
+          base: 'sky, rural background, white background',
+          additional: 'clouds',
+          detail: 'detailed'
+        }
+      }
+    })
     useSceneExtrasStore.setState({
       transparentBackgrounds: { 1: { 4: true } }
     })
     const request = buildSceneRequest(scene)
     expect(request.transparentBackground).toBe(true)
     expect(request.prompt).toContain('transparent background')
+    expect(request.prompt).not.toMatch(/\b(?:rural|white) background\b/i)
 
     useSceneExtrasStore.setState({
       transparentBackgrounds: { 1: { 4: false } }
