@@ -124,6 +124,12 @@ describe('V5 payload', () => {
     expect(
       params({ ...v5Request, transparentBackground: true }).tag_hint_transparent_background
     ).toBe(true)
+    expect(params({ ...v5Request, transparentBackground: true }).v4_prompt).toMatchObject({
+      caption: { base_caption: expect.stringContaining('transparent background') }
+    })
+    expect(
+      buildGenerateImagePayload({ ...v5Request, transparentBackground: true }).input
+    ).toContain('transparent background')
     expect(params(v5Request).straight_alpha).toBeNull()
     expect(params(v5Request).tag_hint_transparent_background).toBeNull()
     expect(buildGenerateImagePayload(v5Request).model).toBe('nai-diffusion-5-full')

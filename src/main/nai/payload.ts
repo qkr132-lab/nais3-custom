@@ -30,6 +30,7 @@ export {
   removeComments
 } from '../../shared/nai-presets'
 import { preparePromptCaptions } from '../../shared/nai-prompts'
+import { appendPrompt } from '../../shared/scene-request'
 import { effectiveNoiseSchedule, isV5, modelCaps } from '../../shared/nai-models'
 
 /**
@@ -132,7 +133,15 @@ export function buildGenerateImagePayload(
   opts: BuildOptions = {}
 ): NaiImagePayload {
   const captions = preparePromptCaptions(req)
-  const prompt = captions.positive.base
+  // The web client makes the prompt tag authoritative for alpha transparency.
+  // Keep this invariant at the payload boundary so scene rebuilds, wildcard
+  // expansion, and every queue path cannot accidentally drop it.
+  const prompt =
+    isV5(req.model) && req.transparentBackground === true
+      ? /\btransparent\s+background\b/i.test(captions.positive.base)
+        ? captions.positive.base
+        : appendPrompt(captions.positive.base, 'transparent background')
+      : captions.positive.base
   const negative = captions.negative.base
   const activeChars = captions.activeCharacters
   const center = (c: (typeof activeChars)[number]): { x: number; y: number } =>
