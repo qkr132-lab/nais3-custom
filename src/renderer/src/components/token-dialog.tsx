@@ -28,6 +28,7 @@ import { useFragmentsStore } from '../stores/fragments-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { usePromptPresetsStore } from '../stores/prompt-presets-store'
 import { useScenesStore } from '../stores/scenes-store'
+import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useUpdateStore } from '../stores/update-store'
 import { askConfirm, getConfirmsDisabled, setConfirmsDisabled } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -503,6 +504,8 @@ function BackupButtons(): React.JSX.Element {
           void useCharRefsStore.getState().load()
           void usePromptPresetsStore.getState().load()
           void useScenesStore.getState().loadPresets()
+          // 씬별 캐릭터 추가·큐 반복 — 안 다시 읽으면 다음 편집 때 복원한 내용을 예전 값으로 덮어쓴다
+          void useSceneExtrasStore.getState().reload()
           // 메인 프롬프트가 바뀌었으면 재하이드레이트
           if (r.needsPromptReload) void useGenerationStore.getState().hydrate()
         }}

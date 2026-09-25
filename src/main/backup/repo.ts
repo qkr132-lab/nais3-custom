@@ -4,6 +4,7 @@ import { join } from 'path'
 import { getDb } from '../db'
 import { getNaiToken, getSetting, setNaiToken, setSetting } from '../db/settings'
 import { imagesRoot } from '../images/storage'
+import { pruneSceneExtras, type SceneExtrasFile } from '../../shared/scene-bundle'
 
 /**
  * NAIS3 데이터 내보내기/가져오기 (백업/이전).
@@ -28,6 +29,28 @@ const TABLES = [
 
 // file_path의 실제 이미지를 인라인해야 하는 테이블
 const IMAGE_TABLES = new Set(['vibe_images', 'charref_images'])
+
+/**
+ * 휴지통을 쓰는 테이블 (커스텀) — 지운 행은 백업에 싣지 않는다.
+ * 통째로 뜨면 휴지통 씬·캐릭터까지 따라가 "지운 게 백업에 같이 들어간다"가 된다.
+ * 실수 복구용 휴지통은 자동 DB 스냅샷(backups/*.db)이 따로 들고 있다.
+ */
+const SOFT_DELETE = new Set<string>(['character_folders', 'character_prompts', 'gen_scenes'])
+
+/** scene_extras에서 백업에 안 실린 씬·캐릭터의 흔적을 걷어낸다. 손상돼 있으면 그대로 둔다 */
+function pruneExtrasSetting(raw: string, liveScenes: Set<number>, liveChars: Set<number>): string {
+  try {
+    return JSON.stringify(
+      pruneSceneExtras(
+        JSON.parse(raw) as SceneExtrasFile,
+        (id) => liveScenes.has(id),
+        (id) => liveChars.has(id)
+      )
+    )
+  } catch {
+    return raw
+  }
+}
 
 // 백업에 항상 포함하는 앱 설정 (비밀 아님 — 이식 가능한 사용자 취향/구성, 커스텀)
 const SETTINGS_KEYS = [
@@ -62,7 +85,8 @@ export function exportAll(includeSecrets = false): Record<string, unknown> {
   const db = getDb()
   const tables: Record<string, Row[]> = {}
   for (const t of TABLES) {
-    const rows = db.prepare(`SELECT * FROM ${t}`).all() as Row[]
+    const live = SOFT_DELETE.has(t) ? ' WHERE deleted_at IS NULL' : ''
+    const rows = db.prepare(`SELECT * FROM ${t}${live}`).all() as Row[]
     tables[t] = rows.map((r) => {
       const out: Row = {}
       for (const [k, v] of Object.entries(r)) out[k] = encodeValue(v)
@@ -78,11 +102,24 @@ export function exportAll(includeSecrets = false): Record<string, unknown> {
     })
   }
 
+  // 휴지통 폴더를 빼면서 끊긴 참조 — 살아 있는 폴더·카드가 사라진 폴더를 가리키지 않게
+  const liveFolders = new Set(tables.character_folders.map((r) => r.id as number))
+  for (const r of tables.character_folders) {
+    if (r.parent_id != null && !liveFolders.has(r.parent_id as number)) r.parent_id = null
+  }
+  for (const r of tables.character_prompts) {
+    if (r.folder_id != null && !liveFolders.has(r.folder_id as number)) r.folder_id = null
+  }
+  const liveScenes = new Set(tables.gen_scenes.map((r) => r.id as number))
+  const liveChars = new Set(tables.character_prompts.map((r) => r.id as number))
+
   // 앱 설정(비밀 아님) — 항상 포함 (커스텀)
   const settings: Record<string, string> = {}
   for (const k of SETTINGS_KEYS) {
     const v = getSetting(k)
-    if (v != null) settings[k] = v
+    if (v == null) continue
+    // 씬별 캐릭터 추가·큐 반복 — 지운 씬의 설정과 지운 캐릭터를 가리키는 좌석·태그를 뺀다
+    settings[k] = k === 'scene_extras' ? pruneExtrasSetting(v, liveScenes, liveChars) : v
   }
 
   const out: Record<string, unknown> = {

@@ -10,6 +10,7 @@ import type {
 import { isFullBackup, planImport, remapUidMap, remapUids } from '../../shared/character-backup'
 import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
+import { decodeSlotExtras, encodeSlotExtras, type SceneSetup } from '../../shared/scene-bundle'
 import { createCharacter, createFolder, deleteCharacter, updateCharacter } from './repo'
 
 /**
@@ -27,26 +28,9 @@ import { createCharacter, createFolder, deleteCharacter, updateCharacter } from 
 
 const EXTRAS_KEY = 'scene_extras'
 
-interface SceneAddition {
-  characterIds: number[]
-  charRefIds: number[]
-  vibeIds: number[]
-  useCoords?: boolean
-  positions?: Record<number, { x: number; y: number }>
-  roles?: Record<number, 'source' | 'target' | null>
-}
+type SceneAddition = SceneSetup & { charRefIds: number[]; vibeIds: number[] }
 
-interface SequenceEntry {
-  id: string
-  name: string
-  characterIds: number[]
-  charRefIds: number[]
-  vibeIds: number[]
-  enabled: boolean
-  useCoords?: boolean
-  positions?: Record<number, { x: number; y: number }>
-  roles?: Record<number, 'source' | 'target' | null>
-}
+type SequenceEntry = SceneAddition & { id: string; name: string; enabled: boolean }
 
 interface SceneExtras {
   sequenceEnabled?: boolean
@@ -72,13 +56,16 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
   const db = getDb()
 
   const folderRows = db
-    .prepare('SELECT id, name, color, parent_id FROM character_folders ORDER BY sort_order')
+    // 휴지통 폴더는 싣지 않는다 — 가져오면 살아 있는 폴더로 되살아나 버린다
+    .prepare(
+      'SELECT id, name, color, parent_id FROM character_folders WHERE deleted_at IS NULL ORDER BY sort_order'
+    )
     .all() as { id: number; name: string; color: string | null; parent_id: number | null }[]
   const folderName = new Map(folderRows.map((f) => [f.id, f.name]))
 
   const cardRows = db
     .prepare(
-      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, enabled, folder_id,
+      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, slot_no, enabled, folder_id,
               char_ref_id, thumbnail
        FROM character_prompts WHERE deleted_at IS NULL ORDER BY sort_order, id`
     )
@@ -90,6 +77,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     center_x: number
     center_y: number
     role: string | null
+    slot_no: number | null
     enabled: number
     folder_id: number | null
     char_ref_id: number | null
@@ -112,6 +100,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     negativePrompt: r.negative_prompt,
     center: { x: r.center_x, y: r.center_y },
     role: r.role === 'source' || r.role === 'target' ? r.role : null,
+    ...(r.slot_no != null ? { slotNo: r.slot_no } : {}),
     enabled: r.enabled === 1,
     folder: r.folder_id != null ? (folderName.get(r.folder_id) ?? null) : null,
     charRefName: r.char_ref_id != null ? (refName.get(r.char_ref_id) ?? null) : null,
@@ -119,6 +108,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
   }))
 
   const known = new Set(cardRows.map((r) => r.id))
+  const uidIfKnown = (id: number): string | undefined => (known.has(id) ? uidOf(id) : undefined)
   const keepUids = (ids: number[] | undefined): string[] =>
     (ids ?? []).filter((id) => known.has(id)).map(uidOf)
   const keepMap = <V>(map: Record<number, V> | undefined): Record<string, V> => {
@@ -153,14 +143,16 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       const scene = sceneName.get(Number(sceneId))
       if (!scene) continue
       const characterUids = keepUids(addition.characterIds)
-      if (!characterUids.length) continue
+      const slotExtras = encodeSlotExtras(addition, uidIfKnown)
+      if (!characterUids.length && !slotExtras.slots) continue
       sceneLinks.push({
         preset,
         scene,
         characterUids,
         useCoords: addition.useCoords,
         positions: keepMap(addition.positions),
-        roles: keepMap(addition.roles)
+        roles: keepMap(addition.roles),
+        ...slotExtras
       })
     }
   }
@@ -172,9 +164,10 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       characterUids: keepUids(e.characterIds),
       useCoords: e.useCoords,
       positions: keepMap(e.positions),
-      roles: keepMap(e.roles)
+      roles: keepMap(e.roles),
+      ...encodeSlotExtras(e, uidIfKnown)
     }))
-    .filter((e) => e.characterUids.length > 0)
+    .filter((e) => e.characterUids.length > 0 || !!e.slots)
 
   const backup: CharacterBackup = {
     version: 3,
@@ -351,9 +344,10 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
     if (!name?.trim()) return null
     const cached = folderIds.get(name)
     if (cached !== undefined) return cached
-    const found = db.prepare('SELECT id FROM character_folders WHERE name = ? LIMIT 1').get(name) as
-      | { id: number }
-      | undefined
+    // 휴지통 폴더에 넣으면 카드가 안 보인다 — 살아 있는 폴더만 찾는다
+    const found = db
+      .prepare('SELECT id FROM character_folders WHERE name = ? AND deleted_at IS NULL LIMIT 1')
+      .get(name) as { id: number } | undefined
     const id = found?.id ?? createFolder(name)
     folderIds.set(name, id)
     return id
@@ -384,6 +378,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
         enabled: false,
         center: c.center,
         role: c.role,
+        ...(Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? { slotNo: c.slotNo } : {}),
         ...(c.charRefName && refIds.has(c.charRefName)
           ? { charRefId: refIds.get(c.charRefName) }
           : {})
@@ -433,7 +428,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       continue
     }
     const characterIds = remapUids(link.characterUids, uidToId)
-    if (!characterIds.length) {
+    const slot = decodeSlotExtras(link, (uid) => uidToId.get(uid))
+    if (!characterIds.length && !slot.extras.slots) {
       dropped++
       continue
     }
@@ -449,7 +445,19 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       vibeIds: prev?.vibeIds ?? [],
       useCoords: link.useCoords ?? prev?.useCoords,
       positions: { ...(prev?.positions ?? {}), ...remapUidMap(link.positions, uidToId) },
-      roles: { ...(prev?.roles ?? {}), ...remapUidMap(link.roles, uidToId) }
+      roles: { ...(prev?.roles ?? {}), ...remapUidMap(link.roles, uidToId) },
+      charTags: { ...(prev?.charTags ?? {}), ...(slot.extras.charTags ?? {}) },
+      // 자리 묶음은 통째로 바꾼다 — 좌석·역할·태그가 자리 번호로 엮여 있어, 기존 배치와
+      // 섞으면 엉뚱한 자리에 붙는다. 백업에 자리가 없으면 기존 배치를 그대로 둔다.
+      ...(slot.extras.slots
+        ? {
+            slots: slot.extras.slots,
+            slotChars: slot.extras.slotChars ?? {},
+            slotRoles: slot.extras.slotRoles ?? {},
+            slotTags: slot.extras.slotTags ?? {},
+            slotOf: {}
+          }
+        : {})
     }
     restoredLinks++
   }
@@ -458,7 +466,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
   let restoredEntries = 0
   for (const e of backup.queueEntries) {
     const characterIds = remapUids(e.characterUids, uidToId)
-    if (!characterIds.length) continue
+    const slot = decodeSlotExtras(e, (uid) => uidToId.get(uid))
+    if (!characterIds.length && !slot.extras.slots) continue
     entries.push({
       id: `imported_${Date.now().toString(36)}_${restoredEntries}`,
       name: e.name,
@@ -468,7 +477,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       enabled: e.enabled,
       useCoords: e.useCoords,
       positions: remapUidMap(e.positions, uidToId),
-      roles: remapUidMap(e.roles, uidToId)
+      roles: remapUidMap(e.roles, uidToId),
+      ...slot.extras
     })
     restoredEntries++
   }

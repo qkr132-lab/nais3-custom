@@ -2,6 +2,7 @@
 // 규칙: 렌더러는 이 타입들로만 메인과 대화한다 (IPC 계약).
 
 import type { OpusUsage } from './opus-usage'
+import type { SceneSetup } from './scene-bundle'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
 export type { OpusUsage }
@@ -809,14 +810,20 @@ export interface IpcInvokeMap {
   /** 씬 이미지 폴더 열기 (NAIS3_scene/<프리셋>/<씬>) */
   'scenes:openFolder': { req: { sceneId: number }; res: { ok: boolean } }
   /** 씬 JSON 내보내기/불러오기 (파일 다이얼로그, 활성 프리셋 기준) */
-  'scenes:exportJson': { req: { presetId: number }; res: { saved: boolean } }
-  /** 불러오기 — 씬에 캐릭터탭(characters/sharedCharacters)이 실려 있으면 카드로 만들고
-   *  additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에 연결한다. roles = 행위 역할 (커스텀) */
+  /** 내보내기 (v2) — 살아 있는 씬과 그 캐릭터 구성 전부. shared = 모든 씬 공용으로 실은 카드 수 */
+  'scenes:exportJson': {
+    req: { presetId: number }
+    res: { saved: boolean; scenes: number; characters: number; shared: number }
+  }
+  /** 불러오기 — 씬에 캐릭터 구성이 실려 있으면 카드를 만들고, 씬마다의 구성(씬별 캐릭터·
+   *  위치·역할·자리·자리 태그·씬 태그)을 additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에
+   *  그대로 넣는다. dropped = 파일 안에서 가리키는 카드를 못 찾아 버린 연결 수 (커스텀) */
   'scenes:importJson': {
     req: { presetId: number }
     res: {
       count: number
-      additions: { sceneId: number; characterIds: number[]; roles?: CharRoles }[]
+      additions: { sceneId: number; setup: SceneSetup }[]
+      dropped: number
     }
   }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */

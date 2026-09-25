@@ -5,6 +5,7 @@ import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { useCharactersStore } from '../stores/characters-store'
+import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
@@ -62,6 +63,9 @@ export function CharacterBackupDialog({
     const r = await window.nais.invoke('chars:importBackup', { filePath: preview.filePath, mode })
     setBusy(false)
     await load()
+    // 복원이 씬별 캐릭터 추가·큐 반복 연결을 디스크에 썼다 — 다시 읽어야 화면에 뜨고,
+    // 안 읽으면 다음 편집 때 메모리의 예전 값이 복원한 연결을 덮어쓴다
+    await useSceneExtrasStore.getState().reload()
     onClose()
     toast(
       `캐릭터 ${r.created}개 복원` +

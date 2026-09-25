@@ -61,7 +61,7 @@ import {
   useState,
   type CSSProperties
 } from 'react'
-import type { R2SyncConfig, Scene, ScenePreset } from '@shared/types'
+import type { CharRole, CharRoles, R2SyncConfig, Scene, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
 import { useGenerationStore } from '../stores/generation-store'
@@ -125,6 +125,14 @@ export function SceneMode({
   const selected = scenes.find((s) => s.id === selectedId) ?? null
   if (selected) return <SceneDetail scene={selected} />
   return <SceneGrid />
+}
+
+/** 파일에서 온 역할 맵의 빈 값(null)을 걷어 씬별 설정 모양으로 */
+function stripNullRoles(roles?: Record<number, CharRole | null>): CharRoles | undefined {
+  if (!roles) return undefined
+  const out: CharRoles = {}
+  for (const [id, role] of Object.entries(roles)) if (role) out[Number(id)] = role
+  return out
 }
 
 /** NAIS2식 프리셋 드롭다운 — 현재 프리셋 표시 + 전환/추가/이름변경/삭제 */
@@ -615,10 +623,16 @@ function SceneGrid(): React.JSX.Element {
   const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
 
   async function exportJson(): Promise<void> {
-    await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
+    const r = await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
+    if (!r.saved) return
+    toast(
+      `씬 ${r.scenes}개 · 캐릭터 ${r.characters}개 내보냄` +
+        (r.shared ? ` (캐릭터 창에서 켜둔 ${r.shared}개는 모든 씬 공용)` : ''),
+      'success'
+    )
   }
   async function importJson(): Promise<void> {
-    const { count, additions } = await window.nais.invoke('scenes:importJson', {
+    const { count, additions, dropped } = await window.nais.invoke('scenes:importJson', {
       presetId: activePresetId
     })
     if (count > 0) {
@@ -628,17 +642,22 @@ function SceneGrid(): React.JSX.Element {
         await extras.load()
         // 하이드레이션 전에 쓰면 기존 씬별 설정을 빈 값으로 덮어쓸 수 있다 — 먼저 로드 보장
         await useSceneExtrasStore.getState().load()
+        // 씬 구성 전체(씬별 캐릭터·위치·역할·자리·자리 태그·씬 태그)를 그대로 넣는다
         for (const a of additions) {
           useSceneExtrasStore.getState().updateAddition(activePresetId, a.sceneId, {
-            characterIds: a.characterIds,
-            charRefIds: [],
-            vibeIds: [],
-            ...(a.roles ? { roles: a.roles } : {})
+            ...a.setup,
+            roles: stripNullRoles(a.setup.roles),
+            charRefIds: a.setup.charRefIds ?? [],
+            vibeIds: a.setup.vibeIds ?? []
           })
         }
         useSceneExtrasStore.getState().setAdditionsEnabled(true)
         await useCharactersStore.getState().load()
-        toast(`씬 ${count}개 가져옴 — 캐릭터탭 ${additions.length}개 씬에 연결됨`, 'success')
+        toast(
+          `씬 ${count}개 가져옴 — ${additions.length}개 씬에 캐릭터 구성 연결` +
+            (dropped ? ` · 못 찾은 연결 ${dropped}건` : ''),
+          'success'
+        )
       } else {
         toast(`씬 ${count}개 가져옴`, 'success')
       }

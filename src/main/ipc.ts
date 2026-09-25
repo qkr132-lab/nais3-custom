@@ -478,7 +478,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     scheduleSyncForPresets(presetIds)
     return { count }
   })
-  handle('scenes:exportJson', async ({ presetId }) => ({ saved: await exportScenesJson(presetId) }))
+  handle('scenes:exportJson', ({ presetId }) => exportScenesJson(presetId))
   handle('scenes:importJson', ({ presetId }) => importScenesJson(presetId))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
   handle('scenes:exportToFolder', ({ ids, mode, favoritesOnly, dir, policy }) =>

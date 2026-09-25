@@ -71,6 +71,12 @@ interface SceneExtrasState {
   transparentBackgrounds: SceneTransparentBackgroundMap
 
   load: () => Promise<void>
+  /**
+   * 디스크에서 다시 읽는다 (커스텀). 백업 복원처럼 메인이 settings를 직접 고친 뒤에 부른다 —
+   * load()는 한 번 읽으면 다시 안 읽어서, 안 부르면 메모리의 예전 값이 남아 있다가
+   * 다음 저장 때 복원한 내용을 덮어써 버린다.
+   */
+  reload: () => Promise<void>
   setSequenceEnabled: (v: boolean) => void
   addEntry: () => void
   updateEntry: (id: string, patch: Partial<SequenceEntry>) => void
@@ -241,6 +247,12 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       }
     }
     set({ loaded: true })
+  },
+
+  reload: async () => {
+    // loaded=false인 동안은 persist()가 쓰지 않는다 — 읽는 도중 예전 값이 끼어들 틈이 없다
+    set({ loaded: false })
+    await get().load()
   },
 
   setSequenceEnabled: (sequenceEnabled) => {

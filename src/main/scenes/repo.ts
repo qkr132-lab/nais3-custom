@@ -26,6 +26,19 @@ import {
 } from '../../shared/censor-tags'
 import { getDb } from '../db'
 import { getSetting } from '../db/settings'
+import {
+  decodeSetup,
+  encodeSetup,
+  isPos,
+  isSceneBundle,
+  setupCharacterIds,
+  setupHasContent,
+  withShared,
+  type FileCharacter,
+  type SceneBundle,
+  type SceneExtrasFile,
+  type SceneSetup
+} from '../../shared/scene-bundle'
 import { libraryRoot } from '../images/storage'
 import { trashFile } from '../trash'
 import { assignExportName, safeName } from './export-name'
@@ -747,35 +760,130 @@ export function deleteImage(id: number, deleteFile: boolean): void {
 }
 
 // ── JSON / ZIP ──────────────────────────────────────────
-export async function exportScenesJson(presetId: number): Promise<boolean> {
-  const scenes = getDb()
+
+/** settings의 scene_extras — 씬별 캐릭터 추가 설정. 손상되면 빈 것으로 */
+function readSceneExtras(): SceneExtrasFile {
+  try {
+    return JSON.parse(getSetting('scene_extras') ?? '{}') as SceneExtrasFile
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * 씬 JSON 내보내기 (v2, 커스텀).
+ *
+ * 예전(v1)은 씬 글자만 담았고 휴지통 씬까지 섞여 들어가, 가져오면 지운 씬이 살아 돌아왔다.
+ * v2는 살아 있는 씬만, 그리고 그 씬의 캐릭터 구성(씬별 캐릭터·위치·역할·자리·자리 역할·
+ * 자리 태그·씬 태그)과 거기 쓰인 캐릭터 카드까지 함께 싣는다.
+ * 바이브·캐릭레퍼는 이미지라 여기 싣지 않는다 (전체 백업이 담당).
+ */
+export async function exportScenesJson(presetId: number): Promise<{
+  saved: boolean
+  scenes: number
+  characters: number
+  /** 모든 씬 공용으로 실은 카드 수 (캐릭터 창에서 켜져 있던 것) */
+  shared: number
+}> {
+  const db = getDb()
+  const scenes = db
     .prepare(
-      'SELECT name, prompt, negative_prompt, width, height, source_tags, target_tags, censor_kinds, censor_weights, suppress_anal, background FROM gen_scenes WHERE preset_id = ? ORDER BY sort_order, id'
+      `SELECT id, name, prompt, negative_prompt, width, height, source_tags, target_tags, source_pos, target_pos,
+              censor_kinds, censor_weights, suppress_anal, background
+       FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all(presetId) as Row[]
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const presetName =
+    (db.prepare('SELECT name FROM scene_presets WHERE id = ?').get(presetId) as
+      | { name: string }
+      | undefined)?.name ?? 'scenes'
   const result = await dialog.showSaveDialog(win, {
     title: '씬 내보내기',
-    defaultPath: 'nais3-scenes.json',
+    defaultPath: `${presetName.replace(/[\\/:*?"<>|]/g, '_')}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || !result.filePath) return false
-  const data = scenes.map((s) => ({
-    name: s.name,
-    prompt: s.prompt,
-    negativePrompt: s.negative_prompt,
-    width: s.width,
-    height: s.height,
-    // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
-    ...(s.source_tags?.trim() ? { sourceTags: s.source_tags } : {}),
-    ...(s.target_tags?.trim() ? { targetTags: s.target_tags } : {}),
-    censorKinds: normalizeCensors(s.censor_kinds),
-    censorWeights: normalizeCensorWeights(s.censor_weights),
-    background: normalizeBackground(s.background),
-    suppressAnal: normalizeAnalSuppression(s.suppress_anal)
+  if (result.canceled || !result.filePath) return { saved: false, scenes: 0, characters: 0, shared: 0 }
+
+  // 이 모듈 씬들의 캐릭터 구성과, 거기 쓰인 (살아 있는) 카드
+  const additions = readSceneExtras().additions?.[String(presetId)] ?? {}
+  const setupOf = (sceneId: number): SceneSetup | undefined => {
+    const s = additions[String(sceneId)]
+    return setupHasContent(s) ? s : undefined
+  }
+  const wanted = new Set<number>()
+  for (const s of scenes) {
+    const setup = setupOf(Number(s.id))
+    if (setup) for (const id of setupCharacterIds(setup)) wanted.add(id)
+  }
+  // 캐릭터 창에서 켜둔 카드 — 모든 씬 생성에 들어가므로 "모든 씬 공용"으로 싣는다
+  const sharedIds = (
+    db
+      .prepare(
+        "SELECT id FROM character_prompts WHERE enabled = 1 AND deleted_at IS NULL AND trim(prompt) != '' ORDER BY sort_order, id"
+      )
+      .all() as { id: number }[]
+  ).map((r) => r.id)
+  for (const id of sharedIds) wanted.add(id)
+  const cards = wanted.size
+    ? (db
+        .prepare(
+          `SELECT id, name, prompt, negative_prompt, role, slot_no FROM character_prompts
+           WHERE deleted_at IS NULL AND id IN (${[...wanted].map(() => '?').join(',')})
+           ORDER BY sort_order, id`
+        )
+        .all(...wanted) as {
+        id: number
+        name: string
+        prompt: string
+        negative_prompt: string
+        role: string | null
+        slot_no: number | null
+      }[])
+    : []
+  const alive = new Set(cards.map((c) => c.id))
+  const uidOf = (id: number): string | undefined => (alive.has(id) ? `c${id}` : undefined)
+
+  const characters: FileCharacter[] = cards.map((c) => ({
+    uid: `c${c.id}`,
+    name: c.name,
+    prompt: c.prompt,
+    negativePrompt: c.negative_prompt,
+    ...(c.role === 'source' || c.role === 'target' ? { role: c.role } : {}),
+    ...(c.slot_no != null ? { slotNo: c.slot_no } : {})
   }))
-  writeFileSync(result.filePath, JSON.stringify({ version: 1, scenes: data }, null, 2), 'utf-8')
-  return true
+
+  const bundle: SceneBundle = {
+    version: 2,
+    characterFolder: presetName,
+    characters,
+    ...(sharedIds.length ? { shared: sharedIds.map((id) => `c${id}`) } : {}),
+    scenes: scenes.map((s) => {
+      const setup = setupOf(Number(s.id))
+      const sourcePos = parsePos(s.source_pos as string | null)
+      const targetPos = parsePos(s.target_pos as string | null)
+      return {
+        name: s.name as string,
+        prompt: s.prompt,
+        negativePrompt: s.negative_prompt,
+        width: s.width,
+        height: s.height,
+        // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
+        ...((s.source_tags as string)?.trim() ? { sourceTags: s.source_tags } : {}),
+        ...((s.target_tags as string)?.trim() ? { targetTags: s.target_tags } : {}),
+        // 역할 위치 — 하는쪽/당하는쪽이 누구든 서는 자리
+        ...(sourcePos ? { sourcePos } : {}),
+        ...(targetPos ? { targetPos } : {}),
+        censorKinds: normalizeCensors(s.censor_kinds),
+        censorWeights: normalizeCensorWeights(s.censor_weights),
+        background: normalizeBackground(s.background),
+        suppressAnal: normalizeAnalSuppression(s.suppress_anal),
+        ...(setup ? { setup: encodeSetup(setup, uidOf) } : {})
+      }
+    })
+  }
+  writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
+  return { saved: true, scenes: scenes.length, characters: characters.length, shared: sharedIds.length }
 }
 
 /** 씬 JSON에 실린 캐릭터탭 (커스텀). role = 행위 역할 (씬의 하는쪽/당하는쪽 태그가 얹힘) */
@@ -786,22 +894,26 @@ interface ImportSceneCharacter {
   role?: 'source' | 'target'
 }
 
-export async function importScenesJson(presetId: number): Promise<{
+/** 씬 JSON 가져오기 결과 — additions는 렌더러가 "씬별 캐릭터 추가"에 그대로 넣는다 */
+export interface SceneImportResult {
   count: number
-  additions: {
-    sceneId: number
-    characterIds: number[]
-    roles?: Record<number, 'source' | 'target'>
-  }[]
-}> {
+  additions: { sceneId: number; setup: SceneSetup }[]
+  /** 파일 안에서 가리키는 카드를 못 찾아 버린 연결 수 */
+  dropped: number
+}
+
+export async function importScenesJson(presetId: number): Promise<SceneImportResult> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const result = await dialog.showOpenDialog(win, {
     title: '씬 불러오기',
     properties: ['openFile'],
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || result.filePaths.length === 0) return { count: 0, additions: [] }
-  const parsed = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as {
+  if (result.canceled || result.filePaths.length === 0) return { count: 0, additions: [], dropped: 0 }
+  const raw = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as unknown
+  // v2 — 씬 구성 전체(자리·자리 태그·씬 태그 포함)가 실린 파일
+  if (isSceneBundle(raw)) return importSceneBundle(presetId, raw, result.filePaths[0])
+  const parsed = raw as {
     /** 캐릭터탭을 담을 캐릭터 폴더 이름 (커스텀) — 미지정 시 파일 이름 */
     characterFolder?: string
     /** 모든 씬에 공용으로 연결되는 캐릭터탭 (커스텀) — 씬의 use로 골라 붙일 수 있다 */
@@ -847,11 +959,7 @@ export async function importScenesJson(presetId: number): Promise<{
     `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled)
      VALUES (?, ?, ?, ?, ?, 0)`
   )
-  const additions: {
-    sceneId: number
-    characterIds: number[]
-    roles?: Record<number, 'source' | 'target'>
-  }[] = []
+  const additions: SceneImportResult['additions'] = []
 
   db.transaction(() => {
     // 폴더: characterFolder(없으면 파일 이름)와 같은 이름이 있으면 재사용, 없으면 생성
@@ -860,7 +968,8 @@ export async function importScenesJson(presetId: number): Promise<{
     if (hasChars) {
       const folderName = parsed.characterFolder?.trim() || basename(result.filePaths[0], '.json')
       const existing = db
-        .prepare('SELECT id FROM character_folders WHERE name = ?')
+        // 휴지통 폴더에 넣으면 카드가 안 보인다 — 살아 있는 폴더만
+        .prepare('SELECT id FROM character_folders WHERE name = ? AND deleted_at IS NULL')
         .get(folderName) as { id: number } | undefined
       if (existing) folderId = existing.id
       else {
@@ -896,7 +1005,9 @@ export async function importScenesJson(presetId: number): Promise<{
     const sharedCards = shared.map((c) => {
       const name = c.name?.trim() || '캐릭터'
       const existing = db
-        .prepare('SELECT id FROM character_prompts WHERE folder_id IS ? AND name = ?')
+        .prepare(
+          'SELECT id FROM character_prompts WHERE folder_id IS ? AND name = ? AND deleted_at IS NULL'
+        )
         .get(folderId, name) as { id: number } | undefined
       return { id: existing?.id ?? createCard(c, name), name, role: c.role }
     })
@@ -937,12 +1048,130 @@ export async function importScenesJson(presetId: number): Promise<{
       if (characterIds.length === 0) continue
       additions.push({
         sceneId,
-        characterIds,
-        ...(Object.keys(roles).length > 0 ? { roles } : {})
+        setup: {
+          characterIds,
+          charRefIds: [],
+          vibeIds: [],
+          ...(Object.keys(roles).length > 0 ? { roles } : {})
+        }
       })
     }
   })()
-  return { count: scenes.length, additions }
+  return { count: scenes.length, additions, dropped: 0 }
+}
+
+/**
+ * 씬 JSON v2 가져오기 — 카드를 만들고(똑같은 게 있으면 재사용) 씬 구성의 uid를 새 id로.
+ */
+function importSceneBundle(
+  presetId: number,
+  bundle: SceneBundle,
+  filePath: string
+): SceneImportResult {
+  const db = getDb()
+  const additions: SceneImportResult['additions'] = []
+  let dropped = 0
+
+  const cards = bundle.characters.filter(
+    (c) => c && typeof c.uid === 'string' && typeof c.prompt === 'string' && c.prompt.trim()
+  )
+  const sceneStmt = db.prepare(
+    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_weights, suppress_anal, background)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+  const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback
+  const pos = (v: unknown): string | null => (isPos(v) ? JSON.stringify({ x: v.x, y: v.y }) : null)
+  const maxOf = (sql: string, ...args: unknown[]): number =>
+    (db.prepare(sql).get(...args) as { m: number }).m
+
+  db.transaction(() => {
+    // 카드 폴더 — 살아 있는 같은 이름 폴더가 있으면 거기, 없으면 새로
+    let folderId: number | null = null
+    if (cards.length) {
+      const folderName = bundle.characterFolder?.trim() || basename(filePath, '.json')
+      const existing = db
+        .prepare('SELECT id FROM character_folders WHERE name = ? AND deleted_at IS NULL')
+        .get(folderName) as { id: number } | undefined
+      folderId =
+        existing?.id ??
+        Number(
+          db
+            .prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)')
+            .run(
+              folderName,
+              maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders') + 1
+            ).lastInsertRowid
+        )
+    }
+
+    let charOrder = maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_prompts')
+    const idOfUid = new Map<string, number>()
+    for (const c of cards) {
+      const name = c.name?.trim() || '캐릭터'
+      const negative = typeof c.negativePrompt === 'string' ? c.negativePrompt : ''
+      const role = c.role === 'source' || c.role === 'target' ? c.role : null
+      const slotNo = Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? c.slotNo : null
+      // 같은 폴더에 이름·태그·역할·자리 번호까지 똑같은 카드가 있으면 재사용 —
+      // 같은 파일을 두 번 가져와도 카드가 불어나지 않게. 하나라도 다르면 새로 만든다.
+      const same = db
+        .prepare(
+          `SELECT id FROM character_prompts
+           WHERE deleted_at IS NULL AND folder_id IS ? AND name = ? AND prompt = ?
+             AND negative_prompt = ? AND role IS ? AND slot_no IS ?`
+        )
+        .get(folderId, name, c.prompt, negative, role, slotNo) as { id: number } | undefined
+      const id =
+        same?.id ??
+        Number(
+          db
+            .prepare(
+              `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled, role, slot_no)
+               VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
+            )
+            .run(name, c.prompt, negative, folderId, ++charOrder, role, slotNo).lastInsertRowid
+        )
+      idOfUid.set(c.uid, id)
+    }
+    const sharedIds = (Array.isArray(bundle.shared) ? bundle.shared : [])
+      .map((uid) => idOfUid.get(uid))
+      .filter((id): id is number => id !== undefined)
+
+    let order = maxOf(
+      'SELECT COALESCE(MAX(sort_order), 0) AS m FROM gen_scenes WHERE preset_id = ?',
+      presetId
+    )
+    for (const s of bundle.scenes) {
+      const sceneId = Number(
+        sceneStmt.run(
+          presetId,
+          str(s.name, '씬'),
+          str(s.prompt),
+          str(s.negativePrompt),
+          num(s.width, 832),
+          num(s.height, 1216),
+          ++order,
+          str(s.sourceTags),
+          str(s.targetTags),
+          pos(s.sourcePos),
+          pos(s.targetPos),
+          JSON.stringify(normalizeCensors(s.censorKinds)),
+          JSON.stringify(normalizeCensorWeights(s.censorWeights)),
+          Number(normalizeAnalSuppression(s.suppressAnal)),
+          JSON.stringify(normalizeBackground(s.background))
+        ).lastInsertRowid
+      )
+      const r = s.setup
+        ? decodeSetup(s.setup, (uid) => idOfUid.get(uid))
+        : { setup: { characterIds: [], charRefIds: [], vibeIds: [] } as SceneSetup, dropped: 0 }
+      dropped += r.dropped
+      const setup = withShared(r.setup, sharedIds)
+      if (setupHasContent(setup)) additions.push({ sceneId, setup })
+    }
+  })()
+
+  return { count: bundle.scenes.length, additions, dropped }
 }
 
 /** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */
