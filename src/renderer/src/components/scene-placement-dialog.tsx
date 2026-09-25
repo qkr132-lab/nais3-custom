@@ -77,6 +77,7 @@ export function ScenePlacementDialog({
   slotRoles,
   slotTags,
   charTags,
+  partnerTags,
   baseCharacterIds,
   roles,
   sceneSize,
@@ -100,6 +101,8 @@ export function ScenePlacementDialog({
   slotTags?: Record<number, string>
   /** 캐릭터 id → 이 씬에서만 덧붙는 태그 */
   charTags?: Record<number, string>
+  /** 캐릭터 id → 이 씬에서 상대(반대 역할)에게 붙일 태그. 비우면 카드에 적힌 걸 쓴다 */
+  partnerTags?: Record<number, string>
   /**
    * 이 씬에 함께 나가지만 여기서 고른 것은 아닌 캐릭터 (캐릭터 창에서 켜둔 카드).
    * 생성에는 들어가는데 이 창에 안 보이면 자리에 앉힐 수가 없어, 자리를 다 잡아놓고도
@@ -123,6 +126,7 @@ export function ScenePlacementDialog({
     slotRoles?: Record<number, CharRole | null>
     slotTags?: Record<number, string>
     charTags?: Record<number, string>
+    partnerTags?: Record<number, string>
     roles?: CharRoles
   }) => void
 }): React.JSX.Element {
@@ -273,6 +277,14 @@ export function ScenePlacementDialog({
     onPatch({ charTags: next })
   }
 
+  /** 이 씬에서 이 캐릭터가 상대에게 줄 태그 — 비우면 카드에 적힌 상대 태그로 돌아간다 */
+  const setPartnerTag = (id: number, text: string): void => {
+    const next = { ...(partnerTags ?? {}) }
+    if (text.trim()) next[id] = text
+    else delete next[id]
+    onPatch({ partnerTags: next })
+  }
+
   const moveSlot = (index: number, center: { x: number; y: number }): void =>
     onPatch({ slots: slotList.map((s, i) => (i === index ? center : s)) })
 
@@ -323,11 +335,14 @@ export function ScenePlacementDialog({
     delete nextSlotOf[id]
     const nextCharTags = { ...(charTags ?? {}) }
     delete nextCharTags[id]
+    const nextPartnerTags = { ...(partnerTags ?? {}) }
+    delete nextPartnerTags[id]
     onPatch({
       characterIds: characterIds.filter((x) => x !== id),
       slotChars: nextChars,
       slotOf: nextSlotOf,
-      charTags: nextCharTags
+      charTags: nextCharTags,
+      partnerTags: nextPartnerTags
     })
   }
 
@@ -549,6 +564,41 @@ export function ScenePlacementDialog({
                     onCommit={(v) => setCharTag(selectedChar.id, v)}
                   />
                 )}
+                {/* 상대 태그 — 이 캐릭터가 나오면 반대 역할 캐릭터가 받는다 (커스텀) */}
+                {(() => {
+                  const role = roles?.[selectedChar.id] ?? selectedChar.role
+                  if (!role) {
+                    return (
+                      <p className="text-[11px] text-faint">
+                        역할이 없어 상대 태그를 줄 곳이 없습니다 — 하는쪽이나 당하는쪽을 정하면
+                        상대에게 붙일 태그를 걸 수 있습니다.
+                      </p>
+                    )
+                  }
+                  const partner = role === 'source' ? '당하는쪽' : '하는쪽'
+                  const cardValue = selectedChar.partnerTags?.trim()
+                  return (
+                    <>
+                      <p className="mt-1 text-[12px] font-medium text-muted">
+                        상대({partner})에게 붙일 태그
+                        <span className="ml-1.5 text-[11px] font-normal text-faint">
+                          이 씬만 · 비우면 카드에 적힌 것
+                        </span>
+                      </p>
+                      <SceneTagEditor
+                        key={`partner-${selectedChar.id}`}
+                        value={partnerTags?.[selectedChar.id] ?? ''}
+                        placeholder={cardValue || 'disgust, glaring, blush'}
+                        onCommit={(v) => setPartnerTag(selectedChar.id, v)}
+                      />
+                      {cardValue && !partnerTags?.[selectedChar.id]?.trim() && (
+                        <p className="text-[11px] text-faint">
+                          지금은 카드에 적힌 상대 태그를 씁니다: <span className="text-muted">{cardValue}</span>
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
                 {seatsOf(selectedChar.id).length > 1 && (
                   <p className="text-[11px] text-faint">
                     {seatsOf(selectedChar.id)

@@ -30,6 +30,8 @@ export interface SceneSetup {
   slotRoles?: Record<number, CharRole | null>
   slotTags?: Record<number, string>
   charTags?: Record<number, string>
+  /** 캐릭터 id → 이 씬에서 상대(반대 역할)에게 붙일 태그. 있으면 카드에 적힌 것 대신 쓴다 */
+  partnerTags?: Record<number, string>
 }
 
 /** 자리 묶음 + 씬 태그 — 파일에 적는 모양 (캐릭터 = 파일 안 uid) */
@@ -41,6 +43,8 @@ export interface FileSlotExtras {
   slotTags?: Record<string, string>
   /** uid → 이 씬에서만 얹는 태그 */
   charTags?: Record<string, string>
+  /** uid → 이 씬에서 상대에게 붙일 태그 */
+  partnerTags?: Record<string, string>
 }
 
 /** 씬 하나의 구성 — 파일에 적는 모양 */
@@ -116,6 +120,14 @@ export function encodeSlotExtras(
   const charTags = nonEmpty(ct)
   if (charTags) out.charTags = charTags
 
+  const pt: Record<string, string> = {}
+  for (const [id, text] of Object.entries(setup.partnerTags ?? {})) {
+    const uid = uidOf(Number(id))
+    if (uid && typeof text === 'string' && text.trim()) pt[uid] = text
+  }
+  const partnerTags = nonEmpty(pt)
+  if (partnerTags) out.partnerTags = partnerTags
+
   return out
 }
 
@@ -162,6 +174,15 @@ export function decodeSlotExtras(
     else charTags[id] = text
   }
   if (Object.keys(charTags).length) extras.charTags = charTags
+
+  const partnerTags: Record<number, string> = {}
+  for (const [uid, text] of Object.entries(file.partnerTags ?? {})) {
+    if (typeof text !== 'string' || !text.trim()) continue
+    const id = idOf(uid)
+    if (id === undefined) dropped++
+    else partnerTags[id] = text
+  }
+  if (Object.keys(partnerTags).length) extras.partnerTags = partnerTags
 
   return { extras, dropped }
 }
@@ -276,6 +297,7 @@ export function stripDeadCharacters<T extends SceneSetup>(setup: T, alive: (id: 
     roles: keep(setup.roles),
     slotOf: keep(setup.slotOf),
     charTags: keep(setup.charTags),
+    partnerTags: keep(setup.partnerTags),
     slotChars: seats
   }
 }
@@ -318,6 +340,8 @@ export interface FileCharacter {
   role?: CharRole | null
   /** 카드 자리 번호 — 씬의 N번 자리로 자동 배정 */
   slotNo?: number | null
+  /** 상대(반대 역할)에게 붙일 태그 */
+  partnerTags?: string
 }
 
 /** 씬 JSON v2 — 씬 글자 + 그 씬의 캐릭터 구성 전부 */

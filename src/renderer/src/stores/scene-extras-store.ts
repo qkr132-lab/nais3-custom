@@ -49,6 +49,11 @@ export interface SceneAddition {
    * 카드 태그는 그대로 두고 이 씬에서만 얹는다 — "이 씬에서 이 캐릭터는 교복" 같은 것.
    */
   charTags?: Record<number, string>
+  /**
+   * 캐릭터 id → 이 씬에서 상대(반대 역할)에게 붙일 태그 (커스텀).
+   * 카드에 적힌 상대 태그 대신 이 씬에서만 다르게 쓸 때. 비우면 카드 것을 쓴다.
+   */
+  partnerTags?: Record<number, string>
 }
 
 export interface SceneAdditionTransfer {
@@ -400,7 +405,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       roles: stripRoles(a.roles),
       slotOf: stripKeyed(a.slotOf),
       slotChars: stripSlotChars(a.slotChars),
-      charTags: stripKeyed(a.charTags)
+      charTags: stripKeyed(a.charTags),
+      partnerTags: stripKeyed(a.partnerTags)
     })
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
@@ -419,7 +425,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
         roles: stripRoles(e.roles),
         slotOf: stripKeyed(e.slotOf),
         slotChars: stripSlotChars(e.slotChars),
-        charTags: stripKeyed(e.charTags)
+        charTags: stripKeyed(e.charTags),
+        partnerTags: stripKeyed(e.partnerTags)
       })),
       additions: nextAdditions
     })

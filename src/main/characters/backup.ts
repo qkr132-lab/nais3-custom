@@ -65,8 +65,8 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
 
   const cardRows = db
     .prepare(
-      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, slot_no, enabled, folder_id,
-              char_ref_id, thumbnail
+      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, slot_no, partner_tags, enabled,
+              folder_id, char_ref_id, thumbnail
        FROM character_prompts WHERE deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all() as {
@@ -78,6 +78,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     center_y: number
     role: string | null
     slot_no: number | null
+    partner_tags: string | null
     enabled: number
     folder_id: number | null
     char_ref_id: number | null
@@ -101,6 +102,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     center: { x: r.center_x, y: r.center_y },
     role: r.role === 'source' || r.role === 'target' ? r.role : null,
     ...(r.slot_no != null ? { slotNo: r.slot_no } : {}),
+    ...(r.partner_tags?.trim() ? { partnerTags: r.partner_tags } : {}),
     enabled: r.enabled === 1,
     folder: r.folder_id != null ? (folderName.get(r.folder_id) ?? null) : null,
     charRefName: r.char_ref_id != null ? (refName.get(r.char_ref_id) ?? null) : null,
@@ -229,7 +231,7 @@ export async function pickCharacterBackup(): Promise<BackupPreview> {
 
   const existing = getDb()
     .prepare(
-      'SELECT id, name, prompt, negative_prompt, center_x, center_y, role FROM character_prompts WHERE deleted_at IS NULL'
+      'SELECT id, name, prompt, negative_prompt, center_x, center_y, role, partner_tags FROM character_prompts WHERE deleted_at IS NULL'
     )
     .all() as {
     id: number
@@ -239,6 +241,7 @@ export async function pickCharacterBackup(): Promise<BackupPreview> {
     center_x: number
     center_y: number
     role: string | null
+    partner_tags: string | null
   }[]
   const plan = planImport(
     existing.map((c) => ({
@@ -250,7 +253,8 @@ export async function pickCharacterBackup(): Promise<BackupPreview> {
       role: (c.role === 'source' || c.role === 'target' ? c.role : null) as
         | 'source'
         | 'target'
-        | null
+        | null,
+      partnerTags: c.partner_tags ?? ''
     })),
     backup.characters,
     'skip-identical'
@@ -304,7 +308,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
   const db = getDb()
   const existing = db
     .prepare(
-      'SELECT id, name, prompt, negative_prompt, center_x, center_y, role FROM character_prompts WHERE deleted_at IS NULL'
+      'SELECT id, name, prompt, negative_prompt, center_x, center_y, role, partner_tags FROM character_prompts WHERE deleted_at IS NULL'
     )
     .all() as {
     id: number
@@ -314,6 +318,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
     center_x: number
     center_y: number
     role: string | null
+    partner_tags: string | null
   }[]
 
   const plan = planImport(
@@ -326,7 +331,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       role: (c.role === 'source' || c.role === 'target' ? c.role : null) as
         | 'source'
         | 'target'
-        | null
+        | null,
+      partnerTags: c.partner_tags ?? ''
     })),
     backup.characters,
     mode
@@ -379,6 +385,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
         center: c.center,
         role: c.role,
         ...(Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? { slotNo: c.slotNo } : {}),
+        ...(typeof c.partnerTags === 'string' ? { partnerTags: c.partnerTags } : {}),
         ...(c.charRefName && refIds.has(c.charRefName)
           ? { charRefId: refIds.get(c.charRefName) }
           : {})
@@ -447,6 +454,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       positions: { ...(prev?.positions ?? {}), ...remapUidMap(link.positions, uidToId) },
       roles: { ...(prev?.roles ?? {}), ...remapUidMap(link.roles, uidToId) },
       charTags: { ...(prev?.charTags ?? {}), ...(slot.extras.charTags ?? {}) },
+      partnerTags: { ...(prev?.partnerTags ?? {}), ...(slot.extras.partnerTags ?? {}) },
       // 자리 묶음은 통째로 바꾼다 — 좌석·역할·태그가 자리 번호로 엮여 있어, 기존 배치와
       // 섞으면 엉뚱한 자리에 붙는다. 백업에 자리가 없으면 기존 배치를 그대로 둔다.
       ...(slot.extras.slots

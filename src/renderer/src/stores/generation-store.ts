@@ -10,7 +10,7 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
-import { mergePromptParts } from '@shared/scene-request'
+import { mergePromptParts, withPartnerTags } from '@shared/scene-request'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -229,8 +229,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const seed = seedLocked && request.seed >= 0 ? request.seed : randomSeed()
     const baseRequest = withoutTransientSource({ ...request, seed })
     // 캐릭터는 라이브러리의 enabled 카드에서 구성 (리스트 순서 = v4 use_order 순서)
-    const characterPrompts = enabledCharacters().map((c) => ({
-      prompt: c.prompt,
+    // 상대 태그 (커스텀) — 카드 역할 기준으로 반대 역할 카드가 적어둔 태그를 받는다
+    const enabled = enabledCharacters()
+    const givers = enabled.map((c) => ({ id: c.id, role: c.role, partnerTags: c.partnerTags }))
+    const characterPrompts = enabled.map((c) => ({
+      prompt: withPartnerTags(c.prompt, c.role, givers, c.id),
       negativePrompt: c.negativePrompt,
       center: c.center,
       enabled: true as const

@@ -500,6 +500,23 @@ export function CharacterOverlay(): React.JSX.Element {
         placeholder="캐릭터 네거티브"
         onValueChange={(v) => updateCard(char.id, { negativePrompt: v })}
       />
+      {/* 상대 태그 (커스텀) — 이 캐릭터가 나오는 그림에서 반대 역할 캐릭터가 받는다.
+          하는쪽 카드마다 "상대는 이런 표정"을 걸어두는 용도라 역할이 있을 때만 보인다 */}
+      {char.role && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-faint">
+            상대({char.role === 'source' ? '당하는쪽' : '하는쪽'})에게 붙일 태그 — 이 캐릭터가
+            나오는 그림에서
+          </span>
+          <PromptEditor
+            autoGrow
+            className="max-h-64 min-h-12 bg-surface-2"
+            value={char.partnerTags}
+            placeholder="disgust, glaring, blush"
+            onValueChange={(v) => updateCard(char.id, { partnerTags: v })}
+          />
+        </div>
+      )}
       {/* 캐릭레퍼 연결 (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */}
       <RefLinkRow char={char} onOpen={() => setLinkCharId(char.id)} />
     </div>

@@ -172,6 +172,37 @@ export function mergePromptParts(parts: PromptParts): string {
   return [parts.base, parts.additional, parts.detail].reduce(appendPrompt, '')
 }
 
+/**
+ * 상대 태그 (커스텀) — 이 역할의 캐릭터가 받을 태그를, 반대 역할 캐릭터들이 적어둔 것에서 모은다.
+ *
+ * 하는쪽 카드에 "상대에게 붙일 태그"를 적어두면 그 캐릭터가 나오는 그림에서 당하는쪽이 받는다
+ * (반대도 같다). 상대마다 다른 반응을 카드에 걸어두는 용도라, 받는 쪽 카드는 건드리지 않는다.
+ * 역할이 없으면 상대도 없다 — 주지도 받지도 않는다.
+ */
+export function partnerTagsFor(
+  receiverRole: CharRole | null | undefined,
+  givers: { id: number; role?: CharRole | null; partnerTags?: string }[],
+  receiverId?: number
+): string {
+  if (!receiverRole) return ''
+  const opposite: CharRole = receiverRole === 'source' ? 'target' : 'source'
+  return givers
+    .filter((g) => g.id !== receiverId && g.role === opposite && g.partnerTags?.trim())
+    .map((g) => g.partnerTags!.trim().replace(/,\s*$/, ''))
+    .join(', ')
+}
+
+/** 프롬프트 뒤에 상대 태그를 붙인다 — 행위 태그(sex 등)는 받는 쪽 역할로 접두사가 붙는다 */
+export function withPartnerTags(
+  prompt: string,
+  role: CharRole | null | undefined,
+  givers: { id: number; role?: CharRole | null; partnerTags?: string }[],
+  selfId?: number
+): string {
+  const tags = partnerTagsFor(role, givers, selfId)
+  return tags && role ? appendPrompt(prompt, autoRolePrefix(tags, role)) : prompt
+}
+
 /** 씬에서 고른 순서를 우선하고, 나머지 기본 캐릭터를 뒤에 중복 없이 붙인다. */
 export function prioritizeSceneCharacterIds(sceneIds: number[], baseIds: number[]): number[] {
   return [...new Set([...sceneIds, ...baseIds])]

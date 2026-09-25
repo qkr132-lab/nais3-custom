@@ -92,6 +92,8 @@ export interface SequenceEntry {
   slotChars?: Record<number, number>
   /** 캐릭터 id → 이 항목에서만 덧붙는 태그 (커스텀). 카드는 건드리지 않는다 */
   charTags?: Record<number, string>
+  /** 캐릭터 id → 이 항목에서 상대(반대 역할)에게 붙일 태그. 있으면 카드 것 대신 쓴다 (커스텀) */
+  partnerTags?: Record<number, string>
 }
 
 export interface GenerationRequest {
@@ -261,6 +263,11 @@ export interface CharacterCard {
   charRefId: number | null
   /** 기본 행위 역할 (커스텀) — 씬별 추가/큐 항목에서 따로 지정하지 않으면 이 값을 따른다 */
   role: CharRole | null
+  /**
+   * 상대 태그 (커스텀) — 이 캐릭터가 나오는 그림에서 반대 역할 캐릭터가 받는다.
+   * 하는쪽 카드에 적으면 당하는쪽이 받는다. 역할이 없으면 아무도 안 받는다.
+   */
+  partnerTags: string
 }
 
 /** 폴더 행 (캐릭터/조각 공용 리스트 모델) */
@@ -293,7 +300,15 @@ export const FOLDER_COLORS = [
 export type CharacterCardPatch = Partial<
   Pick<
     CharacterCard,
-    'name' | 'prompt' | 'negativePrompt' | 'enabled' | 'center' | 'charRefId' | 'role' | 'slotNo'
+    | 'name'
+    | 'prompt'
+    | 'negativePrompt'
+    | 'enabled'
+    | 'center'
+    | 'charRefId'
+    | 'role'
+    | 'slotNo'
+    | 'partnerTags'
   >
 >
 

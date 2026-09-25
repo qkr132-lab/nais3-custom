@@ -425,6 +425,7 @@ type SelectionPatch = {
   slotChars?: Record<number, number>
   /** 캐릭터 id → 이 씬/항목에서만 덧붙는 태그 */
   charTags?: Record<number, string>
+  partnerTags?: Record<number, string>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -447,6 +448,7 @@ function SelectionPanel({
   slotTags,
   slotChars,
   charTags,
+  partnerTags,
   baseCharacterIds,
   sceneId
 }: {
@@ -463,6 +465,7 @@ function SelectionPanel({
   slotTags?: Record<number, string>
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
+  partnerTags?: Record<number, string>
   /** 캐릭터 창에서 켜져 이 씬에 함께 나가는 카드 (씬별 추가에서만 씀) */
   baseCharacterIds?: number[]
   sceneId?: number
@@ -520,6 +523,7 @@ function SelectionPanel({
         slotTags={slotTags}
         slotChars={slotChars}
         charTags={charTags}
+        partnerTags={partnerTags}
         baseCharacterIds={baseCharacterIds}
         roles={roles}
         onPatch={onPatch}
@@ -629,6 +633,7 @@ function PositionPanel({
   slotTags,
   slotChars,
   charTags,
+  partnerTags,
   baseCharacterIds,
   roles,
   sceneId,
@@ -643,6 +648,7 @@ function PositionPanel({
   slotTags?: Record<number, string>
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
+  partnerTags?: Record<number, string>
   baseCharacterIds?: number[]
   roles?: CharRoles
   sceneId?: number
@@ -700,6 +706,7 @@ function PositionPanel({
         slotTags={slotTags}
         slotChars={slotChars}
         charTags={charTags}
+        partnerTags={partnerTags}
         baseCharacterIds={baseCharacterIds}
         roles={roles}
         sceneSize={scene ? { width: scene.width, height: scene.height } : undefined}
@@ -943,6 +950,7 @@ function EntryEditor({
           slotTags={entry.slotTags}
           slotChars={entry.slotChars}
           charTags={entry.charTags}
+          partnerTags={entry.partnerTags}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -1073,6 +1081,7 @@ export function AdditionDialog({
             slotTags={current.slotTags}
             slotChars={current.slotChars}
             charTags={current.charTags}
+            partnerTags={current.partnerTags}
             baseCharacterIds={libraryIds}
             positions={current.positions}
             roles={current.roles}

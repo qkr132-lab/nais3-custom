@@ -73,7 +73,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
       folderId,
       charRefId: null,
       role: null,
-      slotNo: null
+      slotNo: null,
+      partnerTags: ''
     }
     const { folders, items } = get()
     const next = canonicalize(folders, [...items, card])
@@ -244,7 +245,8 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
         folderId: null,
         charRefId: null,
         role: null,
-        slotNo: null
+        slotNo: null,
+        partnerTags: ''
       }
       set({ items: canonicalize(get().folders, [...get().items, card]) })
       get().updateCard(id, {

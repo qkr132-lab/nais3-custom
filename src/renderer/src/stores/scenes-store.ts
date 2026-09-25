@@ -7,6 +7,7 @@ import { modelCaps } from '@shared/nai-models'
 import {
   appendPrompt,
   autoRolePrefix,
+  partnerTagsFor,
   seatSlots,
   scenePositivePrompt,
   sceneNegativePrompt,
@@ -218,8 +219,34 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       : [{ char: c, slotIndex: undefined as number | undefined }]
   })
   // NAI 동시 캐릭터 한도를 넘으면 이 순서대로 자른다 (V4.5=6, V5=32)
-  const built = placements
-    .slice(0, modelCaps(base.model).maxCharacters)
+  // 자리에 앉았으면 자리 역할이 먼저 — 같은 캐릭터라도 자리마다 하는쪽/당하는쪽이 다를 수 있다
+  const placementRole = (
+    c: { id: number },
+    slotIndex: number | undefined
+  ): 'source' | 'target' | undefined =>
+    (slotIndex != null ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
+  const drawn = placements.slice(0, modelCaps(base.model).maxCharacters)
+  /**
+   * 상대 태그를 주는 쪽 (커스텀) — 이 그림에 실제로 나오는 캐릭터들.
+   * 씬(또는 큐 항목)에 적은 게 있으면 그걸, 없으면 카드에 적힌 걸 쓴다.
+   * 한 캐릭터가 두 자리에 앉아도 한 번만 준다 (같은 태그가 두 번 붙지 않게).
+   */
+  const givers = [
+    ...new Map(
+      drawn.map(({ char: c, slotIndex }) => {
+        const role = placementRole(c, slotIndex) ?? null
+        return [
+          `${c.id}:${role}`,
+          {
+            id: c.id,
+            role,
+            partnerTags: add?.partnerTags?.[c.id] ?? entry?.partnerTags?.[c.id] ?? c.partnerTags
+          }
+        ] as const
+      })
+    ).values()
+  ]
+  const built = drawn
     .map(({ char: c, slotIndex }) => {
       const seated = slotIndex != null
       const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
@@ -231,9 +258,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
       // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
       const addPos = seated ? undefined : add?.positions?.[c.id]
-      // 자리 역할이 먼저 — 같은 캐릭터라도 자리마다 하는쪽/당하는쪽이 다를 수 있다
-      const role =
-        (seated ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
+      const role = placementRole(c, slotIndex)
+      // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
+      const partnerTag = partnerTagsFor(role, givers, c.id)
       /**
        * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
        * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
@@ -247,11 +274,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       if (rp) rolePosApplied = true
       const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
       return {
-        // 카드 → 이 씬 태그 → 자리 태그 → 역할 태그 순으로 이어붙인다
-        prompt: appendPrompt(
-          appendPrompt(appendPrompt(c.prompt, withRole(charTag)), withRole(slotTag)),
-          roleTagsFor(role, scene)
-        ),
+        // 카드 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+        prompt: [withRole(charTag), withRole(slotTag), withRole(partnerTag), roleTagsFor(role, scene)]
+          .reduce(appendPrompt, c.prompt),
         negativePrompt: c.negativePrompt,
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.

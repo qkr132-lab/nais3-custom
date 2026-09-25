@@ -419,6 +419,11 @@ export const migrations: ((db: Database.Database) => void)[] = [
         )
       }
     }
+  },
+  // v30 (커스텀): 상대 태그 — 이 캐릭터가 나오는 그림에서 반대 역할 캐릭터가 받을 태그.
+  // 하는쪽 카드마다 "상대 여자는 이런 표정"을 걸어두는 용도.
+  (db) => {
+    db.exec(`ALTER TABLE character_prompts ADD COLUMN partner_tags TEXT NOT NULL DEFAULT '';`)
   }
 ]
 
@@ -464,6 +469,7 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('character_prompts', 'deleted_folder', 'deleted_folder TEXT')
   ensureColumn('character_folders', 'parent_id', 'parent_id INTEGER')
   ensureColumn('character_prompts', 'slot_no', 'slot_no INTEGER')
+  ensureColumn('character_prompts', 'partner_tags', "partner_tags TEXT NOT NULL DEFAULT ''")
   ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
