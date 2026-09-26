@@ -583,6 +583,9 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     return { tokens, hasData: hasClothingData() }
   })
   handle('outfits:stateCandidates', ({ tags }) => ({ items: stateCandidates(tags) }))
+  handle('outfits:classifyTags', ({ tags }) => ({
+    kinds: Object.fromEntries(tags.map((t) => [t, classifyTag(t)]))
+  }))
   handle('chars:create', ({ name, folderId }) => ({ id: createCharacter(name, folderId) }))
   handle('chars:update', ({ id, patch }) => {
     updateCharacter(id, patch)

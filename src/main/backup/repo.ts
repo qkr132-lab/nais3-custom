@@ -66,7 +66,10 @@ const SETTINGS_KEYS = [
   'auto_save',
   'image_format',
   'date_folders',
-  'scene_extras'
+  'scene_extras',
+  // 복장 — 자동 젖히기 장면 목록, 누드면 옷 벗기기 (커스텀)
+  'outfit_expose_acts',
+  'nude_strip_clothes'
 ] as const
 
 type Row = Record<string, unknown>

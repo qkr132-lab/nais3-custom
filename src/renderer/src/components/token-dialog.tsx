@@ -24,6 +24,7 @@ import { useGenerationStore } from '../stores/generation-store'
 import { AccountsSection } from './accounts-section'
 import { useThemeStore } from '../stores/theme-store'
 import { useCharactersStore } from '../stores/characters-store'
+import { useOutfitsStore } from '../stores/outfits-store'
 import { useFragmentsStore } from '../stores/fragments-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { usePromptPresetsStore } from '../stores/prompt-presets-store'
@@ -146,6 +147,9 @@ function GenerationSection(): React.JSX.Element {
   const [notify, setNotify] = useState(true) // 생성 완료 알림 (커스텀, 기본 켜짐)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const setPromptSplitEnabled = useGenerationStore((s) => s.setPromptSplitEnabled)
+  // 누드면 옷 벗기기 (커스텀, 기본 켜짐)
+  const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
   // 확인 창 전역 끄기 (커스텀)
   const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
   const confirmsOff = confirmsOffState
@@ -193,6 +197,12 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row label="확인 창 끄기" hint="삭제 등 '정말 하시겠어요?' 확인을 건너뜀 (주의)">
         <Switch checked={confirmsOff} onCheckedChange={setConfirmsOff} />
+      </Row>
+      <Row
+        label="누드면 옷 벗기기"
+        hint="장면에 nude·completely nude·naked towel 등이 있으면 그 캐릭터의 복장을 빼고 카드의 옷 태그를 걷어냄"
+      >
+        <Switch checked={stripOnNude} onCheckedChange={setStripOnNude} />
       </Row>
       <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">
         <Switch

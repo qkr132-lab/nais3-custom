@@ -610,6 +610,11 @@ export interface IpcInvokeMap {
     req: { tags: string[] }
     res: { items: { tag: string; ko: string; count: number }[] }
   }
+  /** 태그마다 옷 / 알몸 / 몸 / 모름 — 누드 씬에서 카드의 옷 태그를 걷어낼 때 (커스텀) */
+  'outfits:classifyTags': {
+    req: { tags: string[] }
+    res: { kinds: Record<string, 'cloth' | 'bare' | 'body' | 'unknown'> }
+  }
   /** 네이티브 파일 선택 → sharp 리사이즈 → BLOB 저장. 취소 시 thumbnail null */
   'chars:pickThumbnail': { req: { id: number }; res: { thumbnail: string | null } }
   'chars:clearThumbnail': { req: { id: number }; res: void }

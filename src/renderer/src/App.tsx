@@ -116,6 +116,13 @@ export default function App(): React.JSX.Element {
         useCharRefsStore.getState().load(),
         useShortcutsStore.getState().hydrate()
       ])
+      // 누드면 옷 벗기기 — 켜져 있으면 카드 태그의 옷 분류를 미리 받아둔다 (씬 미리보기용)
+      if (useOutfitsStore.getState().stripOnNude) {
+        void useOutfitsStore
+          .getState()
+          .ensureKinds(useCharactersStore.getState().items.map((c) => c.prompt))
+          .catch(() => undefined)
+      }
       // 스플래시가 너무 순식간에 사라지지 않게 최소 표시 시간 확보
       setTimeout(() => setReady(true), 350)
     })()

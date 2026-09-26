@@ -14,6 +14,7 @@ import { useGenerationStore } from '../stores/generation-store'
 import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useSceneExtrasStore } from '../stores/scene-extras-store'
+import { useOutfitsStore } from '../stores/outfits-store'
 import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -48,6 +49,12 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const transparentBackground = useGenerationStore((s) => s.transparentBackground)
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const charItems = useCharactersStore((s) => s.items)
+  // 누드면 옷 벗기기 (커스텀) — 켜고 끄거나 옷 분류가 도착하면 미리보기도 다시 계산
+  const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  const clothKinds = useOutfitsStore((s) => s.kinds)
+  useEffect(() => {
+    if (stripOnNude) void useOutfitsStore.getState().ensureKinds(charItems.map((c) => c.prompt))
+  }, [stripOnNude, charItems])
   const sequenceEnabled = useSceneExtrasStore((s) => s.sequenceEnabled)
   const sequenceEntries = useSceneExtrasStore((s) => s.entries)
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
@@ -113,7 +120,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       sequenceEnabled,
       sequenceEntries,
       additionsEnabled,
-      additions
+      additions,
+      stripOnNude,
+      clothKinds
     ]
   )
   const tokenPreview = usePromptTokens('tokens:preview', {

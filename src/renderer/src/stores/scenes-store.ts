@@ -19,7 +19,8 @@ import {
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
-import { outfitMap, useOutfitsStore } from './outfits-store'
+import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
+import { undressForNude } from '@shared/nude-strip'
 import {
   enabledEntries,
   hasAddition,
@@ -232,6 +233,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   // 복장 (커스텀) — 씬(또는 큐 항목)에서 고른 옷 > 카드 기본 복장 > 없음
   const outfits = outfitMap()
   const exposeActs = useOutfitsStore.getState().acts
+  const stripOnNude = useOutfitsStore.getState().stripOnNude
+  const kindOf = clothKindOf()
   // 역할이 걸린 캐릭터가 있으면 씬 전체 태그(삽입 등)는 당하는쪽에게만 적용한다
   const anyRole = drawn.some(({ char: c, slotIndex }) => !!placementRole(c, slotIndex))
   /**
@@ -270,26 +273,33 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
       const partnerTag = partnerTagsFor(role, givers, c.id)
       const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
-      const outfitTag = resolveOutfitTags(c.outfitId, outfitChoice, outfits)
-      const outfitNegative = resolveOutfitNegative(c.outfitId, outfitChoice, outfits)
+      // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
+      const sceneContexts = [
+        ...(role === 'target' || !anyRole ? [base.prompt, scene.prompt] : []),
+        roleTagsFor(role, scene),
+        charTag,
+        slotTag,
+        partnerTag
+      ]
+      // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
+      // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
+      const dressed = undressForNude({
+        card: c.prompt,
+        outfit: resolveOutfitTags(c.outfitId, outfitChoice, outfits),
+        outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
+        explicitOutfit: !!outfitChoice,
+        contexts: sceneContexts,
+        enabled: stripOnNude,
+        kindOf
+      })
+      const outfitTag = dressed.outfit
       /**
        * 옷 입은 채 자동으로 젖히기 (커스텀) — 이 캐릭터에게 걸린 장면 태그를 보고,
        * 입은 옷에 맞게 필요한 곳만 드러낸다 (비키니 + 삽입 → bikini bottom aside).
-       * 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만 적용한다.
        */
       const exposeTag =
         outfitTag && outfitChoice?.auto !== false
-          ? autoExposeTags(
-              outfitTag,
-              [
-                ...(role === 'target' || !anyRole ? [base.prompt, scene.prompt] : []),
-                roleTagsFor(role, scene),
-                charTag,
-                slotTag,
-                partnerTag
-              ],
-              exposeActs
-            )
+          ? autoExposeTags(outfitTag, sceneContexts, exposeActs)
               .map((e) => e.tag)
               .join(', ')
           : ''
@@ -314,9 +324,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
           withRole(slotTag),
           withRole(partnerTag),
           roleTagsFor(role, scene)
-        ].reduce(appendPrompt, c.prompt),
+        ].reduce(appendPrompt, dressed.card),
         // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
-        negativePrompt: appendPrompt(c.negativePrompt, outfitNegative),
+        negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
         center: explicit ?? { x: 0.5, y: 0.5 },
@@ -444,6 +454,12 @@ async function ensureExtrasData(): Promise<void> {
   if (!useVibesStore.getState().loaded) jobs.push(useVibesStore.getState().load())
   if (!useCharRefsStore.getState().loaded) jobs.push(useCharRefsStore.getState().load())
   await Promise.all(jobs)
+  // 누드면 옷 벗기기 — 카드 태그의 옷 분류를 미리 받아둔다 (요청은 동기로 만들어진다)
+  if (useOutfitsStore.getState().stripOnNude) {
+    await useOutfitsStore
+      .getState()
+      .ensureKinds(useCharactersStore.getState().items.map((c) => c.prompt))
+  }
 }
 
 /**

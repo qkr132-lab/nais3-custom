@@ -18,7 +18,8 @@ import {
 } from '@shared/scene-request'
 import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
 import { autoExposeTags } from '@shared/auto-expose'
-import { outfitMap, useOutfitsStore } from './outfits-store'
+import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
+import { undressForNude } from '@shared/nude-strip'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -243,34 +244,47 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     // 복장 (커스텀) — 메인 탭은 씬 선택이 없으니 카드의 기본 복장
     const outfits = outfitMap()
     const exposeActs = useOutfitsStore.getState().acts
+    const { stripOnNude } = useOutfitsStore.getState()
+    if (stripOnNude) await useOutfitsStore.getState().ensureKinds(enabled.map((c) => c.prompt))
+    const kindOf = clothKindOf()
     const anyRole = enabled.some((c) => !!c.role)
-    // 옷 입은 채 자동으로 젖히기 — 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게
-    const withOutfit = (c: (typeof enabled)[number]): string => {
-      const worn = resolveOutfitTags(c.outfitId, undefined, outfits)
-      const exposed = worn
-        ? autoExposeTags(
-            worn,
-            [
-              ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
-              partnerTagsFor(c.role, givers, c.id)
-            ],
-            exposeActs
-          )
+    /**
+     * 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게.
+     * 누드면 옷 벗기기 → 옷 입은 채 자동으로 젖히기 순 (커스텀)
+     */
+    const dress = (c: (typeof enabled)[number]): { prompt: string; negative: string } => {
+      const contexts = [
+        ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
+        partnerTagsFor(c.role, givers, c.id)
+      ]
+      const dressed = undressForNude({
+        card: c.prompt,
+        outfit: resolveOutfitTags(c.outfitId, undefined, outfits),
+        outfitNegative: resolveOutfitNegative(c.outfitId, undefined, outfits),
+        contexts,
+        enabled: stripOnNude,
+        kindOf
+      })
+      const exposed = dressed.outfit
+        ? autoExposeTags(dressed.outfit, contexts, exposeActs)
             .map((e) => e.tag)
             .join(', ')
         : ''
-      return appendPrompt(appendPrompt(c.prompt, worn), exposed)
+      return {
+        prompt: appendPrompt(appendPrompt(dressed.card, dressed.outfit), exposed),
+        negative: dressed.outfitNegative
+      }
     }
-    const characterPrompts = enabled.map((c) => ({
-      prompt: withPartnerTags(withOutfit(c), c.role, givers, c.id),
-      // 기본 복장의 네거티브도 붙는다 (커스텀)
-      negativePrompt: appendPrompt(
-        c.negativePrompt,
-        resolveOutfitNegative(c.outfitId, undefined, outfits)
-      ),
-      center: c.center,
-      enabled: true as const
-    }))
+    const characterPrompts = enabled.map((c) => {
+      const worn = dress(c)
+      return {
+        prompt: withPartnerTags(worn.prompt, c.role, givers, c.id),
+        // 기본 복장의 네거티브도 붙는다 (커스텀)
+        negativePrompt: appendPrompt(c.negativePrompt, worn.negative),
+        center: c.center,
+        enabled: true as const
+      }
+    })
     const src = get().source
     // 캐릭터에 연결된 캐릭레퍼 자동 포함 (커스텀) — 있으면 enabled 레퍼런스와 합집합으로 오버라이드
     const linked = linkedCharRefIds()
