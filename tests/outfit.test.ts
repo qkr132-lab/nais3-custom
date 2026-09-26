@@ -185,3 +185,22 @@ describe('복장이 파일로 갔다 돌아온다', () => {
     expect(s.outfits).toEqual({ 1: { outfitId: 1 } })
   })
 })
+
+describe('복장 네거티브', () => {
+  it('입은 복장의 네거티브만 따라온다 — 씬 선택 > 카드 기본', async () => {
+    const { resolveOutfitNegative } = await import('../src/shared/outfit')
+    const withNeg = new Map([
+      [1, { ...uniform, negative: 'pants' }],
+      [2, { ...nude, negative: 'clothes' }]
+    ])
+    expect(resolveOutfitNegative(1, undefined, withNeg)).toBe('pants')
+    expect(resolveOutfitNegative(1, { outfitId: 2 }, withNeg)).toBe('clothes')
+    expect(resolveOutfitNegative(null, undefined, withNeg)).toBe('')
+  })
+
+  it('조각을 다 꺼도 복장을 입고 있으면 네거티브는 붙는다', async () => {
+    const { resolveOutfitNegative } = await import('../src/shared/outfit')
+    const withNeg = new Map([[1, { ...uniform, negative: 'pants' }]])
+    expect(resolveOutfitNegative(1, { outfitId: 1, off: ['jacket', 'shirt', 'skirt'] }, withNeg)).toBe('pants')
+  })
+})

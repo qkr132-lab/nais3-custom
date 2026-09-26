@@ -84,6 +84,11 @@ export function OutfitPicker({
           <p className="truncate text-[11px] text-faint" title={outfitTags(outfit, current)}>
             {outfitTags(outfit, current) || '켜진 조각이 없어 옷 태그가 붙지 않습니다'}
           </p>
+          {outfit.negative?.trim() && (
+            <p className="truncate text-[11px] text-faint" title={outfit.negative}>
+              <span className="text-danger/80">네거티브</span> {outfit.negative}
+            </p>
+          )}
         </>
       ) : (
         <p className="text-[11px] text-faint">

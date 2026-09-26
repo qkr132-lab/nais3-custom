@@ -25,6 +25,8 @@ export interface Outfit {
   id: number
   name: string
   pieces: OutfitPiece[]
+  /** 이 복장을 입을 때 캐릭터 네거티브에 붙는 태그 — 다른 끈 모양·원치 않는 갑옷 부위 막기 */
+  negative: string
 }
 
 /**
@@ -55,23 +57,42 @@ export function outfitTags(outfit: Outfit, choice?: Pick<OutfitChoice, 'on' | 'o
 }
 
 /**
- * 이 캐릭터가 이 그림에서 입는 옷의 태그.
- * 씬에서 고른 것 > 카드 기본 복장 > 없음. 지워진 복장을 가리키면 없는 것으로 본다.
+ * 이 캐릭터가 이 그림에서 입는 복장.
+ * 씬에서 고른 것 > 카드 기본 복장 > 없음. 지워진 복장을 가리키면 다음 순서로 물러난다.
  */
+export function resolveOutfit(
+  cardOutfitId: number | null | undefined,
+  sceneChoice: OutfitChoice | undefined,
+  outfits: ReadonlyMap<number, Outfit>
+): { outfit: Outfit; choice?: OutfitChoice } | null {
+  if (sceneChoice) {
+    const o = outfits.get(sceneChoice.outfitId)
+    if (o) return { outfit: o, choice: sceneChoice }
+  }
+  if (cardOutfitId != null) {
+    const o = outfits.get(cardOutfitId)
+    if (o) return { outfit: o }
+  }
+  return null
+}
+
+/** 입는 옷의 태그 (켜진 조각만) */
 export function resolveOutfitTags(
   cardOutfitId: number | null | undefined,
   sceneChoice: OutfitChoice | undefined,
   outfits: ReadonlyMap<number, Outfit>
 ): string {
-  if (sceneChoice) {
-    const o = outfits.get(sceneChoice.outfitId)
-    if (o) return outfitTags(o, sceneChoice)
-  }
-  if (cardOutfitId != null) {
-    const o = outfits.get(cardOutfitId)
-    if (o) return outfitTags(o)
-  }
-  return ''
+  const r = resolveOutfit(cardOutfitId, sceneChoice, outfits)
+  return r ? outfitTags(r.outfit, r.choice) : ''
+}
+
+/** 입는 옷의 네거티브 — 조각을 켜고 끄는 것과 상관없이 그 복장을 입으면 붙는다 */
+export function resolveOutfitNegative(
+  cardOutfitId: number | null | undefined,
+  sceneChoice: OutfitChoice | undefined,
+  outfits: ReadonlyMap<number, Outfit>
+): string {
+  return resolveOutfit(cardOutfitId, sceneChoice, outfits)?.outfit.negative?.trim() ?? ''
 }
 
 /** 조각 켜고 끄기 — 기본값과 같아지면 기록에서 뺀다 (기록이 기본값 대비 차이만 남게) */

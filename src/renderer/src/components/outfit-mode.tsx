@@ -245,6 +245,26 @@ function OutfitEditor({
         </Button>
       </div>
 
+      {/* 네거티브 — 이 복장을 입을 때만 캐릭터 네거티브 뒤에 붙는다 */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[12px] font-medium text-muted">
+          네거티브
+          <span className="ml-1.5 text-[11px] font-normal text-faint">
+            이 복장을 입을 때만 캐릭터 네거티브 뒤에 붙습니다 · 다른 끈 모양이나 원치 않는 갑옷
+            부위를 막을 때
+          </span>
+        </p>
+        <PromptEditor
+          negative
+          autoGrow
+          tokensOverride={null}
+          className="max-h-[140px] min-h-[40px] bg-surface-2"
+          value={outfit.negative}
+          placeholder="halterneck, strapless, single pauldron"
+          onValueChange={(v) => update(outfit.id, { negative: v })}
+        />
+      </div>
+
       {/* 상태 후보 — 입은 옷에 맞는 것만 */}
       <div className="rounded-lg border border-line p-2.5">
         <p className="mb-1.5 text-[12px] font-medium text-muted">

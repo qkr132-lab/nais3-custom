@@ -441,6 +441,10 @@ export const migrations: ((db: Database.Database) => void)[] = [
       '알몸',
       JSON.stringify([{ id: 'nude', name: '알몸', tags: 'nude, completely nude', on: true }])
     )
+  },
+  // v32 (커스텀): 복장 네거티브 — 그 복장을 입을 때만 캐릭터 네거티브에 붙는다
+  (db) => {
+    db.exec(`ALTER TABLE outfits ADD COLUMN negative TEXT NOT NULL DEFAULT '';`)
   }
 ]
 
@@ -500,6 +504,7 @@ export function reconcileSchema(db: Database.Database): void {
   } catch {
     // 표가 없어도 앱은 뜬다 — 복장 기능만 비어 보인다
   }
+  ensureColumn('outfits', 'negative', "negative TEXT NOT NULL DEFAULT ''")
   ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')

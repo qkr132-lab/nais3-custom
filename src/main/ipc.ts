@@ -547,9 +547,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('chars:list', () => listCharacters())
   // 복장 (커스텀)
   handle('outfits:list', () => ({ items: listOutfits() }))
-  handle('outfits:create', ({ name, pieces }) => ({ id: createOutfit(name, pieces) }))
-  handle('outfits:update', ({ id, name, pieces }) => {
-    updateOutfit(id, { name, pieces })
+  handle('outfits:create', ({ name, pieces, negative }) => ({
+    id: createOutfit(name, pieces, negative)
+  }))
+  handle('outfits:update', ({ id, name, pieces, negative }) => {
+    updateOutfit(id, { name, pieces, negative })
   })
   handle('outfits:delete', ({ id }) => {
     deleteOutfit(id)

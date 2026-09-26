@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
-import { resolveOutfitTags } from '@shared/outfit'
+import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -265,11 +265,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       const role = placementRole(c, slotIndex)
       // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
       const partnerTag = partnerTagsFor(role, givers, c.id)
-      const outfitTag = resolveOutfitTags(
-        c.outfitId,
-        add?.outfits?.[c.id] ?? entry?.outfits?.[c.id],
-        outfits
-      )
+      const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
+      const outfitTag = resolveOutfitTags(c.outfitId, outfitChoice, outfits)
+      const outfitNegative = resolveOutfitNegative(c.outfitId, outfitChoice, outfits)
       /**
        * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
        * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
@@ -291,7 +289,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
           withRole(partnerTag),
           roleTagsFor(role, scene)
         ].reduce(appendPrompt, c.prompt),
-        negativePrompt: c.negativePrompt,
+        // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
+        negativePrompt: appendPrompt(c.negativePrompt, outfitNegative),
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
         center: explicit ?? { x: 0.5, y: 0.5 },

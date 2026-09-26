@@ -11,7 +11,7 @@ import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './charact
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 import { appendPrompt, mergePromptParts, withPartnerTags } from '@shared/scene-request'
-import { resolveOutfitTags } from '@shared/outfit'
+import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
 import { outfitMap } from './outfits-store'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
@@ -243,7 +243,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         givers,
         c.id
       ),
-      negativePrompt: c.negativePrompt,
+      // 기본 복장의 네거티브도 붙는다 (커스텀)
+      negativePrompt: appendPrompt(
+        c.negativePrompt,
+        resolveOutfitNegative(c.outfitId, undefined, outfits)
+      ),
       center: c.center,
       enabled: true as const
     }))

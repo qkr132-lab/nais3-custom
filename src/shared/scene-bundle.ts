@@ -64,6 +64,7 @@ export interface FileOutfit {
   uid: string
   name: string
   pieces: OutfitPiece[]
+  negative?: string
 }
 
 /** 씬 하나의 구성 — 파일에 적는 모양 */

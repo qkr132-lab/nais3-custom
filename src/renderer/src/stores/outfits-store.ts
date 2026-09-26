@@ -10,7 +10,7 @@ interface OutfitsState {
   loaded: boolean
   load: () => Promise<void>
   create: (name: string, pieces?: OutfitPiece[]) => Promise<number>
-  update: (id: number, patch: { name?: string; pieces?: OutfitPiece[] }) => void
+  update: (id: number, patch: { name?: string; pieces?: OutfitPiece[]; negative?: string }) => void
   remove: (id: number) => Promise<void>
   duplicate: (id: number) => Promise<number | null>
 }

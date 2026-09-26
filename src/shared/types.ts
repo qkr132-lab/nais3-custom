@@ -588,8 +588,14 @@ export interface IpcInvokeMap {
   'chars:duplicate': { req: { id: number }; res: { id: number } }
   // ── 복장 (커스텀) ──
   'outfits:list': { req: void; res: { items: Outfit[] } }
-  'outfits:create': { req: { name: string; pieces?: OutfitPiece[] }; res: { id: number } }
-  'outfits:update': { req: { id: number; name?: string; pieces?: OutfitPiece[] }; res: void }
+  'outfits:create': {
+    req: { name: string; pieces?: OutfitPiece[]; negative?: string }
+    res: { id: number }
+  }
+  'outfits:update': {
+    req: { id: number; name?: string; pieces?: OutfitPiece[]; negative?: string }
+    res: void
+  }
   'outfits:delete': { req: { id: number }; res: void }
   'outfits:duplicate': { req: { id: number }; res: { id: number | null } }
   /** 이 복장을 기본으로 입는 카드 수 — 지우기 전 경고용 */
