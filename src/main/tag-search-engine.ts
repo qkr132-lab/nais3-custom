@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { existsSync, readFileSync } from 'node:fs'
 import { compact, koreanInitials, koreanTypingKey, oneTypo, relatedKey } from './tags-related'
 import { mergeTagRecommendations } from '../shared/tag-search'
 import type { TagMatch, TagSuggestion, TagUsage } from '../shared/tag-search'
@@ -21,6 +22,22 @@ interface Aliases {
 interface Personal {
   ko: Record<string, string>
   usage: TagUsage
+}
+/**
+ * 사용자 PC에만 있는 한글 태그 자료 (커스텀) — tag-ko-extra.json.
+ * 앱 번들에는 싣지 않고, 있으면 그 PC의 파일을 읽는다 (남이 번역·정리한 자료라 배포하지 않는다).
+ * 파일 모양: { "tags": { "<영어 태그>": ["한글 이름", ["별칭", ...], "한글 설명"] } }
+ */
+interface ExtraEntry {
+  ko: string
+  aliases: string[]
+  desc: string
+}
+interface ExtraAlias {
+  tag: string
+  key: string
+  typing: string
+  initials: string
 }
 interface Ranked {
   row: Row
@@ -46,7 +63,10 @@ export class TagSearchEngine {
   private cache = new Map<string, TagSuggestion[]>()
   private rowCache = new Map<number, Row>()
   private statements = new Map<string, Database.Statement>()
-  constructor(path: string) {
+  private extra = new Map<string, ExtraEntry>()
+  /** 한글 이름·별칭 색인 — 시작할 때 한 번 만든다 (검색마다 파일을 훑지 않게) */
+  private extraAliases: ExtraAlias[] = []
+  constructor(path: string, extraPath?: string) {
     this.db = new Database(path, { readonly: true, fileMustExist: true })
     this.db.pragma('query_only = ON')
     this.db.pragma('cache_size = -16384')
@@ -54,6 +74,42 @@ export class TagSearchEngine {
       { value: string } | undefined
     if (!manifest || JSON.parse(manifest.value).schema !== 1)
       throw new Error('Unsupported tag search database')
+    if (extraPath) this.loadExtra(extraPath)
+  }
+  /** 한글 태그 자료를 읽는다. 없거나 깨졌으면 조용히 넘어간다 — 기본 사전만으로 돈다 */
+  private loadExtra(path: string): void {
+    try {
+      if (!existsSync(path)) return
+      const data = JSON.parse(readFileSync(path, 'utf8')) as {
+        tags?: Record<string, unknown>
+      }
+      for (const [raw, value] of Object.entries(data.tags ?? {})) {
+        if (!Array.isArray(value)) continue
+        const [ko, aliases, desc] = value as unknown[]
+        const tag = normalizeTagQuery(raw)
+        const entry: ExtraEntry = {
+          ko: typeof ko === 'string' ? ko.trim() : '',
+          aliases: Array.isArray(aliases)
+            ? aliases.filter((a): a is string => typeof a === 'string' && !!a.trim())
+            : [],
+          desc: typeof desc === 'string' ? desc.trim() : ''
+        }
+        this.extra.set(tag, entry)
+        for (const name of [entry.ko, ...entry.aliases]) {
+          const key = compact(name)
+          if (!/[가-힣]/.test(key)) continue
+          this.extraAliases.push({
+            tag,
+            key,
+            typing: koreanTypingKey(name),
+            initials: koreanInitials(key)
+          })
+        }
+      }
+    } catch {
+      this.extra.clear()
+      this.extraAliases = []
+    }
   }
   close(): void {
     this.db.close()
@@ -91,7 +147,10 @@ export class TagSearchEngine {
     return this.get('SELECT * FROM tags WHERE tag = ?', normalizeTagQuery(name)) as Row | undefined
   }
   private enrich(row: Row, match?: TagMatch, alias?: string): TagSuggestion {
-    const ko = this.personal.ko[row.tag] || row.ko
+    const extra = this.extra.get(row.tag)
+    // 직접 지정한 한글 > 기존 사전 > 받아온 자료 — 받아온 자료는 한글이 없던 태그만 채운다
+    const ko = this.personal.ko[row.tag] || row.ko || extra?.ko || null
+    const desc = extra?.desc || row.description
     const used = this.personal.usage[row.tag]
     return {
       tag: row.tag,
@@ -100,7 +159,7 @@ export class TagSearchEngine {
       ...(row.legacy ? { legacy: true } : {}),
       ...(ko ? { ko: splitAliases(ko)[0] } : {}),
       ...(this.personal.ko[row.tag] ? { userKo: true } : {}),
-      ...(row.description ? { desc: row.description } : {}),
+      ...(desc ? { desc } : {}),
       ...(alias && compact(alias) !== compact(ko ?? '') ? { matchedAlias: alias } : {}),
       ...(match ? { match } : {}),
       ...(used ? { usageCount: used.count, lastUsed: used.lastUsed } : {})
@@ -219,6 +278,22 @@ export class TagSearchEngine {
         )
       }
     }
+    // 받아온 한글 자료 (커스텀) — 디스크 색인에 없는 한글 이름·별칭으로도 찾히게
+    if (korean && this.extraAliases.length) {
+      let added = 0
+      for (const a of this.extraAliases) {
+        if (added >= 512) break
+        const hit = initial
+          ? a.initials.startsWith(cq)
+          : a.key.includes(cq) || (cq.length >= 2 && a.typing.startsWith(typing))
+        if (!hit) continue
+        const r = this.named(a.tag)
+        if (r && !candidates.has(r.id)) {
+          candidates.set(r.id, r)
+          added++
+        }
+      }
+    }
     // Personal vocabulary is small and changes independently of the disk index.
     for (const tag of Object.keys(this.personal.ko)) {
       const r = this.named(tag)
@@ -227,9 +302,11 @@ export class TagSearchEngine {
     const ranked: Ranked[] = []
     for (const row of candidates.values()) {
       const saved = JSON.parse(row.aliases) as Aliases
+      const extra = this.extra.get(row.tag)
       const names = [
         ...splitAliases(this.personal.ko[row.tag] ?? ''),
         ...saved.ko,
+        ...(extra ? [extra.ko, ...extra.aliases].filter(Boolean) : []),
         row.tag,
         ...saved.en
       ]

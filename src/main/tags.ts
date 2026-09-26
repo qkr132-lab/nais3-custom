@@ -77,12 +77,23 @@ function fail(error: Error): void {
     void old.terminate()
   }
 }
+/**
+ * 사용자 PC에만 있는 한글 태그 자료 경로 (커스텀). 앱에 싣지 않는 자료라 사용자 데이터 폴더에 둔다.
+ * 없으면 기본 사전만 쓴다.
+ */
+function extraKoPath(): string | undefined {
+  try {
+    return join(app.getPath('userData'), 'tag-ko-extra.json')
+  } catch {
+    return undefined
+  }
+}
 function startWorker(): Worker {
   if (worker) return worker
   // SQLite needs a real filesystem path; resources/** is unpacked by the builder.
   const root = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked')
   const next = new Worker(join(__dirname, 'tag-search-worker.js'), {
-    workerData: { path: join(root, 'resources', 'tag-search.sqlite') }
+    workerData: { path: join(root, 'resources', 'tag-search.sqlite'), extraPath: extraKoPath() }
   })
   worker = next
   next.unref()

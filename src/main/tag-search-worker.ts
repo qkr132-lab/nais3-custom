@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads'
 import { TagSearchEngine } from './tag-search-engine'
 import type { TagUsage } from '../shared/tag-search'
 
-const engine = new TagSearchEngine(workerData.path)
+const engine = new TagSearchEngine(workerData.path, workerData.extraPath)
 parentPort!.on(
   'message',
   (message: {
