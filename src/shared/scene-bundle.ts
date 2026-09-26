@@ -1,4 +1,5 @@
 import type { CharRole } from './types'
+import type { OutfitChoice, OutfitPiece } from './outfit'
 
 /**
  * 씬 구성 직렬화 (커스텀) — 씬 JSON·캐릭터 백업·전체 백업이 함께 쓴다.
@@ -32,6 +33,8 @@ export interface SceneSetup {
   charTags?: Record<number, string>
   /** 캐릭터 id → 이 씬에서 상대(반대 역할)에게 붙일 태그. 있으면 카드에 적힌 것 대신 쓴다 */
   partnerTags?: Record<number, string>
+  /** 캐릭터 id → 이 씬에서 입힐 옷. 없으면 카드의 기본 복장 */
+  outfits?: Record<number, OutfitChoice>
 }
 
 /** 자리 묶음 + 씬 태그 — 파일에 적는 모양 (캐릭터 = 파일 안 uid) */
@@ -45,6 +48,22 @@ export interface FileSlotExtras {
   charTags?: Record<string, string>
   /** uid → 이 씬에서 상대에게 붙일 태그 */
   partnerTags?: Record<string, string>
+  /** uid → 이 씬에서 입힐 옷 (복장은 파일 안 복장 uid로) */
+  outfits?: Record<string, FileOutfitChoice>
+}
+
+/** 파일에 적는 옷 선택 — 복장을 id 대신 파일 안 uid로 가리킨다 */
+export interface FileOutfitChoice {
+  outfit: string
+  on?: string[]
+  off?: string[]
+}
+
+/** 파일에 싣는 복장 */
+export interface FileOutfit {
+  uid: string
+  name: string
+  pieces: OutfitPiece[]
 }
 
 /** 씬 하나의 구성 — 파일에 적는 모양 */
@@ -77,7 +96,8 @@ function nonEmpty<T extends object>(o: T): T | undefined {
  */
 export function encodeSlotExtras(
   setup: Omit<SceneSetup, 'characterIds'>,
-  uidOf: (id: number) => string | undefined
+  uidOf: (id: number) => string | undefined,
+  outfitUidOf: (id: number) => string | undefined = () => undefined
 ): FileSlotExtras {
   const count = setup.slots?.length ?? 0
   const out: FileSlotExtras = {}
@@ -128,6 +148,20 @@ export function encodeSlotExtras(
   const partnerTags = nonEmpty(pt)
   if (partnerTags) out.partnerTags = partnerTags
 
+  const oc: Record<string, FileOutfitChoice> = {}
+  for (const [id, choice] of Object.entries(setup.outfits ?? {})) {
+    const uid = uidOf(Number(id))
+    const outfit = choice ? outfitUidOf(choice.outfitId) : undefined
+    if (!uid || !outfit) continue
+    oc[uid] = {
+      outfit,
+      ...(choice.on?.length ? { on: [...choice.on] } : {}),
+      ...(choice.off?.length ? { off: [...choice.off] } : {})
+    }
+  }
+  const outfits = nonEmpty(oc)
+  if (outfits) out.outfits = outfits
+
   return out
 }
 
@@ -136,7 +170,8 @@ export function encodeSlotExtras(
  */
 export function decodeSlotExtras(
   file: FileSlotExtras,
-  idOf: (uid: string) => number | undefined
+  idOf: (uid: string) => number | undefined,
+  outfitIdOf: (uid: string) => number | undefined = () => undefined
 ): { extras: Omit<SceneSetup, 'characterIds'>; dropped: number } {
   let dropped = 0
   const extras: Omit<SceneSetup, 'characterIds'> = {}
@@ -184,6 +219,23 @@ export function decodeSlotExtras(
   }
   if (Object.keys(partnerTags).length) extras.partnerTags = partnerTags
 
+  const strs = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.length ? v.filter((x): x is string => typeof x === 'string') : undefined
+  const outfits: Record<number, OutfitChoice> = {}
+  for (const [uid, fc] of Object.entries(file.outfits ?? {})) {
+    if (!fc || typeof fc.outfit !== 'string') continue
+    const id = idOf(uid)
+    const outfitId = outfitIdOf(fc.outfit)
+    if (id === undefined || outfitId === undefined) {
+      dropped++
+      continue
+    }
+    const on = strs(fc.on)
+    const off = strs(fc.off)
+    outfits[id] = { outfitId, ...(on ? { on } : {}), ...(off ? { off } : {}) }
+  }
+  if (Object.keys(outfits).length) extras.outfits = outfits
+
   return { extras, dropped }
 }
 
@@ -196,8 +248,17 @@ export function setupCharacterIds(setup: SceneSetup): number[] {
   return [...ids]
 }
 
+/** 이 구성이 입히는 복장 id 전부 — 파일에 복장을 실을 대상 */
+export function setupOutfitIds(setup: SceneSetup): number[] {
+  return [...new Set(Object.values(setup.outfits ?? {}).map((c) => c.outfitId))]
+}
+
 /** 씬 구성 전체를 파일 모양으로 */
-export function encodeSetup(setup: SceneSetup, uidOf: (id: number) => string | undefined): FileSetup {
+export function encodeSetup(
+  setup: SceneSetup,
+  uidOf: (id: number) => string | undefined,
+  outfitUidOf: (id: number) => string | undefined = () => undefined
+): FileSetup {
   const characters = setupCharacterIds(setup)
     .map(uidOf)
     .filter((u): u is string => !!u)
@@ -218,13 +279,14 @@ export function encodeSetup(setup: SceneSetup, uidOf: (id: number) => string | u
   }
   if (Object.keys(roles).length) out.roles = roles
 
-  return { ...out, ...encodeSlotExtras(setup, uidOf) }
+  return { ...out, ...encodeSlotExtras(setup, uidOf, outfitUidOf) }
 }
 
 /** 파일의 씬 구성을 id 모양으로. 바이브·캐릭레퍼 연결은 파일에 없으므로 빈 채로 둔다 */
 export function decodeSetup(
   file: FileSetup,
-  idOf: (uid: string) => number | undefined
+  idOf: (uid: string) => number | undefined,
+  outfitIdOf: (uid: string) => number | undefined = () => undefined
 ): { setup: SceneSetup; dropped: number } {
   let dropped = 0
   const characterIds: number[] = []
@@ -250,7 +312,7 @@ export function decodeSetup(
   }
   if (Object.keys(roles).length) setup.roles = roles
 
-  const slot = decodeSlotExtras(file, idOf)
+  const slot = decodeSlotExtras(file, idOf, outfitIdOf)
   return { setup: { ...setup, ...slot.extras }, dropped: dropped + slot.dropped }
 }
 
@@ -298,6 +360,7 @@ export function stripDeadCharacters<T extends SceneSetup>(setup: T, alive: (id: 
     slotOf: keep(setup.slotOf),
     charTags: keep(setup.charTags),
     partnerTags: keep(setup.partnerTags),
+    outfits: keep(setup.outfits),
     slotChars: seats
   }
 }
@@ -342,6 +405,8 @@ export interface FileCharacter {
   slotNo?: number | null
   /** 상대(반대 역할)에게 붙일 태그 */
   partnerTags?: string
+  /** 기본 복장 (파일 안 복장 uid) */
+  outfit?: string
 }
 
 /** 씬 JSON v2 — 씬 글자 + 그 씬의 캐릭터 구성 전부 */
@@ -356,6 +421,8 @@ export interface SceneBundle {
    * 여자가 파일에서 빠져 가져간 쪽의 당하는쪽 자리가 비어버린다. 가져올 때 모든 씬에 붙인다.
    */
   shared?: string[]
+  /** 이 파일의 카드·씬이 입는 복장 */
+  outfits?: FileOutfit[]
   scenes: (Record<string, unknown> & {
     name: string
     sourcePos?: Pos | null

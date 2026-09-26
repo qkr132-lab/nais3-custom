@@ -25,6 +25,7 @@ import {
   type CensorKind
 } from '../../shared/censor-tags'
 import { getDb } from '../db'
+import { exportOutfits, importOutfits } from '../outfits/repo'
 import { getSetting } from '../db/settings'
 import {
   decodeSetup,
@@ -33,6 +34,7 @@ import {
   isSceneBundle,
   setupCharacterIds,
   setupHasContent,
+  setupOutfitIds,
   withShared,
   type FileCharacter,
   type SceneBundle,
@@ -828,7 +830,7 @@ export async function exportScenesJson(presetId: number): Promise<{
   const cards = wanted.size
     ? (db
         .prepare(
-          `SELECT id, name, prompt, negative_prompt, role, slot_no, partner_tags FROM character_prompts
+          `SELECT id, name, prompt, negative_prompt, role, slot_no, partner_tags, outfit_id FROM character_prompts
            WHERE deleted_at IS NULL AND id IN (${[...wanted].map(() => '?').join(',')})
            ORDER BY sort_order, id`
         )
@@ -840,10 +842,23 @@ export async function exportScenesJson(presetId: number): Promise<{
         role: string | null
         slot_no: number | null
         partner_tags: string | null
+        outfit_id: number | null
       }[])
     : []
   const alive = new Set(cards.map((c) => c.id))
   const uidOf = (id: number): string | undefined => (alive.has(id) ? `c${id}` : undefined)
+  // 복장 — 카드의 기본 복장과 씬에서 고른 옷
+  const outfitIds = [
+    ...cards.flatMap((c) => (c.outfit_id != null ? [c.outfit_id] : [])),
+    ...scenes.flatMap((s) => {
+      const setup = setupOf(Number(s.id))
+      return setup ? setupOutfitIds(setup) : []
+    })
+  ]
+  const fileOutfits = exportOutfits(outfitIds)
+  const outfitAlive = new Set(fileOutfits.map((o) => o.uid))
+  const outfitUid = (id: number): string | undefined =>
+    outfitAlive.has(`o${id}`) ? `o${id}` : undefined
 
   const characters: FileCharacter[] = cards.map((c) => ({
     uid: `c${c.id}`,
@@ -852,7 +867,8 @@ export async function exportScenesJson(presetId: number): Promise<{
     negativePrompt: c.negative_prompt,
     ...(c.role === 'source' || c.role === 'target' ? { role: c.role } : {}),
     ...(c.slot_no != null ? { slotNo: c.slot_no } : {}),
-    ...(c.partner_tags?.trim() ? { partnerTags: c.partner_tags } : {})
+    ...(c.partner_tags?.trim() ? { partnerTags: c.partner_tags } : {}),
+    ...(c.outfit_id != null && outfitUid(c.outfit_id) ? { outfit: outfitUid(c.outfit_id) } : {})
   }))
 
   const bundle: SceneBundle = {
@@ -860,6 +876,7 @@ export async function exportScenesJson(presetId: number): Promise<{
     characterFolder: presetName,
     characters,
     ...(sharedIds.length ? { shared: sharedIds.map((id) => `c${id}`) } : {}),
+    ...(fileOutfits.length ? { outfits: fileOutfits } : {}),
     scenes: scenes.map((s) => {
       const setup = setupOf(Number(s.id))
       const sourcePos = parsePos(s.source_pos as string | null)
@@ -880,7 +897,7 @@ export async function exportScenesJson(presetId: number): Promise<{
         censorWeights: normalizeCensorWeights(s.censor_weights),
         background: normalizeBackground(s.background),
         suppressAnal: normalizeAnalSuppression(s.suppress_anal),
-        ...(setup ? { setup: encodeSetup(setup, uidOf) } : {})
+        ...(setup ? { setup: encodeSetup(setup, uidOf, outfitUid) } : {})
       }
     })
   }
@@ -1109,6 +1126,8 @@ function importSceneBundle(
     }
 
     let charOrder = maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_prompts')
+    // 복장 먼저 — 카드와 씬 구성이 가리킨다
+    const outfitOfUid = importOutfits(bundle.outfits)
     const idOfUid = new Map<string, number>()
     for (const c of cards) {
       const name = c.name?.trim() || '캐릭터'
@@ -1116,15 +1135,17 @@ function importSceneBundle(
       const role = c.role === 'source' || c.role === 'target' ? c.role : null
       const slotNo = Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? c.slotNo : null
       const partner = typeof c.partnerTags === 'string' ? c.partnerTags : ''
+      const outfitId = typeof c.outfit === 'string' ? (outfitOfUid.get(c.outfit) ?? null) : null
       // 같은 폴더에 이름·태그·역할·자리 번호까지 똑같은 카드가 있으면 재사용 —
       // 같은 파일을 두 번 가져와도 카드가 불어나지 않게. 하나라도 다르면 새로 만든다.
       const same = db
         .prepare(
           `SELECT id FROM character_prompts
            WHERE deleted_at IS NULL AND folder_id IS ? AND name = ? AND prompt = ?
-             AND negative_prompt = ? AND role IS ? AND slot_no IS ? AND partner_tags = ?`
+             AND negative_prompt = ? AND role IS ? AND slot_no IS ? AND partner_tags = ?
+             AND outfit_id IS ?`
         )
-        .get(folderId, name, c.prompt, negative, role, slotNo, partner) as
+        .get(folderId, name, c.prompt, negative, role, slotNo, partner, outfitId) as
         | { id: number }
         | undefined
       const id =
@@ -1132,10 +1153,10 @@ function importSceneBundle(
         Number(
           db
             .prepare(
-              `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled, role, slot_no, partner_tags)
-               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`
+              `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled, role, slot_no, partner_tags, outfit_id)
+               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
             )
-            .run(name, c.prompt, negative, folderId, ++charOrder, role, slotNo, partner)
+            .run(name, c.prompt, negative, folderId, ++charOrder, role, slotNo, partner, outfitId)
             .lastInsertRowid
         )
       idOfUid.set(c.uid, id)
@@ -1169,7 +1190,11 @@ function importSceneBundle(
         ).lastInsertRowid
       )
       const r = s.setup
-        ? decodeSetup(s.setup, (uid) => idOfUid.get(uid))
+        ? decodeSetup(
+            s.setup,
+            (uid) => idOfUid.get(uid),
+            (uid) => outfitOfUid.get(uid)
+          )
         : { setup: { characterIds: [], charRefIds: [], vibeIds: [] } as SceneSetup, dropped: 0 }
       dropped += r.dropped
       const setup = withShared(r.setup, sharedIds)

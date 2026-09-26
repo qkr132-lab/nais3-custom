@@ -20,6 +20,8 @@ import { SettingsDialog } from './components/token-dialog'
 import { TextPromptHost } from './components/text-prompt-host'
 import { TooltipProvider } from './components/ui/tooltip'
 import { useCharactersStore } from './stores/characters-store'
+import { useOutfitsStore } from './stores/outfits-store'
+import { OutfitMode } from './components/outfit-mode'
 import { useFragmentsStore } from './stores/fragments-store'
 import { useCharRefsStore, useVibesStore } from './stores/refs-store'
 import { bindGenerationEvents, useGenerationStore } from './stores/generation-store'
@@ -108,6 +110,7 @@ export default function App(): React.JSX.Element {
         useLayoutStore.getState().hydrate(),
         useGenerationStore.getState().hydrate(),
         useCharactersStore.getState().load(),
+        useOutfitsStore.getState().load(),
         useFragmentsStore.getState().load(),
         useVibesStore.getState().load(),
         useCharRefsStore.getState().load(),
@@ -186,6 +189,8 @@ export default function App(): React.JSX.Element {
           </AnimatePresence>
           {centerMode === 'scene' || centerMode === 'background' ? (
             <SceneMode key={centerMode} kind={centerMode} />
+          ) : centerMode === 'outfit' ? (
+            <OutfitMode />
           ) : centerMode === 'composition' ? (
             <CompositionMode />
           ) : centerMode === 'director' ? (

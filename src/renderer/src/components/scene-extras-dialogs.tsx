@@ -16,6 +16,7 @@ import {
   Waves
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { OutfitChoice } from '@shared/outfit'
 import type { CharRefItem, CharacterCard, ListFolder, VibeItem } from '@shared/types'
 import { useCharactersStore } from '../stores/characters-store'
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
@@ -426,6 +427,7 @@ type SelectionPatch = {
   /** 캐릭터 id → 이 씬/항목에서만 덧붙는 태그 */
   charTags?: Record<number, string>
   partnerTags?: Record<number, string>
+  outfits?: Record<number, OutfitChoice>
   charRefIds?: number[]
   vibeIds?: number[]
   useCoords?: boolean
@@ -449,6 +451,7 @@ function SelectionPanel({
   slotChars,
   charTags,
   partnerTags,
+  outfits,
   baseCharacterIds,
   sceneId
 }: {
@@ -466,6 +469,7 @@ function SelectionPanel({
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
   partnerTags?: Record<number, string>
+  outfits?: Record<number, OutfitChoice>
   /** 캐릭터 창에서 켜져 이 씬에 함께 나가는 카드 (씬별 추가에서만 씀) */
   baseCharacterIds?: number[]
   sceneId?: number
@@ -524,6 +528,7 @@ function SelectionPanel({
         slotChars={slotChars}
         charTags={charTags}
         partnerTags={partnerTags}
+        outfits={outfits}
         baseCharacterIds={baseCharacterIds}
         roles={roles}
         onPatch={onPatch}
@@ -634,6 +639,7 @@ function PositionPanel({
   slotChars,
   charTags,
   partnerTags,
+  outfits,
   baseCharacterIds,
   roles,
   sceneId,
@@ -649,6 +655,7 @@ function PositionPanel({
   slotChars?: Record<number, number>
   charTags?: Record<number, string>
   partnerTags?: Record<number, string>
+  outfits?: Record<number, OutfitChoice>
   baseCharacterIds?: number[]
   roles?: CharRoles
   sceneId?: number
@@ -707,6 +714,7 @@ function PositionPanel({
         slotChars={slotChars}
         charTags={charTags}
         partnerTags={partnerTags}
+        outfits={outfits}
         baseCharacterIds={baseCharacterIds}
         roles={roles}
         sceneSize={scene ? { width: scene.width, height: scene.height } : undefined}
@@ -951,6 +959,7 @@ function EntryEditor({
           slotChars={entry.slotChars}
           charTags={entry.charTags}
           partnerTags={entry.partnerTags}
+          outfits={entry.outfits}
           positions={entry.positions}
           roles={entry.roles}
           onPatch={onPatch}
@@ -1082,6 +1091,7 @@ export function AdditionDialog({
             slotChars={current.slotChars}
             charTags={current.charTags}
             partnerTags={current.partnerTags}
+            outfits={current.outfits}
             baseCharacterIds={libraryIds}
             positions={current.positions}
             roles={current.roles}

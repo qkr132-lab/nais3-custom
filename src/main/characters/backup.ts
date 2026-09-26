@@ -10,7 +10,13 @@ import type {
 import { isFullBackup, planImport, remapUidMap, remapUids } from '../../shared/character-backup'
 import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
-import { decodeSlotExtras, encodeSlotExtras, type SceneSetup } from '../../shared/scene-bundle'
+import {
+  decodeSlotExtras,
+  encodeSlotExtras,
+  setupOutfitIds,
+  type SceneSetup
+} from '../../shared/scene-bundle'
+import { exportOutfits, importOutfits } from '../outfits/repo'
 import { createCharacter, createFolder, deleteCharacter, updateCharacter } from './repo'
 
 /**
@@ -65,8 +71,8 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
 
   const cardRows = db
     .prepare(
-      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, slot_no, partner_tags, enabled,
-              folder_id, char_ref_id, thumbnail
+      `SELECT id, name, prompt, negative_prompt, center_x, center_y, role, slot_no, partner_tags, outfit_id,
+              enabled, folder_id, char_ref_id, thumbnail
        FROM character_prompts WHERE deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all() as {
@@ -79,6 +85,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     role: string | null
     slot_no: number | null
     partner_tags: string | null
+    outfit_id: number | null
     enabled: number
     folder_id: number | null
     char_ref_id: number | null
@@ -94,6 +101,13 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
   // uid는 파일 안에서만 통하면 되므로 카드 id로 짓는다 (읽기 쉬워 디버깅에도 유리)
   const uidOf = (id: number): string => `c${id}`
 
+  // 복장 — 파일 안에선 o<id>로 가리킨다 (지워진 복장은 가리키지 않는다)
+  const outfitExists = new Set(
+    (db.prepare('SELECT id FROM outfits').all() as { id: number }[]).map((r) => r.id)
+  )
+  const outfitUid = (id: number | null | undefined): string | undefined =>
+    id != null && outfitExists.has(id) ? `o${id}` : undefined
+
   const characters: BackupCharacter[] = cardRows.map((r) => ({
     uid: uidOf(r.id),
     name: r.name,
@@ -103,6 +117,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     role: r.role === 'source' || r.role === 'target' ? r.role : null,
     ...(r.slot_no != null ? { slotNo: r.slot_no } : {}),
     ...(r.partner_tags?.trim() ? { partnerTags: r.partner_tags } : {}),
+    ...(outfitUid(r.outfit_id) ? { outfit: outfitUid(r.outfit_id) } : {}),
     enabled: r.enabled === 1,
     folder: r.folder_id != null ? (folderName.get(r.folder_id) ?? null) : null,
     charRefName: r.char_ref_id != null ? (refName.get(r.char_ref_id) ?? null) : null,
@@ -145,7 +160,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       const scene = sceneName.get(Number(sceneId))
       if (!scene) continue
       const characterUids = keepUids(addition.characterIds)
-      const slotExtras = encodeSlotExtras(addition, uidIfKnown)
+      const slotExtras = encodeSlotExtras(addition, uidIfKnown, outfitUid)
       if (!characterUids.length && !slotExtras.slots) continue
       sceneLinks.push({
         preset,
@@ -167,7 +182,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       useCoords: e.useCoords,
       positions: keepMap(e.positions),
       roles: keepMap(e.roles),
-      ...encodeSlotExtras(e, uidIfKnown)
+      ...encodeSlotExtras(e, uidIfKnown, outfitUid)
     }))
     .filter((e) => e.characterUids.length > 0 || !!e.slots)
 
@@ -180,7 +195,14 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     })),
     characters,
     sceneLinks,
-    queueEntries
+    queueEntries,
+    outfits: exportOutfits([
+      ...cardRows.flatMap((r) => (r.outfit_id != null ? [r.outfit_id] : [])),
+      ...Object.values(extras.additions ?? {}).flatMap((scenes) =>
+        Object.values(scenes).flatMap(setupOutfitIds)
+      ),
+      ...(extras.entries ?? []).flatMap(setupOutfitIds)
+    ])
   }
 
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -339,6 +361,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
   )
 
   const uidToId = new Map<string, number>()
+  // 복장 먼저 — 카드와 씬 연결이 가리킨다 (같은 이름·조각이 있으면 그걸 쓴다)
+  const outfitOfUid = importOutfits(backup.outfits)
   const folderIds = new Map<string, number>()
   const refIds = new Map(
     (db.prepare('SELECT id, name FROM charref_images').all() as { id: number; name: string }[]).map(
@@ -386,6 +410,9 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
         role: c.role,
         ...(Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? { slotNo: c.slotNo } : {}),
         ...(typeof c.partnerTags === 'string' ? { partnerTags: c.partnerTags } : {}),
+        ...(typeof c.outfit === 'string' && outfitOfUid.has(c.outfit)
+          ? { outfitId: outfitOfUid.get(c.outfit) }
+          : {}),
         ...(c.charRefName && refIds.has(c.charRefName)
           ? { charRefId: refIds.get(c.charRefName) }
           : {})
@@ -435,7 +462,11 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       continue
     }
     const characterIds = remapUids(link.characterUids, uidToId)
-    const slot = decodeSlotExtras(link, (uid) => uidToId.get(uid))
+    const slot = decodeSlotExtras(
+      link,
+      (uid) => uidToId.get(uid),
+      (uid) => outfitOfUid.get(uid)
+    )
     if (!characterIds.length && !slot.extras.slots) {
       dropped++
       continue
@@ -455,6 +486,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       roles: { ...(prev?.roles ?? {}), ...remapUidMap(link.roles, uidToId) },
       charTags: { ...(prev?.charTags ?? {}), ...(slot.extras.charTags ?? {}) },
       partnerTags: { ...(prev?.partnerTags ?? {}), ...(slot.extras.partnerTags ?? {}) },
+      outfits: { ...(prev?.outfits ?? {}), ...(slot.extras.outfits ?? {}) },
       // 자리 묶음은 통째로 바꾼다 — 좌석·역할·태그가 자리 번호로 엮여 있어, 기존 배치와
       // 섞으면 엉뚱한 자리에 붙는다. 백업에 자리가 없으면 기존 배치를 그대로 둔다.
       ...(slot.extras.slots
@@ -474,7 +506,11 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
   let restoredEntries = 0
   for (const e of backup.queueEntries) {
     const characterIds = remapUids(e.characterUids, uidToId)
-    const slot = decodeSlotExtras(e, (uid) => uidToId.get(uid))
+    const slot = decodeSlotExtras(
+      e,
+      (uid) => uidToId.get(uid),
+      (uid) => outfitOfUid.get(uid)
+    )
     if (!characterIds.length && !slot.extras.slots) continue
     entries.push({
       id: `imported_${Date.now().toString(36)}_${restoredEntries}`,

@@ -143,3 +143,45 @@ describe('카드 태그 나누기', () => {
     expect(r.cloth).toEqual(['gloves'])
   })
 })
+
+describe('복장이 파일로 갔다 돌아온다', () => {
+  it('씬에서 고른 옷과 켜고 끈 조각이 새 id로 돌아온다', async () => {
+    const { decodeSetup, encodeSetup } = await import('../src/shared/scene-bundle')
+    const file = JSON.parse(
+      JSON.stringify(
+        encodeSetup(
+          { characterIds: [5], outfits: { 5: { outfitId: 1, on: ['lift'], off: ['jacket'] } } },
+          (id) => `c${id}`,
+          (id) => `o${id}`
+        )
+      )
+    )
+    expect(file.outfits).toEqual({ c5: { outfit: 'o1', on: ['lift'], off: ['jacket'] } })
+    const { setup } = decodeSetup(
+      file,
+      (u) => (u === 'c5' ? 50 : undefined),
+      (u) => (u === 'o1' ? 10 : undefined)
+    )
+    expect(setup.outfits).toEqual({ 50: { outfitId: 10, on: ['lift'], off: ['jacket'] } })
+  })
+
+  it('파일에 없는 복장을 가리키면 그 선택만 빠지고 센다', async () => {
+    const { decodeSetup } = await import('../src/shared/scene-bundle')
+    const { setup, dropped } = decodeSetup(
+      { characters: ['c5'], outfits: { c5: { outfit: 'o9' } } },
+      () => 50,
+      () => undefined
+    )
+    expect(setup.outfits).toBeUndefined()
+    expect(dropped).toBe(1)
+  })
+
+  it('지운 캐릭터의 옷 선택은 휴지통 정리 때 걷힌다', async () => {
+    const { stripDeadCharacters } = await import('../src/shared/scene-bundle')
+    const s = stripDeadCharacters(
+      { characterIds: [1, 2], outfits: { 1: { outfitId: 1 }, 2: { outfitId: 2 } } },
+      (id) => id === 1
+    )
+    expect(s.outfits).toEqual({ 1: { outfitId: 1 } })
+  })
+})

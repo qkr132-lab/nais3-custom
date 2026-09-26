@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { CharPositions, CharRoles, SequenceEntry } from '@shared/types'
+import type { OutfitChoice } from '@shared/outfit'
 
 export type { CharPositions, CharRoles, SequenceEntry }
 
@@ -54,6 +55,8 @@ export interface SceneAddition {
    * 카드에 적힌 상대 태그 대신 이 씬에서만 다르게 쓸 때. 비우면 카드 것을 쓴다.
    */
   partnerTags?: Record<number, string>
+  /** 캐릭터 id → 이 씬에서 입힐 옷 (커스텀). 없으면 카드의 기본 복장 */
+  outfits?: Record<number, OutfitChoice>
 }
 
 export interface SceneAdditionTransfer {
@@ -406,7 +409,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
       slotOf: stripKeyed(a.slotOf),
       slotChars: stripSlotChars(a.slotChars),
       charTags: stripKeyed(a.charTags),
-      partnerTags: stripKeyed(a.partnerTags)
+      partnerTags: stripKeyed(a.partnerTags),
+      outfits: stripKeyed(a.outfits)
     })
     const nextAdditions: AdditionsMap = {}
     for (const [presetId, scenes] of Object.entries(get().additions)) {
@@ -426,7 +430,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
         slotOf: stripKeyed(e.slotOf),
         slotChars: stripSlotChars(e.slotChars),
         charTags: stripKeyed(e.charTags),
-        partnerTags: stripKeyed(e.partnerTags)
+        partnerTags: stripKeyed(e.partnerTags),
+        outfits: stripKeyed(e.outfits)
       })),
       additions: nextAdditions
     })

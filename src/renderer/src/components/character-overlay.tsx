@@ -35,6 +35,8 @@ import { PositionPicker } from './position-picker'
 import { CharacterTrashDialog } from './character-trash-dialog'
 import { CharacterBackupDialog } from './character-backup-dialog'
 import { PromptEditor } from './prompt-editor'
+import { OutfitExtractDialog } from './outfit-extract-dialog'
+import { useOutfitsStore } from '../stores/outfits-store'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -88,6 +90,9 @@ export function CharacterOverlay(): React.JSX.Element {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   // 레퍼런스 연결 다이얼로그 — 카드 서브트리가 아니라 오버레이 최상단에서 단 하나만 렌더 (커스텀)
   const [linkCharId, setLinkCharId] = useState<number | null>(null)
+  // 옷 떼어내기 창 (커스텀)
+  const [extractCharId, setExtractCharId] = useState<number | null>(null)
+  const outfitItems = useOutfitsStore((s) => s.items)
   /** 썸네일 호버 미리보기 — 카드 오른쪽 바깥에 고정 위치로 (카드 내용을 가리지 않게) */
   const [hoverPreview, setHoverPreview] = useState<{
     src: string
@@ -518,6 +523,31 @@ export function CharacterOverlay(): React.JSX.Element {
         </div>
       )}
       {/* 캐릭레퍼 연결 (커스텀) — 이 캐릭터가 생성에 포함되면 레퍼런스도 자동 적용 */}
+      {/* 기본 복장 (커스텀) — 씬에서 따로 안 고르면 이 옷을 입는다 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-faint">기본 복장</span>
+        <select
+          className="h-7 rounded-md border border-line bg-surface-2 px-1.5 text-[11.5px]"
+          value={char.outfitId ?? ''}
+          onChange={(e) =>
+            updateCard(char.id, { outfitId: e.target.value ? Number(e.target.value) : null })
+          }
+        >
+          <option value="">없음 (카드 태그 그대로)</option>
+          {outfitItems.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+        <button
+          className="rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-surface-2"
+          title="카드 태그에서 옷을 골라 복장으로 옮깁니다 (결과를 먼저 보여줍니다)"
+          onClick={() => setExtractCharId(char.id)}
+        >
+          옷 떼어내기
+        </button>
+      </div>
       <RefLinkRow char={char} onOpen={() => setLinkCharId(char.id)} />
     </div>
   )
@@ -764,6 +794,10 @@ export function CharacterOverlay(): React.JSX.Element {
       <CharacterBackupDialog preview={backupPreview} onClose={() => setBackupPreview(null)} />
 
       {/* 레퍼런스 연결 다이얼로그 — 오버레이 최상단에서 단 하나만. 카드가 리렌더돼도 안 사라진다 */}
+      <OutfitExtractDialog
+        card={extractCharId != null ? (items.find((c) => c.id === extractCharId) ?? null) : null}
+        onClose={() => setExtractCharId(null)}
+      />
       <CharRefLinkDialog
         open={linkCharId != null}
         onOpenChange={(o) => !o && setLinkCharId(null)}

@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
+import { resolveOutfitTags } from '@shared/outfit'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -17,6 +18,7 @@ import {
 import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './characters-store'
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
+import { outfitMap, useOutfitsStore } from './outfits-store'
 import {
   enabledEntries,
   hasAddition,
@@ -226,6 +228,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   ): 'source' | 'target' | undefined =>
     (slotIndex != null ? (layout?.slotRoles?.[slotIndex] ?? undefined) : undefined) ?? roleOf(c.id)
   const drawn = placements.slice(0, modelCaps(base.model).maxCharacters)
+  // 복장 (커스텀) — 씬(또는 큐 항목)에서 고른 옷 > 카드 기본 복장 > 없음
+  const outfits = outfitMap()
   /**
    * 상대 태그를 주는 쪽 (커스텀) — 이 그림에 실제로 나오는 캐릭터들.
    * 씬(또는 큐 항목)에 적은 게 있으면 그걸, 없으면 카드에 적힌 걸 쓴다.
@@ -261,6 +265,11 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       const role = placementRole(c, slotIndex)
       // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
       const partnerTag = partnerTagsFor(role, givers, c.id)
+      const outfitTag = resolveOutfitTags(
+        c.outfitId,
+        add?.outfits?.[c.id] ?? entry?.outfits?.[c.id],
+        outfits
+      )
       /**
        * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
        * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
@@ -274,9 +283,14 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       if (rp) rolePosApplied = true
       const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
       return {
-        // 카드 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
-        prompt: [withRole(charTag), withRole(slotTag), withRole(partnerTag), roleTagsFor(role, scene)]
-          .reduce(appendPrompt, c.prompt),
+        // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+        prompt: [
+          outfitTag,
+          withRole(charTag),
+          withRole(slotTag),
+          withRole(partnerTag),
+          roleTagsFor(role, scene)
+        ].reduce(appendPrompt, c.prompt),
         negativePrompt: c.negativePrompt,
         // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
         // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
@@ -401,6 +415,7 @@ async function ensureExtrasData(): Promise<void> {
   const jobs: Promise<void>[] = []
   if (!useSceneExtrasStore.getState().loaded) jobs.push(useSceneExtrasStore.getState().load())
   if (!useCharactersStore.getState().loaded) jobs.push(useCharactersStore.getState().load())
+  if (!useOutfitsStore.getState().loaded) jobs.push(useOutfitsStore.getState().load())
   if (!useVibesStore.getState().loaded) jobs.push(useVibesStore.getState().load())
   if (!useCharRefsStore.getState().loaded) jobs.push(useCharRefsStore.getState().load())
   await Promise.all(jobs)

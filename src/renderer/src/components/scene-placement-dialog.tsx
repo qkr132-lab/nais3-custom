@@ -9,6 +9,8 @@ import { useGenerationStore } from '../stores/generation-store'
 import { PlacementCanvas } from './placement-canvas'
 import { distributed } from '../lib/placement-geometry'
 import { PromptEditor } from './prompt-editor'
+import { OutfitPicker } from './outfit-picker'
+import type { OutfitChoice } from '@shared/outfit'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { PlacementMode } from './placement-mode'
@@ -78,6 +80,7 @@ export function ScenePlacementDialog({
   slotTags,
   charTags,
   partnerTags,
+  outfits,
   baseCharacterIds,
   roles,
   sceneSize,
@@ -103,6 +106,8 @@ export function ScenePlacementDialog({
   charTags?: Record<number, string>
   /** 캐릭터 id → 이 씬에서 상대(반대 역할)에게 붙일 태그. 비우면 카드에 적힌 걸 쓴다 */
   partnerTags?: Record<number, string>
+  /** 캐릭터 id → 이 씬에서 입힐 옷. 없으면 카드의 기본 복장 */
+  outfits?: Record<number, OutfitChoice>
   /**
    * 이 씬에 함께 나가지만 여기서 고른 것은 아닌 캐릭터 (캐릭터 창에서 켜둔 카드).
    * 생성에는 들어가는데 이 창에 안 보이면 자리에 앉힐 수가 없어, 자리를 다 잡아놓고도
@@ -127,6 +132,7 @@ export function ScenePlacementDialog({
     slotTags?: Record<number, string>
     charTags?: Record<number, string>
     partnerTags?: Record<number, string>
+    outfits?: Record<number, OutfitChoice>
     roles?: CharRoles
   }) => void
 }): React.JSX.Element {
@@ -277,6 +283,14 @@ export function ScenePlacementDialog({
     onPatch({ charTags: next })
   }
 
+  /** 이 씬에서 이 캐릭터에게 입힐 옷 — undefined면 카드 기본 복장으로 돌아간다 */
+  const setOutfit = (id: number, choice: OutfitChoice | undefined): void => {
+    const next = { ...(outfits ?? {}) }
+    if (choice) next[id] = choice
+    else delete next[id]
+    onPatch({ outfits: next })
+  }
+
   /** 이 씬에서 이 캐릭터가 상대에게 줄 태그 — 비우면 카드에 적힌 상대 태그로 돌아간다 */
   const setPartnerTag = (id: number, text: string): void => {
     const next = { ...(partnerTags ?? {}) }
@@ -337,12 +351,15 @@ export function ScenePlacementDialog({
     delete nextCharTags[id]
     const nextPartnerTags = { ...(partnerTags ?? {}) }
     delete nextPartnerTags[id]
+    const nextOutfits = { ...(outfits ?? {}) }
+    delete nextOutfits[id]
     onPatch({
       characterIds: characterIds.filter((x) => x !== id),
       slotChars: nextChars,
       slotOf: nextSlotOf,
       charTags: nextCharTags,
-      partnerTags: nextPartnerTags
+      partnerTags: nextPartnerTags,
+      outfits: nextOutfits
     })
   }
 
@@ -599,6 +616,14 @@ export function ScenePlacementDialog({
                     </>
                   )
                 })()}
+                {/* 복장 (커스텀) — 이 씬에서 입힐 옷과 조각 켜고 끄기 */}
+                <div className="mt-1 border-t border-line pt-2">
+                  <OutfitPicker
+                    card={selectedChar}
+                    choice={outfits?.[selectedChar.id]}
+                    onChange={(c) => setOutfit(selectedChar.id, c)}
+                  />
+                </div>
                 {seatsOf(selectedChar.id).length > 1 && (
                   <p className="text-[11px] text-faint">
                     {seatsOf(selectedChar.id)

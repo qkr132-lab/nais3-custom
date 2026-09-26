@@ -10,7 +10,9 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
-import { mergePromptParts, withPartnerTags } from '@shared/scene-request'
+import { appendPrompt, mergePromptParts, withPartnerTags } from '@shared/scene-request'
+import { resolveOutfitTags } from '@shared/outfit'
+import { outfitMap } from './outfits-store'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -232,8 +234,15 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     // 상대 태그 (커스텀) — 카드 역할 기준으로 반대 역할 카드가 적어둔 태그를 받는다
     const enabled = enabledCharacters()
     const givers = enabled.map((c) => ({ id: c.id, role: c.role, partnerTags: c.partnerTags }))
+    // 복장 (커스텀) — 메인 탭은 씬 선택이 없으니 카드의 기본 복장
+    const outfits = outfitMap()
     const characterPrompts = enabled.map((c) => ({
-      prompt: withPartnerTags(c.prompt, c.role, givers, c.id),
+      prompt: withPartnerTags(
+        appendPrompt(c.prompt, resolveOutfitTags(c.outfitId, undefined, outfits)),
+        c.role,
+        givers,
+        c.id
+      ),
       negativePrompt: c.negativePrompt,
       center: c.center,
       enabled: true as const

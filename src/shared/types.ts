@@ -3,7 +3,7 @@
 
 import type { OpusUsage } from './opus-usage'
 import type { SceneSetup } from './scene-bundle'
-import type { Outfit, OutfitPiece, TagKind } from './outfit'
+import type { Outfit, OutfitChoice, OutfitPiece, TagKind } from './outfit'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
 export type { OpusUsage }
@@ -95,6 +95,8 @@ export interface SequenceEntry {
   charTags?: Record<number, string>
   /** 캐릭터 id → 이 항목에서 상대(반대 역할)에게 붙일 태그. 있으면 카드 것 대신 쓴다 (커스텀) */
   partnerTags?: Record<number, string>
+  /** 캐릭터 id → 이 항목에서 입힐 옷. 없으면 카드의 기본 복장 (커스텀) */
+  outfits?: Record<number, OutfitChoice>
 }
 
 export interface GenerationRequest {
