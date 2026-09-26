@@ -3,6 +3,7 @@
 
 import type { OpusUsage } from './opus-usage'
 import type { SceneSetup } from './scene-bundle'
+import type { Outfit, OutfitPiece, TagKind } from './outfit'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
 export type { OpusUsage }
@@ -268,6 +269,8 @@ export interface CharacterCard {
    * 하는쪽 카드에 적으면 당하는쪽이 받는다. 역할이 없으면 아무도 안 받는다.
    */
   partnerTags: string
+  /** 기본 복장 (커스텀) — 씬에서 따로 안 고르면 이걸 입는다. null이면 카드 태그 그대로 */
+  outfitId: number | null
 }
 
 /** 폴더 행 (캐릭터/조각 공용 리스트 모델) */
@@ -309,6 +312,7 @@ export type CharacterCardPatch = Partial<
     | 'role'
     | 'slotNo'
     | 'partnerTags'
+    | 'outfitId'
   >
 >
 
@@ -580,6 +584,24 @@ export interface IpcInvokeMap {
   'chars:update': { req: { id: number; patch: CharacterCardPatch }; res: void }
   'chars:delete': { req: { id: number }; res: void }
   'chars:duplicate': { req: { id: number }; res: { id: number } }
+  // ── 복장 (커스텀) ──
+  'outfits:list': { req: void; res: { items: Outfit[] } }
+  'outfits:create': { req: { name: string; pieces?: OutfitPiece[] }; res: { id: number } }
+  'outfits:update': { req: { id: number; name?: string; pieces?: OutfitPiece[] }; res: void }
+  'outfits:delete': { req: { id: number }; res: void }
+  'outfits:duplicate': { req: { id: number }; res: { id: number | null } }
+  /** 이 복장을 기본으로 입는 카드 수 — 지우기 전 경고용 */
+  'outfits:usage': { req: { id: number }; res: { cards: number } }
+  /** 카드 태그를 몸/옷/알몸으로 나눠본다 (저장 안 함). hasData=false면 흔한 옷 이름만 알아본 것 */
+  'outfits:analyzeCard': {
+    req: { charId: number }
+    res: { tokens: { token: string; kind: TagKind; label: string }[]; hasData: boolean }
+  }
+  /** 옷 태그에 맞는 착의 상태 후보 (예: bikini → bikini pull) */
+  'outfits:stateCandidates': {
+    req: { tags: string[] }
+    res: { items: { tag: string; ko: string; count: number }[] }
+  }
   /** 네이티브 파일 선택 → sharp 리사이즈 → BLOB 저장. 취소 시 thumbnail null */
   'chars:pickThumbnail': { req: { id: number }; res: { thumbnail: string | null } }
   'chars:clearThumbnail': { req: { id: number }; res: void }

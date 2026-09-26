@@ -81,7 +81,7 @@ function fail(error: Error): void {
  * 사용자 PC에만 있는 한글 태그 자료 경로 (커스텀). 앱에 싣지 않는 자료라 사용자 데이터 폴더에 둔다.
  * 없으면 기본 사전만 쓴다.
  */
-function extraKoPath(): string | undefined {
+export function extraKoPath(): string | undefined {
   try {
     return join(app.getPath('userData'), 'tag-ko-extra.json')
   } catch {

@@ -24,6 +24,7 @@ interface CharRow {
   role: string | null
   slot_no: number | null
   partner_tags: string | null
+  outfit_id: number | null
 }
 
 export function listCharacters(): { folders: CharacterFolder[]; items: CharacterCard[] } {
@@ -51,7 +52,7 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
   const items = (
     db
       .prepare(
-        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id, role, slot_no, partner_tags
+        `SELECT id, name, prompt, negative_prompt, thumbnail, enabled, center_x, center_y, folder_id, char_ref_id, role, slot_no, partner_tags, outfit_id
          FROM character_prompts WHERE deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all() as CharRow[]
@@ -67,7 +68,8 @@ export function listCharacters(): { folders: CharacterFolder[]; items: Character
     charRefId: r.char_ref_id,
     role: (r.role === 'source' || r.role === 'target' ? r.role : null) as CharacterCard['role'],
     slotNo: r.slot_no,
-    partnerTags: r.partner_tags ?? ''
+    partnerTags: r.partner_tags ?? '',
+    outfitId: r.outfit_id ?? null
   }))
 
   return { folders, items }
@@ -125,6 +127,10 @@ export function updateCharacter(id: number, patch: CharacterCardPatch): void {
   if (patch.partnerTags !== undefined) {
     sets.push('partner_tags = ?')
     values.push(patch.partnerTags)
+  }
+  if (patch.outfitId !== undefined) {
+    sets.push('outfit_id = ?')
+    values.push(patch.outfitId)
   }
   if (sets.length === 0) return
   sets.push(`updated_at = datetime('now')`)
@@ -227,8 +233,8 @@ export function duplicateCharacter(id: number): number {
   const info = db
     .prepare(
       `INSERT INTO character_prompts
-         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, role, partner_tags, sort_order)
-       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, role, partner_tags, ?
+         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, role, partner_tags, outfit_id, sort_order)
+       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, role, partner_tags, outfit_id, ?
        FROM character_prompts WHERE id = ?`
     )
     .run(max + 1, id)

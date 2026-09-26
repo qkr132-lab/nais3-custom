@@ -137,6 +137,16 @@ import {
   reorderPromptPresets
 } from './prompts/repo'
 import { exportAll, importAll } from './backup/repo'
+import {
+  createOutfit,
+  deleteOutfit,
+  duplicateOutfit,
+  listOutfits,
+  outfitUsage,
+  updateOutfit
+} from './outfits/repo'
+import { classifyTag, hasClothingData, stateCandidates, tagKo } from './outfits/classify'
+import { splitPromptTokens, tokenTags, type TagKind } from '../shared/outfit'
 import { importNais2 } from './backup/nais2'
 import { checkForUpdatesNow, startUpdateDownload } from './updater'
 import { countTokenTexts } from './nai/tokenizer-client'
@@ -535,6 +545,42 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
 
   handle('chars:list', () => listCharacters())
+  // 복장 (커스텀)
+  handle('outfits:list', () => ({ items: listOutfits() }))
+  handle('outfits:create', ({ name, pieces }) => ({ id: createOutfit(name, pieces) }))
+  handle('outfits:update', ({ id, name, pieces }) => {
+    updateOutfit(id, { name, pieces })
+  })
+  handle('outfits:delete', ({ id }) => {
+    deleteOutfit(id)
+  })
+  handle('outfits:duplicate', ({ id }) => ({ id: duplicateOutfit(id) }))
+  handle('outfits:usage', ({ id }) => ({ cards: outfitUsage(id) }))
+  handle('outfits:analyzeCard', ({ charId }) => {
+    const card = listCharacters().items.find((c) => c.id === charId)
+    const tokens = splitPromptTokens(card?.prompt ?? '').map((token) => {
+      const negative = /^-\d*\.?\d+::/.test(token)
+      const tags = tokenTags(token)
+      const kinds = tags.map(classifyTag)
+      // 빼달라는 음수 가중치·몸이 섞인 묶음은 카드에 — splitClothing과 같은 규칙
+      const kind: TagKind = negative
+        ? 'body'
+        : kinds.length && kinds.every((k) => k === 'cloth')
+          ? 'cloth'
+          : kinds.length && kinds.every((k) => k === 'bare')
+            ? 'bare'
+            : kinds.includes('body')
+              ? 'body'
+              : 'unknown'
+      const label = tags
+        .map(tagKo)
+        .filter(Boolean)
+        .join(', ')
+      return { token, kind, label }
+    })
+    return { tokens, hasData: hasClothingData() }
+  })
+  handle('outfits:stateCandidates', ({ tags }) => ({ items: stateCandidates(tags) }))
   handle('chars:create', ({ name, folderId }) => ({ id: createCharacter(name, folderId) }))
   handle('chars:update', ({ id, patch }) => {
     updateCharacter(id, patch)

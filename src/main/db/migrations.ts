@@ -424,6 +424,23 @@ export const migrations: ((db: Database.Database) => void)[] = [
   // 하는쪽 카드마다 "상대 여자는 이런 표정"을 걸어두는 용도.
   (db) => {
     db.exec(`ALTER TABLE character_prompts ADD COLUMN partner_tags TEXT NOT NULL DEFAULT '';`)
+  },
+  // v31 (커스텀): 복장 — 카드는 몸만, 옷은 복장(조각 목록)으로 떼어 씬마다 갈아입힌다.
+  // outfit_id = 카드의 기본 복장. 알몸도 복장 하나로 넣어둔다 (태그는 사용자가 고친다)
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      pieces TEXT NOT NULL DEFAULT '[]',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );`)
+    db.exec(`ALTER TABLE character_prompts ADD COLUMN outfit_id INTEGER;`)
+    db.prepare('INSERT INTO outfits (name, pieces, sort_order) VALUES (?, ?, 0)').run(
+      '알몸',
+      JSON.stringify([{ id: 'nude', name: '알몸', tags: 'nude, completely nude', on: true }])
+    )
   }
 ]
 
@@ -470,6 +487,19 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('character_folders', 'parent_id', 'parent_id INTEGER')
   ensureColumn('character_prompts', 'slot_no', 'slot_no INTEGER')
   ensureColumn('character_prompts', 'partner_tags', "partner_tags TEXT NOT NULL DEFAULT ''")
+  ensureColumn('character_prompts', 'outfit_id', 'outfit_id INTEGER')
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS outfits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      pieces TEXT NOT NULL DEFAULT '[]',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );`)
+  } catch {
+    // 표가 없어도 앱은 뜬다 — 복장 기능만 비어 보인다
+  }
   ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
