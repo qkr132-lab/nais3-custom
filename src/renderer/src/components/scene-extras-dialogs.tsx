@@ -1105,7 +1105,7 @@ export function AdditionDialog({
 }
 
 /** 씬 행위 태그 편집 (커스텀) — 역할(하는쪽/당하는쪽)이 지정된 캐릭터에 합쳐질 태그.
- *  단일 씬을 열었을 때만 표시. 입력을 벗어나면 저장 */
+ *  단일 씬을 열었을 때만 표시. 치는 동안·입력을 벗어날 때·창을 닫을 때 저장 */
 function SceneRoleTagsEditor({ sceneId }: { sceneId: number }): React.JSX.Element | null {
   const scene = useScenesStore((s) => s.scenes.find((x) => x.id === sceneId))
   const update = useScenesStore((s) => s.update)
@@ -1227,6 +1227,38 @@ function RoleTagTextarea({
   const [open, setOpen] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const ref = useRef<HTMLTextAreaElement>(null)
+
+  /**
+   * 저장 (커스텀). 예전엔 입력칸을 벗어날 때만 저장해서, 치고 나서 Esc나 바깥 클릭으로 창을
+   * 닫으면(칸이 사라질 땐 blur가 안 온다) 입력이 날아갔다 — 복제해도 빈 칸이 따라간 원인.
+   * 이제 치는 동안 잠깐 멈추면 저장하고, 창이 닫혀 칸이 사라질 때도 남은 걸 저장한다.
+   */
+  const latest = useRef(initial)
+  const committed = useRef(initial)
+  const commitRef = useRef(onCommit)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => {
+    commitRef.current = onCommit
+  }, [onCommit])
+  const flush = (): void => {
+    clearTimeout(saveTimer.current)
+    if (latest.current === committed.current) return
+    committed.current = latest.current
+    commitRef.current(latest.current)
+  }
+  const change = (next: string): void => {
+    setValue(next)
+    latest.current = next
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(flush, 400)
+  }
+  useEffect(
+    () => () => {
+      clearTimeout(saveTimer.current)
+      if (latest.current !== committed.current) commitRef.current(latest.current)
+    },
+    []
+  )
   const tokenRef = useRef<{ start: number; end: number; prefix: string }>({
     start: 0,
     end: 0,
@@ -1260,7 +1292,7 @@ function RoleTagTextarea({
   const accept = (tag: string): void => {
     const { start, end, prefix } = tokenRef.current
     const next = `${value.slice(0, start)}${prefix}${tag}, ${value.slice(end)}`
-    setValue(next)
+    change(next)
     setOpen(false)
     const caret = start + prefix.length + tag.length + 2
     requestAnimationFrame(() => {
@@ -1279,7 +1311,7 @@ function RoleTagTextarea({
         placeholder={placeholder}
         className="w-full resize-y rounded-md border border-line bg-surface px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-accent"
         onChange={(e) => {
-          setValue(e.target.value)
+          change(e.target.value)
           queryAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
         }}
         onKeyDown={(e) => {
@@ -1299,7 +1331,7 @@ function RoleTagTextarea({
         }}
         onBlur={() => {
           setOpen(false)
-          onCommit(value)
+          flush()
         }}
       />
       {open && (

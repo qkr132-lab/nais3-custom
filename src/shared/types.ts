@@ -815,12 +815,16 @@ export interface IpcInvokeMap {
   }
   'scenes:duplicate': { req: { id: number }; res: { id: number } }
   /** 모듈(프리셋) 복제 — 안의 씬 전부 포함 (커스텀) */
-  'scenes:duplicatePreset': { req: { id: number }; res: { id: number } }
-  /** 씬들을 다른 프리셋으로 복사 — 원본 유지 (커스텀, bulkMove=잘라내기와 짝) */
-  /** 다른 프리셋으로 복사 — 새로 만든 씬 id들을 (넘긴 순서대로) 함께 반환 */
+  /** pairs = 원본 씬 id → 사본 씬 id (씬별 설정을 옮길 때 짝짓기용) */
+  'scenes:duplicatePreset': {
+    req: { id: number }
+    res: { id: number; pairs: { from: number; to: number }[] }
+  }
+  /** 씬들을 다른 프리셋으로 복사 — 원본 유지 (커스텀, bulkMove=잘라내기와 짝).
+   *  pairs = 원본 → 사본. 못 찾은 원본은 빠지므로 ids만으로 짝지으면 어긋날 수 있다 */
   'scenes:bulkCopy': {
     req: { ids: number[]; presetId: number }
-    res: { copied: number; ids: number[] }
+    res: { copied: number; ids: number[]; pairs: { from: number; to: number }[] }
   }
   'scenes:delete': { req: { id: number }; res: void }
   'scenes:reorder': { req: { ids: number[] }; res: void }
@@ -869,6 +873,8 @@ export interface IpcInvokeMap {
       count: number
       additions: { sceneId: number; setup: SceneSetup }[]
       dropped: number
+      /** 씬마다 따로 켜고 끈 투명 배경 */
+      transparent?: { sceneId: number; enabled: boolean }[]
     }
   }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */

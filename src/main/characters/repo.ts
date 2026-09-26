@@ -222,7 +222,11 @@ export function purgeOldTrashedCharacters(days: number): number {
   return result.changes
 }
 
-/** 카드 복제 — 썸네일 포함, enabled는 꺼서 (실수로 6명 초과 방지) */
+/**
+ * 카드 복제 — 썸네일 포함, enabled는 꺼서 (실수로 6명 초과 방지).
+ * 역할·자리 번호·상대 태그·기본 복장·캐릭터 레퍼런스까지 카드에 딸린 건 전부 따라간다
+ * (자리 번호·캐릭레퍼가 빠져 있어, 복제본은 자기 자리에 안 앉았다).
+ */
 export function duplicateCharacter(id: number): number {
   const db = getDb()
   const max = (
@@ -233,12 +237,12 @@ export function duplicateCharacter(id: number): number {
   const info = db
     .prepare(
       `INSERT INTO character_prompts
-         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, role, partner_tags, outfit_id, sort_order)
-       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, role, partner_tags, outfit_id, ?
-       FROM character_prompts WHERE id = ?`
+         (name, prompt, negative_prompt, folder, thumbnail, settings_json, enabled, center_x, center_y, folder_id, char_ref_id, role, slot_no, partner_tags, outfit_id, sort_order)
+       SELECT name || ' 복사', prompt, negative_prompt, folder, thumbnail, settings_json, 0, center_x, center_y, folder_id, char_ref_id, role, slot_no, partner_tags, outfit_id, ?
+       FROM character_prompts WHERE id = ? AND deleted_at IS NULL`
     )
     .run(max + 1, id)
-  return Number(info.lastInsertRowid)
+  return info.changes ? Number(info.lastInsertRowid) : 0
 }
 
 /**

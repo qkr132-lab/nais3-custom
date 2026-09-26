@@ -32,7 +32,7 @@ import {
   encodeSetup,
   isPos,
   isSceneBundle,
-  setupCharacterIds,
+  setupReferencedIds,
   setupHasContent,
   setupOutfitIds,
   withShared,
@@ -300,6 +300,12 @@ export function createScene(presetId: number, name: string): number {
   )
 }
 
+/** 복사한 씬 — 원본 id → 사본 id (씬별 설정을 옮길 때 짝짓기용) */
+export interface ScenePair {
+  from: number
+  to: number
+}
+
 export function duplicateScene(id: number): number {
   const db = getDb()
   return db.transaction(() => {
@@ -340,12 +346,17 @@ export function duplicateScene(id: number): number {
   })()
 }
 
-/** 모듈(프리셋) 복제 (커스텀) — 프리셋 + 안의 씬 전부(프롬프트/해상도/V+/번호, 예약 0) 사본 생성 */
-export function duplicatePreset(id: number): number {
+/**
+ * 모듈(프리셋) 복제 (커스텀) — 프리셋 + 안의 씬 전부(프롬프트/해상도/V+/번호, 예약 0) 사본 생성.
+ * pairs = 원본 씬 id → 사본 씬 id. 렌더러가 씬별 설정을 옮길 때 이걸로 짝짓는다 —
+ * 목록 순서로 짝지으면 순서가 같은 씬이 섞였을 때 설정이 엉뚱한 씬에 붙는다.
+ */
+export function duplicatePreset(id: number): { id: number; pairs: ScenePair[] } {
   const db = getDb()
   const p = db.prepare('SELECT * FROM scene_presets WHERE id = ?').get(id) as
     Record<string, unknown> | undefined
-  if (!p) return 0
+  if (!p) return { id: 0, pairs: [] }
+  const pairs: ScenePair[] = []
   const maxOrder = (
     db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM scene_presets').get() as { m: number }
   ).m
@@ -366,7 +377,7 @@ export function duplicatePreset(id: number): number {
     )
     const scenes = db
       .prepare(
-        `SELECT name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weights, suppress_anal, background
+        `SELECT id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weights, suppress_anal, background
          FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all(id) as Record<string, unknown>[]
@@ -375,7 +386,7 @@ export function duplicatePreset(id: number): number {
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const s of scenes) {
-      ins.run(
+      const r = ins.run(
         newId,
         s.name,
         s.prompt,
@@ -394,18 +405,19 @@ export function duplicatePreset(id: number): number {
         s.suppress_anal ?? 0,
         s.background ?? '{}'
       )
+      pairs.push({ from: Number(s.id), to: Number(r.lastInsertRowid) })
     }
   })()
-  return newId
+  return { id: newId, pairs }
 }
 
 /** 씬들을 다른 프리셋으로 "복사" (커스텀) — 원본 유지. bulkMove(잘라내기)와 짝.
  *  대상 모듈 맨 뒤에 ids 순서대로 이어붙이고, 새로 만든 씬 id들을 그 순서로 반환한다
  *  (우클릭 "붙여넣기"가 위치를 다시 잡을 때 사용). */
-export function bulkCopyScenes(ids: number[], presetId: number): number[] {
+export function bulkCopyScenes(ids: number[], presetId: number): ScenePair[] {
   if (ids.length === 0) return []
   const db = getDb()
-  const newIds: number[] = []
+  const pairs: ScenePair[] = []
   db.transaction(() => {
     let order = (
       db
@@ -438,10 +450,10 @@ export function bulkCopyScenes(ids: number[], presetId: number): number[] {
         s.suppress_anal ?? 0,
         s.background ?? '{}'
       )
-      newIds.push(Number(r.lastInsertRowid))
+      pairs.push({ from: id, to: Number(r.lastInsertRowid) })
     }
   })()
-  return newIds
+  return pairs
 }
 
 const FIELDS: Record<string, string> = {
@@ -790,25 +802,29 @@ export async function exportScenesJson(presetId: number): Promise<{
   const db = getDb()
   const scenes = db
     .prepare(
-      `SELECT id, name, prompt, negative_prompt, width, height, source_tags, target_tags, source_pos, target_pos,
+      `SELECT id, name, prompt, negative_prompt, width, height, variety_plus, source_tags, target_tags, source_pos, target_pos,
               censor_kinds, censor_weights, suppress_anal, background
        FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all(presetId) as Row[]
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const presetName =
-    (db.prepare('SELECT name FROM scene_presets WHERE id = ?').get(presetId) as
-      | { name: string }
-      | undefined)?.name ?? 'scenes'
+    (
+      db.prepare('SELECT name FROM scene_presets WHERE id = ?').get(presetId) as
+        { name: string } | undefined
+    )?.name ?? 'scenes'
   const result = await dialog.showSaveDialog(win, {
     title: '씬 내보내기',
     defaultPath: `${presetName.replace(/[\\/:*?"<>|]/g, '_')}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || !result.filePath) return { saved: false, scenes: 0, characters: 0, shared: 0 }
+  if (result.canceled || !result.filePath)
+    return { saved: false, scenes: 0, characters: 0, shared: 0 }
 
   // 이 모듈 씬들의 캐릭터 구성과, 거기 쓰인 (살아 있는) 카드
-  const additions = readSceneExtras().additions?.[String(presetId)] ?? {}
+  const extrasFile = readSceneExtras()
+  const additions = extrasFile.additions?.[String(presetId)] ?? {}
+  const transparent = extrasFile.transparentBackgrounds?.[String(presetId)] ?? {}
   const setupOf = (sceneId: number): SceneSetup | undefined => {
     const s = additions[String(sceneId)]
     return setupHasContent(s) ? s : undefined
@@ -816,7 +832,9 @@ export async function exportScenesJson(presetId: number): Promise<{
   const wanted = new Set<number>()
   for (const s of scenes) {
     const setup = setupOf(Number(s.id))
-    if (setup) for (const id of setupCharacterIds(setup)) wanted.add(id)
+    // 씬 캐릭터 목록에 없어도 역할·태그·복장이 걸린 카드(캐릭터 창·큐 항목 카드)까지 싣는다 —
+    // 안 실으면 그 카드에 걸린 하는쪽/당하는쪽 지정이 파일에서 빠진다
+    if (setup) for (const id of setupReferencedIds(setup)) wanted.add(id)
   }
   // 캐릭터 창에서 켜둔 카드 — 모든 씬 생성에 들어가므로 "모든 씬 공용"으로 싣는다
   const sharedIds = (
@@ -887,6 +905,10 @@ export async function exportScenesJson(presetId: number): Promise<{
         negativePrompt: s.negative_prompt,
         width: s.width,
         height: s.height,
+        ...(s.variety_plus ? { varietyPlus: true } : {}),
+        ...(typeof transparent[String(s.id)] === 'boolean'
+          ? { transparentBackground: transparent[String(s.id)] }
+          : {}),
         // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
         ...((s.source_tags as string)?.trim() ? { sourceTags: s.source_tags } : {}),
         ...((s.target_tags as string)?.trim() ? { targetTags: s.target_tags } : {}),
@@ -902,7 +924,12 @@ export async function exportScenesJson(presetId: number): Promise<{
     })
   }
   writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
-  return { saved: true, scenes: scenes.length, characters: characters.length, shared: sharedIds.length }
+  return {
+    saved: true,
+    scenes: scenes.length,
+    characters: characters.length,
+    shared: sharedIds.length
+  }
 }
 
 /** 씬 JSON에 실린 캐릭터탭 (커스텀). role = 행위 역할 (씬의 하는쪽/당하는쪽 태그가 얹힘) */
@@ -919,6 +946,8 @@ export interface SceneImportResult {
   additions: { sceneId: number; setup: SceneSetup }[]
   /** 파일 안에서 가리키는 카드를 못 찾아 버린 연결 수 */
   dropped: number
+  /** 씬마다 따로 켜고 끈 투명 배경 — 렌더러가 씬 설정에 넣는다 */
+  transparent?: { sceneId: number; enabled: boolean }[]
 }
 
 export async function importScenesJson(presetId: number): Promise<SceneImportResult> {
@@ -1095,9 +1124,10 @@ function importSceneBundle(
     (c) => c && typeof c.uid === 'string' && typeof c.prompt === 'string' && c.prompt.trim()
   )
   const sceneStmt = db.prepare(
-    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_weights, suppress_anal, background)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_weights, suppress_anal, background)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
+  const transparent: SceneImportResult['transparent'] = []
   const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback
@@ -1179,6 +1209,7 @@ function importSceneBundle(
           num(s.width, 832),
           num(s.height, 1216),
           ++order,
+          s.varietyPlus === true ? 1 : 0,
           str(s.sourceTags),
           str(s.targetTags),
           pos(s.sourcePos),
@@ -1199,10 +1230,13 @@ function importSceneBundle(
       dropped += r.dropped
       const setup = withShared(r.setup, sharedIds)
       if (setupHasContent(setup)) additions.push({ sceneId, setup })
+      if (typeof s.transparentBackground === 'boolean') {
+        transparent.push({ sceneId, enabled: s.transparentBackground })
+      }
     }
   })()
 
-  return { count: bundle.scenes.length, additions, dropped }
+  return { count: bundle.scenes.length, additions, dropped, transparent }
 }
 
 /** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */

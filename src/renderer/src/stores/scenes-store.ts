@@ -550,27 +550,20 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   // 모듈(프리셋) 복제 — 안의 씬 전부 포함, 복제본으로 전환 (커스텀)
   duplicatePreset: async (id) => {
-    const { items: sourceScenes } = await window.nais.invoke('scenes:list', { presetId: id })
-    const { id: newId } = await window.nais.invoke('scenes:duplicatePreset', { id })
+    const { id: newId, pairs } = await window.nais.invoke('scenes:duplicatePreset', { id })
     if (newId > 0) {
+      // 씬별 설정을 먼저 옮기고 새 모듈로 넘어간다 — 원본 → 사본 짝은 메인이 만든 그대로 쓴다
+      // (예전엔 목록 순서로 짝지어, 순서가 어긋나면 설정이 엉뚱한 씬에 붙었다)
+      useSceneExtrasStore.getState().copyAdditions(
+        pairs.map((pair): SceneAdditionTransfer => ({
+          sourcePresetId: id,
+          sourceSceneId: pair.from,
+          targetPresetId: newId,
+          targetSceneId: pair.to
+        }))
+      )
       await get().loadPresets()
       await get().setActivePreset(newId)
-      const targetScenes = get().scenes
-      useSceneExtrasStore.getState().copyAdditions(
-        sourceScenes
-          .map((source, index) => {
-            const target = targetScenes[index]
-            return target
-              ? {
-                  sourcePresetId: id,
-                  sourceSceneId: source.id,
-                  targetPresetId: newId,
-                  targetSceneId: target.id
-                }
-              : null
-          })
-          .filter((transfer): transfer is SceneAdditionTransfer => transfer !== null)
-      )
     }
   },
   renamePreset: async (id, name) => {
@@ -881,16 +874,16 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       .scenes.filter((s) => get().selection.has(s.id))
       .map((s) => s.id) // 목록 순서대로
     if (ids.length === 0) return 0
-    const { copied, ids: copiedIds } = await window.nais.invoke('scenes:bulkCopy', {
+    const { copied, pairs } = await window.nais.invoke('scenes:bulkCopy', {
       ids,
       presetId
     })
     useSceneExtrasStore.getState().copyAdditions(
-      copiedIds.map((targetSceneId, index): SceneAdditionTransfer => ({
+      pairs.map((pair): SceneAdditionTransfer => ({
         sourcePresetId,
-        sourceSceneId: ids[index],
+        sourceSceneId: pair.from,
         targetPresetId: presetId,
-        targetSceneId
+        targetSceneId: pair.to
       }))
     )
     await get().refreshPresetCounts()
@@ -919,13 +912,16 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
     let pastedIds: number[] = []
 
     if (clip.mode === 'copy') {
-      const { ids } = await window.nais.invoke('scenes:bulkCopy', { ids: clip.ids, presetId })
+      const { ids, pairs } = await window.nais.invoke('scenes:bulkCopy', {
+        ids: clip.ids,
+        presetId
+      })
       useSceneExtrasStore.getState().copyAdditions(
-        ids.map((targetSceneId, index): SceneAdditionTransfer => ({
+        pairs.map((pair): SceneAdditionTransfer => ({
           sourcePresetId: clip.presetId,
-          sourceSceneId: clip.ids[index],
+          sourceSceneId: pair.from,
           targetPresetId: presetId,
-          targetSceneId
+          targetSceneId: pair.to
         }))
       )
       pastedIds = ids

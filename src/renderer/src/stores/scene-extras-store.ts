@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CharPositions, CharRoles, SequenceEntry } from '@shared/types'
 import type { OutfitChoice } from '@shared/outfit'
+import { copyCharacterKeys, setupHasContent } from '@shared/scene-bundle'
 
 export type { CharPositions, CharRoles, SequenceEntry }
 
@@ -104,6 +105,11 @@ interface SceneExtrasState {
   copyAdditions: (transfers: SceneAdditionTransfer[]) => void
   moveAdditions: (transfers: SceneAdditionTransfer[]) => void
   /**
+   * 카드 복제 때 — 원본 카드에 걸린 씬별 설정·큐 항목 설정(역할·위치·씬 태그·상대 태그·복장·자리)을
+   * 사본 카드에도 건다. 사본을 캐릭터 목록에 넣지는 않는다(원본과 둘이 함께 그려지지 않게).
+   */
+  copyCharacterSettings: (fromId: number, toId: number) => void
+  /**
    * 씬별 추가·큐 반복에 저장된 '위치 적용' 오버라이드를 전부 지운다 (커스텀).
    * 이 오버라이드는 전역 위치 지정 스위치보다 우선이라, 남아 있으면 전역을 꺼도
    * 그 씬들은 계속 좌표를 쓴다 — "껐는데 유지된다"의 주범.
@@ -135,36 +141,15 @@ function persist(): void {
 }
 
 export function hasAddition(a: SceneAddition | undefined | null): a is SceneAddition {
-  return (
-    !!a &&
-    // 캐릭터 창/큐에서 함께 나가는 카드의 위치·태그만 고친 경우도 유효한 씬 설정이다.
-    // 특히 false는 자동 배치를 끄려는 명시 설정이므로 빈 설정으로 버리면 안 된다.
-    (a.characterIds.length > 0 ||
-      a.charRefIds.length > 0 ||
-      a.vibeIds.length > 0 ||
-      (a.slots?.length ?? 0) > 0 ||
-      a.useCoords !== undefined ||
-      Object.keys(a.positions ?? {}).length > 0 ||
-      Object.keys(a.roles ?? {}).length > 0 ||
-      Object.keys(a.charTags ?? {}).length > 0)
-  )
+  // 캐릭터 창/큐에서 함께 나가는 카드의 위치·역할·태그·복장만 고친 경우도 유효한 씬 설정이다.
+  // 특히 useCoords=false는 자동 배치를 끄려는 명시 설정이므로 빈 설정으로 버리면 안 된다.
+  // (예전 판정엔 상대 태그·복장이 빠져 있어, 그것만 건 씬은 생성 때 통째로 무시됐다)
+  return setupHasContent(a)
 }
 
+/** 씬 설정 사본 — 안쪽 맵까지 통째로 떠서 원본과 사본이 서로 영향을 주지 않게 */
 function cloneAddition(a: SceneAddition): SceneAddition {
-  return {
-    ...a,
-    characterIds: [...a.characterIds],
-    charRefIds: [...a.charRefIds],
-    vibeIds: [...a.vibeIds],
-    positions: a.positions ? { ...a.positions } : undefined,
-    roles: a.roles ? { ...a.roles } : undefined,
-    slots: a.slots?.map((slot) => ({ ...slot })),
-    slotOf: a.slotOf ? { ...a.slotOf } : undefined,
-    slotRoles: a.slotRoles ? { ...a.slotRoles } : undefined,
-    slotTags: a.slotTags ? { ...a.slotTags } : undefined,
-    slotChars: a.slotChars ? { ...a.slotChars } : undefined,
-    charTags: a.charTags ? { ...a.charTags } : undefined
-  }
+  return JSON.parse(JSON.stringify(a)) as SceneAddition
 }
 
 function transferAdditions(
@@ -338,6 +323,22 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({
       additions: transferAdditions(get(), transfers, 'move'),
       transparentBackgrounds: transferTransparentBackgrounds(get(), transfers, 'move')
+    })
+    persist()
+  },
+  copyCharacterSettings: (fromId, toId) => {
+    if (fromId === toId) return
+    const additions: AdditionsMap = {}
+    for (const [presetId, scenes] of Object.entries(get().additions)) {
+      const next: Record<number, SceneAddition> = {}
+      for (const [sceneId, add] of Object.entries(scenes)) {
+        next[Number(sceneId)] = copyCharacterKeys(add, fromId, toId)
+      }
+      additions[Number(presetId)] = next
+    }
+    set({
+      additions,
+      entries: get().entries.map((e) => copyCharacterKeys(e, fromId, toId))
     })
     persist()
   },

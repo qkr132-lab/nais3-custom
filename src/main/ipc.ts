@@ -416,10 +416,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:setBackground', ({ ids, background }) => setSceneBackground(ids, background))
   handle('scenes:setCensors', ({ ids, changes }) => ({ items: setSceneCensors(ids, changes) }))
   handle('scenes:duplicate', ({ id }) => ({ id: duplicateScene(id) }))
-  handle('scenes:duplicatePreset', ({ id }) => ({ id: duplicatePreset(id) }))
+  handle('scenes:duplicatePreset', ({ id }) => duplicatePreset(id))
   handle('scenes:bulkCopy', ({ ids, presetId }) => {
-    const newIds = bulkCopyScenes(ids, presetId)
-    return { copied: newIds.length, ids: newIds }
+    const pairs = bulkCopyScenes(ids, presetId)
+    return { copied: pairs.length, ids: pairs.map((p) => p.to), pairs }
   })
   handle('scenes:delete', ({ id }) => {
     deleteScene(id)

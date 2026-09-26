@@ -82,9 +82,15 @@ export function SceneBackgroundDialog({
       id,
       patch: { name: `${previewScene.name} · 배경 테스트 ${name.trim() || ''}`.trim(), background }
     })
-    const extras = useSceneExtrasStore.getState()
-    const addition = extras.additions[previewScene.presetId]?.[previewScene.id]
-    if (addition) extras.updateAddition(previewScene.presetId, id, structuredClone(addition))
+    // 씬별 캐릭터 설정·투명 배경까지 원본 그대로
+    useSceneExtrasStore.getState().copyAdditions([
+      {
+        sourcePresetId: previewScene.presetId,
+        sourceSceneId: previewScene.id,
+        targetPresetId: previewScene.presetId,
+        targetSceneId: id
+      }
+    ])
     const store = useScenesStore.getState()
     await Promise.all([store.load(), store.refreshPresetCounts()])
     store.select(id)

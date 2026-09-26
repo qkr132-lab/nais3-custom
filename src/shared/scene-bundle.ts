@@ -335,9 +335,87 @@ export function withShared(setup: SceneSetup, sharedIds: number[]): SceneSetup {
   return { ...setup, characterIds }
 }
 
-/** 파일에 실을 만한 내용이 있는지 — 캐릭터도 자리도 없으면 빈 구성 */
+/**
+ * 이 구성이 id로 가리키는 캐릭터 전부 — 그려질 캐릭터(setupCharacterIds)에 더해, 역할·위치·
+ * 씬 태그·상대 태그·복장만 걸어둔 캐릭터까지. 캐릭터 창이나 큐 항목으로 들어오는 카드는
+ * 씬 캐릭터 목록에 없어도 이 씬 설정을 받으므로, 파일에 실을 카드를 고를 땐 이걸 쓴다.
+ */
+export function setupReferencedIds(setup: SceneSetup): number[] {
+  const ids = new Set<number>(setupCharacterIds(setup))
+  for (const map of [
+    setup.positions,
+    setup.roles,
+    setup.charTags,
+    setup.partnerTags,
+    setup.outfits
+  ]) {
+    for (const id of Object.keys(map ?? {})) ids.add(Number(id))
+  }
+  return [...ids]
+}
+
+const filled = (map: object | undefined | null): boolean => !!map && Object.keys(map).length > 0
+
+/**
+ * 담긴 게 있는 구성인지. 예전엔 캐릭터나 자리가 있어야만 쳐서, 캐릭터 창·큐 항목 카드에
+ * 역할·씬 태그·상대 태그·복장만 걸어둔 씬은 빈 구성으로 버려졌다 — 생성 때 복장·상대 태그가
+ * 무시되고, JSON·백업으로 옮기면 하는쪽/당하는쪽 지정이 통째로 빠졌다.
+ */
 export function setupHasContent(setup: SceneSetup | undefined | null): boolean {
-  return !!setup && ((setup.characterIds?.length ?? 0) > 0 || (setup.slots?.length ?? 0) > 0)
+  if (!setup) return false
+  return (
+    (setup.characterIds?.length ?? 0) > 0 ||
+    (setup.charRefIds?.length ?? 0) > 0 ||
+    (setup.vibeIds?.length ?? 0) > 0 ||
+    (setup.slots?.length ?? 0) > 0 ||
+    setup.useCoords !== undefined ||
+    [
+      setup.positions,
+      setup.roles,
+      setup.slotOf,
+      setup.slotChars,
+      setup.slotRoles,
+      setup.slotTags,
+      setup.charTags,
+      setup.partnerTags,
+      setup.outfits
+    ].some(filled)
+  )
+}
+
+/** 캐릭터별로 걸어두는 씬 설정 — 카드를 복제하면 사본에도 같은 값을 걸어둔다 */
+const PER_CHARACTER_KEYS = [
+  'roles',
+  'positions',
+  'charTags',
+  'partnerTags',
+  'outfits',
+  'slotOf'
+] as const
+
+/**
+ * 원본 카드에 걸린 씬 설정(역할·위치·씬 태그·상대 태그·복장·자리)을 사본 카드에도 건다.
+ * 사본을 씬 캐릭터 목록에 넣지는 않는다 — 넣으면 원본과 둘이 함께 그려진다.
+ * 사본이 큐 항목·캐릭터 창·씬 추가로 들어왔을 때 원본과 같은 설정을 받게 하는 것.
+ * 원본이 자리에 직접 앉아 있으면 사본은 그 자리를 구형 배정(slotOf)으로 받아,
+ * 원본이 없을 때만 그 자리에 앉는다(원본이 있으면 원본이 먼저 앉는다).
+ */
+export function copyCharacterKeys<
+  T extends {
+    [K in (typeof PER_CHARACTER_KEYS)[number]]?: object
+  } & { slotOf?: Record<number, number>; slotChars?: Record<number, number> }
+>(setup: T, from: number, to: number): T {
+  let next = setup
+  for (const key of PER_CHARACTER_KEYS) {
+    const map = setup[key] as Record<number, unknown> | undefined
+    if (!map || !Object.hasOwn(map, from)) continue
+    next = { ...next, [key]: { ...map, [to]: JSON.parse(JSON.stringify(map[from])) } }
+  }
+  const seat = Object.entries(setup.slotChars ?? {}).find(([, id]) => id === from)?.[0]
+  if (seat !== undefined && !Object.hasOwn(next.slotOf ?? {}, to)) {
+    next = { ...next, slotOf: { ...(next.slotOf ?? {}), [to]: Number(seat) } }
+  }
+  return next
 }
 
 // ── 휴지통 정리 ─────────────────────────────────────────────────────────
@@ -348,6 +426,8 @@ export interface SceneExtrasFile {
   entries?: (SceneSetup & { id: string; name: string; enabled: boolean })[]
   additionsEnabled?: boolean
   additions?: Record<string, Record<string, SceneSetup>>
+  /** 프리셋 id → 씬 id → 이 씬만 투명 배경 켬/끔 */
+  transparentBackgrounds?: Record<string, Record<string, boolean>>
 }
 
 /** 지워진 캐릭터를 가리키는 항목을 구성에서 걷어낸다 */
@@ -436,6 +516,9 @@ export interface SceneBundle {
     name: string
     sourcePos?: Pos | null
     targetPos?: Pos | null
+    varietyPlus?: boolean
+    /** 이 씬만 투명 배경으로 (없으면 전역 설정을 따른다) */
+    transparentBackground?: boolean
     /** 씬별 캐릭터 추가 — 없으면 캐릭터 없이 씬만 */
     setup?: FileSetup
   })[]

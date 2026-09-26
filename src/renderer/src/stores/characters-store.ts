@@ -146,7 +146,13 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   },
 
   duplicateCard: async (id) => {
-    await window.nais.invoke('chars:duplicate', { id })
+    const { id: copyId } = await window.nais.invoke('chars:duplicate', { id })
+    // 원본에 걸린 씬별·큐 항목 설정(역할·위치·씬 태그·상대 태그·복장·자리)도 사본에 건다
+    if (copyId > 0) {
+      const { useSceneExtrasStore } = await import('./scene-extras-store')
+      await useSceneExtrasStore.getState().load()
+      useSceneExtrasStore.getState().copyCharacterSettings(id, copyId)
+    }
     await get().load()
   },
 

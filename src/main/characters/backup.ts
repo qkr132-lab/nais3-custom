@@ -7,12 +7,19 @@ import type {
   CharacterBackup,
   ImportMode
 } from '../../shared/character-backup'
-import { isFullBackup, planImport, remapUidMap, remapUids } from '../../shared/character-backup'
+import {
+  isFullBackup,
+  linkHasContent,
+  planImport,
+  remapUidMap,
+  remapUids
+} from '../../shared/character-backup'
 import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
 import {
   decodeSlotExtras,
   encodeSlotExtras,
+  setupHasContent,
   setupOutfitIds,
   type SceneSetup
 } from '../../shared/scene-bundle'
@@ -142,14 +149,21 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       (p) => [p.id, p.name]
     )
   )
-  const sceneName = new Map(
-    (
-      db.prepare('SELECT id, name FROM gen_scenes WHERE deleted_at IS NULL').all() as {
-        id: number
-        name: string
-      }[]
-    ).map((s) => [s.id, s.name])
-  )
+  // 씬 id → 이름과, 같은 모듈에서 같은 이름 중 몇 번째인지 (목록 순서) — 복사해 이름이 겹친 씬 구분용
+  const sceneName = new Map<number, string>()
+  const sceneNth = new Map<number, number>()
+  const seen = new Map<string, number>()
+  for (const s of db
+    .prepare(
+      'SELECT id, preset_id, name FROM gen_scenes WHERE deleted_at IS NULL ORDER BY preset_id, sort_order, id'
+    )
+    .all() as { id: number; preset_id: number; name: string }[]) {
+    const key = `${s.preset_id}:${s.name}`
+    const nth = seen.get(key) ?? 0
+    seen.set(key, nth + 1)
+    sceneName.set(s.id, s.name)
+    sceneNth.set(s.id, nth)
+  }
 
   const extras = readExtras()
   const sceneLinks: BackupSceneLink[] = []
@@ -159,18 +173,19 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
     for (const [sceneId, addition] of Object.entries(scenes)) {
       const scene = sceneName.get(Number(sceneId))
       if (!scene) continue
-      const characterUids = keepUids(addition.characterIds)
-      const slotExtras = encodeSlotExtras(addition, uidIfKnown, outfitUid)
-      if (!characterUids.length && !slotExtras.slots) continue
-      sceneLinks.push({
+      const link: BackupSceneLink = {
         preset,
         scene,
-        characterUids,
+        ...(sceneNth.get(Number(sceneId)) ? { nth: sceneNth.get(Number(sceneId)) } : {}),
+        characterUids: keepUids(addition.characterIds),
         useCoords: addition.useCoords,
         positions: keepMap(addition.positions),
         roles: keepMap(addition.roles),
-        ...slotExtras
-      })
+        ...encodeSlotExtras(addition, uidIfKnown, outfitUid)
+      }
+      // 캐릭터 목록이 비어도 역할·위치·씬 태그·상대 태그·복장만 걸린 씬은 싣는다 —
+      // 캐릭터 창·큐 항목 카드로 돌리는 씬은 전부 이런 모양이라, 예전엔 통째로 빠졌다
+      if (linkHasContent(link)) sceneLinks.push(link)
     }
   }
 
@@ -184,7 +199,7 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
       roles: keepMap(e.roles),
       ...encodeSlotExtras(e, uidIfKnown, outfitUid)
     }))
-    .filter((e) => e.characterUids.length > 0 || !!e.slots)
+    .filter(linkHasContent)
 
   const backup: CharacterBackup = {
     version: 3,
@@ -452,11 +467,13 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       dropped++
       continue
     }
+    // 이름이 같은 씬이 여럿이면 몇 번째인지로 고른다 — 없으면 첫 번째 (예전 파일)
     const scene = db
       .prepare(
-        'SELECT id FROM gen_scenes WHERE preset_id = ? AND name = ? AND deleted_at IS NULL LIMIT 1'
+        'SELECT id FROM gen_scenes WHERE preset_id = ? AND name = ? AND deleted_at IS NULL ORDER BY sort_order, id LIMIT 1 OFFSET ?'
       )
-      .get(presetId, link.scene) as { id: number } | undefined
+      .get(presetId, link.scene, Number.isInteger(link.nth) ? link.nth : 0) as
+      { id: number } | undefined
     if (!scene) {
       dropped++
       continue
@@ -467,7 +484,17 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       (uid) => uidToId.get(uid),
       (uid) => outfitOfUid.get(uid)
     )
-    if (!characterIds.length && !slot.extras.slots) {
+    const positions = remapUidMap(link.positions, uidToId)
+    const roles = remapUidMap(link.roles, uidToId)
+    if (
+      !setupHasContent({
+        characterIds,
+        useCoords: link.useCoords,
+        positions,
+        roles,
+        ...slot.extras
+      })
+    ) {
       dropped++
       continue
     }
@@ -482,8 +509,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       charRefIds: prev?.charRefIds ?? [],
       vibeIds: prev?.vibeIds ?? [],
       useCoords: link.useCoords ?? prev?.useCoords,
-      positions: { ...(prev?.positions ?? {}), ...remapUidMap(link.positions, uidToId) },
-      roles: { ...(prev?.roles ?? {}), ...remapUidMap(link.roles, uidToId) },
+      positions: { ...(prev?.positions ?? {}), ...positions },
+      roles: { ...(prev?.roles ?? {}), ...roles },
       charTags: { ...(prev?.charTags ?? {}), ...(slot.extras.charTags ?? {}) },
       partnerTags: { ...(prev?.partnerTags ?? {}), ...(slot.extras.partnerTags ?? {}) },
       outfits: { ...(prev?.outfits ?? {}), ...(slot.extras.outfits ?? {}) },
@@ -511,7 +538,12 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       (uid) => uidToId.get(uid),
       (uid) => outfitOfUid.get(uid)
     )
-    if (!characterIds.length && !slot.extras.slots) continue
+    const positions = remapUidMap(e.positions, uidToId)
+    const roles = remapUidMap(e.roles, uidToId)
+    if (
+      !setupHasContent({ characterIds, useCoords: e.useCoords, positions, roles, ...slot.extras })
+    )
+      continue
     entries.push({
       id: `imported_${Date.now().toString(36)}_${restoredEntries}`,
       name: e.name,
@@ -520,8 +552,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       vibeIds: [],
       enabled: e.enabled,
       useCoords: e.useCoords,
-      positions: remapUidMap(e.positions, uidToId),
-      roles: remapUidMap(e.roles, uidToId),
+      positions,
+      roles,
       ...slot.extras
     })
     restoredEntries++

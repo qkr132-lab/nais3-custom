@@ -68,6 +68,7 @@ import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { useSceneExtrasStore, hasAddition } from '../stores/scene-extras-store'
 import { useCharactersStore } from '../stores/characters-store'
+import { useOutfitsStore } from '../stores/outfits-store'
 import { useResolutionsStore } from '../stores/resolutions-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -632,10 +633,21 @@ function SceneGrid(): React.JSX.Element {
     )
   }
   async function importJson(): Promise<void> {
-    const { count, additions, dropped } = await window.nais.invoke('scenes:importJson', {
-      presetId: activePresetId
-    })
+    const { count, additions, dropped, transparent } = await window.nais.invoke(
+      'scenes:importJson',
+      { presetId: activePresetId }
+    )
     if (count > 0) {
+      // 파일이 만든 카드·복장을 바로 쓰게 다시 읽는다 — 안 읽으면 생성 때 복장 태그가 빠진다
+      await Promise.all([useCharactersStore.getState().load(), useOutfitsStore.getState().load()])
+      if (transparent?.length) {
+        await useSceneExtrasStore.getState().load()
+        for (const t of transparent) {
+          useSceneExtrasStore
+            .getState()
+            .setSceneTransparentBackground(activePresetId, t.sceneId, t.enabled)
+        }
+      }
       // 캐릭터탭 포함 파일 (커스텀): 만들어진 카드를 "씬별 캐릭터 추가"로 연결
       if (additions.length > 0) {
         const extras = useSceneExtrasStore.getState()
@@ -652,7 +664,6 @@ function SceneGrid(): React.JSX.Element {
           })
         }
         useSceneExtrasStore.getState().setAdditionsEnabled(true)
-        await useCharactersStore.getState().load()
         toast(
           `씬 ${count}개 가져옴 — ${additions.length}개 씬에 캐릭터 구성 연결` +
             (dropped ? ` · 못 찾은 연결 ${dropped}건` : ''),
