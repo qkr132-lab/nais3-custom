@@ -1,6 +1,7 @@
 import {
   CloudUpload,
   Crosshair,
+  EyeOff,
   Globe,
   Image,
   Images,
@@ -22,6 +23,7 @@ const PAGES: { id: CenterMode; label: string; icon: LucideIcon }[] = [
   { id: 'composition', label: '배치', icon: Crosshair },
   { id: 'director', label: '디렉터', icon: Wand2 },
   { id: 'library', label: '라이브러리', icon: Images },
+  { id: 'censor', label: '검열', icon: EyeOff },
   { id: 'web', label: '웹', icon: Globe },
   { id: 'upload', label: '업로드', icon: CloudUpload }
 ]

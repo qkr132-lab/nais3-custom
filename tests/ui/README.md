@@ -12,6 +12,10 @@ Strength/synchronization checks: `node tests/ui/censor-strength-qa.cjs` and
 preset selection and generation stores with in-memory queue/settings adapters;
 all enqueue calls are captured locally and never sent to an image service.
 
+Auto-censor tab: open `/auto-censor.html` (`?empty=1` for no folder). It renders
+the actual `CensorMode` with a fake IPC that simulates progress, previews and a
+failed list. Nothing is detected, downloaded or sent to NAI.
+
 Model-aware token UI: run `node tests/ui/token-count-qa.cjs` or open
 `/token-count.html` (`?mode=panel` or `?mode=scene` for final totals). It renders
 the actual editor, prompt panel, character overlay and scene detail with

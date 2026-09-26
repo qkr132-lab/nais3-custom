@@ -6,6 +6,7 @@ export type CenterMode =
   | 'scene'
   | 'background'
   | 'outfit'
+  | 'censor'
   | 'composition'
   | 'director'
   | 'library'

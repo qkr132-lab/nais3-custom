@@ -5,6 +5,7 @@ import type { OpusUsage } from './opus-usage'
 import type { SceneSetup } from './scene-bundle'
 import type { Outfit, OutfitChoice, OutfitPiece, TagKind } from './outfit'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
+import type { CensorFileResult, CensorOptions, CensorPart, CensorProgress } from './censor'
 
 export type { OpusUsage }
 
@@ -615,6 +616,38 @@ export interface IpcInvokeMap {
     req: { tags: string[] }
     res: { kinds: Record<string, 'cloth' | 'bare' | 'body' | 'unknown'> }
   }
+  /** 자동 검열 (커스텀) — 설정·상태·미리보기·실행 */
+  'censor:getOptions': { req: undefined; res: { options: CensorOptions } }
+  'censor:setOptions': { req: { options: CensorOptions }; res: void }
+  'censor:pickFolder': { req: { title: string }; res: { path: string | null } }
+  'censor:status': {
+    req: undefined
+    res: {
+      progress: CensorProgress
+      /** 탐지 실행기를 못 쓰는 이유 (쓸 수 있으면 빈 문자열) */
+      runtime: string
+      models: { id: string; name: string; installed: boolean; bytes: number; license: string }[]
+      gemma: { dir: string; model: string | null }
+      /** 저장될 폴더 (옵션 기준) */
+      outputFolder: string
+      /** 저장 폴더가 이미 있는지 (없으면 열기 대신 고르기) */
+      outputExists: boolean
+    }
+  }
+  'censor:preview': {
+    req: { options: CensorOptions; nai?: boolean }
+    res: {
+      file: string
+      before: string
+      after: string
+      parts: CensorPart[]
+      boxes: number
+    }
+  }
+  'censor:start': { req: { options: CensorOptions }; res: void }
+  'censor:cancel': { req: undefined; res: void }
+  'censor:results': { req: undefined; res: { items: CensorFileResult[] } }
+  'censor:openFolder': { req: { path: string }; res: void }
   /** 네이티브 파일 선택 → sharp 리사이즈 → BLOB 저장. 취소 시 thumbnail null */
   'chars:pickThumbnail': { req: { id: number }; res: { thumbnail: string | null } }
   'chars:clearThumbnail': { req: { id: number }; res: void }
@@ -1036,6 +1069,8 @@ export interface R2UploadStatus {
 /** 메인 → 렌더러 이벤트 채널 */
 export interface IpcEventMap {
   'queue:changed': QueueStatusLite
+  /** 자동 검열 진행 (커스텀) */
+  'censor:progress': CensorProgress
   /** 생성 완료 등으로 잔액이 갱신될 때 */
   'anlas:balance': { anlas: number; opusUsage: OpusUsage | null }
   /** 한도가 바닥나 다른 계정으로 갈아탔을 때 (커스텀) */

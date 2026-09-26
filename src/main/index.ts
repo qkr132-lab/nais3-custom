@@ -21,6 +21,7 @@ import { getSetting } from './db/settings'
 import { processWildcards } from './fragments/processor'
 import type { FragmentTrace } from './fragments/processor'
 import { removeComments } from '../shared/nai-presets'
+import { modelCaps } from '../shared/nai-models'
 import { refreshScenePrompts } from '../shared/scene-request'
 import { withTransparentBackground } from '../shared/transparent-background'
 import type { FragmentPromptMetadata } from '../shared/types'
@@ -228,8 +229,9 @@ app.whenReady().then(async () => {
       ? await normalizeInpaintMask(source.maskBase64, request.width, request.height)
       : undefined
     if (source?.maskBase64 && !request.model.includes('inpainting')) {
-      // TODO(fixture): 인페인트 실캡처로 모델 스위칭 여부 확정 필요 (웹 enum에 -inpainting 존재)
-      request = { ...request, model: `${request.model}-inpainting` }
+      // 인페인트는 짝 모델로 — 웹 번들과 같게 V5 Curated는 V4.5 Curated 인페인트로 간다
+      // (예전엔 이름 뒤에 -inpainting만 붙여 없는 모델 5-curated-inpainting을 보냈다)
+      request = { ...request, model: modelCaps(request.model).inpaintModel }
     }
 
     const imageFormat: 'png' | 'webp' = getSetting('image_format') === 'webp' ? 'webp' : 'png'

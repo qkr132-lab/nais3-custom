@@ -31,6 +31,8 @@ export class GenerationQueue extends EventEmitter {
   private delayMs = 600
   /** 이 시각(ms epoch) 전까지는 새 요청을 쏘지 않는다 (취소 직후 쿨다운) */
   private cooldownUntil = 0
+  /** 큐 밖에서 NAI에 요청 중인 수 (자동 검열 NAI) — 0이 될 때까지 새 항목을 시작하지 않는다 */
+  private holds = 0
 
   constructor(
     private readonly generate: (
@@ -121,6 +123,24 @@ export class GenerationQueue extends EventEmitter {
     this.emitChanged()
   }
 
+  /**
+   * 큐 밖에서 NAI에 요청을 보낼 때 (커스텀 — 자동 검열 NAI 모드).
+   * 지금 생성 중인 항목이 끝나길 기다렸다가 fn을 돌리고, 그동안 큐는 새 항목을 시작하지 않는다 —
+   * 두 요청이 겹쳐 429가 나거나 잔액 비교가 섞이지 않게. 큐 전체가 빌 때까지 기다리지는 않는다.
+   */
+  async exclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    this.holds++
+    try {
+      while ([...this.items.values()].some((i) => i.state === 'generating')) {
+        if (signal?.aborted) throw new Error('중단했습니다')
+        await sleep(300)
+      }
+      return await fn()
+    } finally {
+      this.holds--
+    }
+  }
+
   setDelayMs(ms: number): void {
     this.delayMs = ms
   }
@@ -155,6 +175,9 @@ export class GenerationQueue extends EventEmitter {
     try {
       let next: QueueItem | undefined
       while ((next = this.nextPending())) {
+        // 큐 밖 요청(자동 검열 NAI)이 끝날 때까지 새 항목을 쏘지 않는다
+        while (this.holds > 0) await sleep(300)
+        if (next.state !== 'pending') continue
         // 취소 직후 쿨다운 — 대기 중 이 항목이 취소되면 건너뜀
         const wait = this.cooldownUntil - Date.now()
         if (wait > 0) {

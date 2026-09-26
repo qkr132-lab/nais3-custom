@@ -97,3 +97,48 @@ describe('GenerationQueue — 429 재시도', () => {
     expect(n).toBe(1)
   })
 })
+
+describe('GenerationQueue — 큐 밖 요청 잡아두기(exclusive)', () => {
+  it('생성 중인 한 장이 끝나길 기다렸다 돌고, 그동안 다음 항목을 시작하지 않는다', async () => {
+    const log: string[] = []
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req: any) => {
+      log.push(`start ${req.__label}`)
+      if (req.__label === 'A') await gate.p
+      log.push(`end ${req.__label}`)
+      return `/img/${req.__label}.png`
+    })
+    q.setDelayMs(0)
+    q.enqueueMany([mk('A'), mk('B')])
+    await tick() // A 생성 중
+    const outside = q.exclusive(async () => {
+      log.push('outside start')
+      await new Promise((r) => setTimeout(r, 400))
+      log.push('outside end')
+      return 'ok'
+    })
+    gate.resolve()
+    expect(await outside).toBe('ok')
+    await waitIdle(q)
+    // A가 끝난 뒤 바깥 요청, 바깥 요청이 끝난 뒤에야 B
+    expect(log).toEqual(['start A', 'end A', 'outside start', 'outside end', 'start B', 'end B'])
+  })
+
+  it('기다리는 중에 중단되면 던지고 큐는 계속 돈다', async () => {
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req: any) => {
+      if (req.__label === 'A') await gate.p
+      return `/img/${req.__label}.png`
+    })
+    q.setDelayMs(0)
+    q.enqueueMany([mk('A'), mk('B')])
+    await tick()
+    const ac = new AbortController()
+    const outside = q.exclusive(async () => 'never', ac.signal)
+    ac.abort()
+    await expect(outside).rejects.toThrow('중단')
+    gate.resolve()
+    await waitIdle(q)
+    expect(q.status().items.every((i) => i.state === 'done')).toBe(true)
+  })
+})

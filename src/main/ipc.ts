@@ -68,6 +68,22 @@ import {
   setSetting
 } from './db/settings'
 import { anlasUsage, logBalance } from './nai/anlas-log'
+import { normalizeCensorOptions } from '../shared/censor'
+import {
+  cancelCensor,
+  censorResults,
+  censorStatus,
+  idleProgress,
+  outputFolderFor,
+  previewCensor,
+  runCensor,
+  validateStart
+} from './censor/job'
+import type { CensorProgress } from '../shared/censor'
+import { runtimeProblem } from './censor/detector'
+import { BUILTIN_MODELS, isInstalled } from './censor/models'
+import { defaultGemmaDir, findGemma } from './censor/gemma'
+import { previewWithNai } from './censor/nai-preview'
 import { fetchAnlasBalance } from './nai/client'
 import { resetProbeCache } from './nai/account-switch'
 import {
@@ -202,7 +218,15 @@ import {
   syncStatus
 } from './r2/sync'
 import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'fs'
 import { basename, extname, join } from 'path'
 import sharp from 'sharp'
 import { verifyToken } from './nai/client'
@@ -586,6 +610,103 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('outfits:classifyTags', ({ tags }) => ({
     kinds: Object.fromEntries(tags.map((t) => [t, classifyTag(t)]))
   }))
+
+  // 자동 검열 (커스텀) — 폴더 이미지를 탐지해 모자이크·가림·NAI 인페인팅
+  handle('censor:getOptions', () => {
+    let saved: unknown = null
+    try {
+      saved = JSON.parse(getSetting('censor_options') ?? 'null')
+    } catch {
+      saved = null
+    }
+    return { options: normalizeCensorOptions(saved) }
+  })
+  handle('censor:setOptions', ({ options }) => {
+    setSetting('censor_options', JSON.stringify(normalizeCensorOptions(options)))
+  })
+  handle('censor:pickFolder', async ({ title }) => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const r = await dialog.showOpenDialog(win, {
+      title,
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return { path: r.canceled ? null : (r.filePaths[0] ?? null) }
+  })
+  handle('censor:status', async () => {
+    let saved: unknown = null
+    try {
+      saved = JSON.parse(getSetting('censor_options') ?? 'null')
+    } catch {
+      saved = null
+    }
+    const options = normalizeCensorOptions(saved)
+    const gemma = findGemma(defaultGemmaDir())
+    return {
+      progress: censorStatus(),
+      runtime: await runtimeProblem(),
+      models: BUILTIN_MODELS.map((m) => ({
+        id: m.id,
+        name: m.name,
+        installed: isInstalled(m),
+        bytes: m.bytes,
+        license: m.license
+      })),
+      gemma: { dir: defaultGemmaDir(), model: gemma ? gemma.model : null },
+      outputFolder: options.folder ? outputFolderFor(options) : '',
+      outputExists: !!options.folder && existsSync(outputFolderFor(options))
+    }
+  })
+  // NAI 검열이 잔액을 다시 읽거나 계정을 바꾸면 상단 게이지에도 알린다
+  const naiContext = (): import('./censor/nai').NaiCensorContext => ({
+    queue: ctx.queue,
+    onBalance: (anlas, opusUsage) => {
+      logBalance(anlas)
+      broadcast('anlas:balance', { anlas, opusUsage })
+    },
+    onSwitch: (label) => broadcast('accounts:switched', { label })
+  })
+  handle('censor:preview', ({ options, nai }) => {
+    const opts = normalizeCensorOptions(options)
+    // 미리보기 진행은 일괄 작업 진행과 따로 모은다 (지난 작업의 숫자가 섞이지 않게)
+    let shown: CensorProgress = idleProgress()
+    const report = (patch: Partial<CensorProgress>): void => {
+      shown = { ...shown, ...patch }
+      broadcast('censor:progress', shown)
+    }
+    // 미리보기는 늘 원본 폴더의 첫 그림 — 화면이 임의 경로를 넘기지 못하게 파일은 받지 않는다
+    return nai
+      ? previewWithNai(opts, undefined, naiContext(), report)
+      : previewCensor(opts, undefined, report)
+  })
+  handle('censor:start', ({ options }) => {
+    const opts = normalizeCensorOptions(options)
+    // 잘못된 설정은 바로 화면에 알린다 — 아래는 오래 걸려 기다리지 않는다
+    validateStart(opts)
+    void runCensor(opts, (p) => broadcast('censor:progress', p), naiContext()).catch(
+      () => undefined
+    )
+  })
+  handle('censor:cancel', () => cancelCensor())
+  handle('censor:results', () => ({ items: censorResults() }))
+  handle('censor:openFolder', async ({ path }) => {
+    // 검열 화면이 보여준 폴더(원본·저장)만 연다
+    let saved: unknown = null
+    try {
+      saved = JSON.parse(getSetting('censor_options') ?? 'null')
+    } catch {
+      saved = null
+    }
+    const options = normalizeCensorOptions(saved)
+    const allowed = [
+      options.folder,
+      options.folder ? outputFolderFor(options) : '',
+      censorStatus().outputFolder
+    ]
+    // 폴더일 때만 연다 — 파일 경로면(실행 파일 등) 열지 않는다
+    if (path && allowed.includes(path) && existsSync(path) && statSync(path).isDirectory())
+      await shell.openPath(path)
+  })
+
   handle('chars:create', ({ name, folderId }) => ({ id: createCharacter(name, folderId) }))
   handle('chars:update', ({ id, patch }) => {
     updateCharacter(id, patch)

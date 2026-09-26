@@ -18,7 +18,14 @@ files:
   - resources/tag-wiki.json
   - resources/tags-ko.json
   - resources/tags.json
-afterPack: scripts/audit-release.cjs
+  # 자동 검열 탐지 실행기(onnxruntime-node)는 모든 OS 바이너리를 한 패키지에 싣는다(301MB).
+  # CPU로만 돌리므로 GPU(DirectML) 파일·win32/arm64·설치 스크립트는 여기서 빼고,
+  # 다른 OS 폴더는 afterPack(scripts/after-pack.cjs)에서 지운다
+  - '!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/{DirectML,dxcompiler,dxil}.dll'
+  - '!node_modules/onnxruntime-node/script/**'
+# 다른 OS·CPU용 onnxruntime 바이너리 정리 → 개인정보 검사
+afterPack: scripts/after-pack.cjs
 asarUnpack:
   - resources/**
 win:

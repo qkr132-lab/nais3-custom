@@ -13,6 +13,7 @@ export const STAGE_INPUTS = Object.freeze([
   'package-lock.json',
   'electron-builder.yml',
   'scripts/audit-release.cjs',
+  'scripts/after-pack.cjs',
   'LICENSE',
   'NOTICE-tag-search.md',
   'NOTICE-tag-wiki.md',
