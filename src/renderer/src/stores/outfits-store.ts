@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 import type { Outfit, OutfitPiece } from '@shared/outfit'
+import { DEFAULT_EXPOSE_ACTS, type ExposeActs } from '@shared/auto-expose'
+
+const ACTS_KEY = 'outfit_expose_acts'
 
 /**
  * 복장 목록 (커스텀). 생성 요청을 만들 때 동기로 읽어야 해서 앱 시작 때 한 번 불러두고,
@@ -8,6 +11,9 @@ import type { Outfit, OutfitPiece } from '@shared/outfit'
 interface OutfitsState {
   items: Outfit[]
   loaded: boolean
+  /** 자동 젖히기 — 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 (복장 탭에서 고친다) */
+  acts: ExposeActs
+  setActs: (acts: ExposeActs) => void
   load: () => Promise<void>
   create: (name: string, pieces?: OutfitPiece[]) => Promise<number>
   update: (id: number, patch: { name?: string; pieces?: OutfitPiece[]; negative?: string }) => void
@@ -18,10 +24,26 @@ interface OutfitsState {
 export const useOutfitsStore = create<OutfitsState>((set, get) => ({
   items: [],
   loaded: false,
+  acts: DEFAULT_EXPOSE_ACTS,
 
   load: async () => {
-    const { items } = await window.nais.invoke('outfits:list', undefined)
-    set({ items, loaded: true })
+    const [{ items }, { value }] = await Promise.all([
+      window.nais.invoke('outfits:list', undefined),
+      window.nais.invoke('settings:get', { key: ACTS_KEY })
+    ])
+    let acts = DEFAULT_EXPOSE_ACTS
+    try {
+      const v = value ? (JSON.parse(value) as Partial<ExposeActs>) : null
+      if (v && Array.isArray(v.lower) && Array.isArray(v.chest)) acts = { lower: v.lower, chest: v.chest }
+    } catch {
+      // 깨진 설정은 기본 목록으로
+    }
+    set({ items, acts, loaded: true })
+  },
+
+  setActs: (acts) => {
+    set({ acts })
+    void window.nais.invoke('settings:set', { key: ACTS_KEY, value: JSON.stringify(acts) })
   },
 
   create: async (name, pieces) => {

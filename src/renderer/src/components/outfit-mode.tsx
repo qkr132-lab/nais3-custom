@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Copy, Plus, Shirt, Trash2, X } from 'lucide-react'
-import { newPieceId, type Outfit, type OutfitPiece } from '@shared/outfit'
+import { newPieceId, outfitTags, type Outfit, type OutfitPiece } from '@shared/outfit'
+import { DEFAULT_EXPOSE_ACTS, exposePreview, type ExposeActs } from '@shared/auto-expose'
 import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
 import { useOutfitsStore } from '../stores/outfits-store'
@@ -265,6 +266,8 @@ function OutfitEditor({
         />
       </div>
 
+      <ExposeSection outfit={outfit} />
+
       {/* 상태 후보 — 입은 옷에 맞는 것만 */}
       <div className="rounded-lg border border-line p-2.5">
         <p className="mb-1.5 text-[12px] font-medium text-muted">
@@ -298,6 +301,76 @@ function OutfitEditor({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * 옷 입은 채 자동으로 젖히기 — 이 옷이면 무엇이 붙는지 보여주고,
+ * 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 고친다 (모든 복장 공통).
+ */
+function ExposeSection({ outfit }: { outfit: Outfit }): React.JSX.Element {
+  const acts = useOutfitsStore((s) => s.acts)
+  const setActs = useOutfitsStore((s) => s.setActs)
+  const [open, setOpen] = useState(false)
+  const preview = exposePreview(outfitTags(outfit))
+
+  const field = (area: keyof ExposeActs, label: string): React.JSX.Element => (
+    <label className="flex flex-col gap-1">
+      <span className="text-[11.5px] text-muted">{label}</span>
+      <textarea
+        key={acts[area].join(',')}
+        className="min-h-[60px] rounded-md border border-line bg-paper p-2 font-mono text-[11px]"
+        defaultValue={acts[area].join(', ')}
+        onBlur={(e) =>
+          setActs({
+            ...acts,
+            [area]: e.target.value
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean)
+          })
+        }
+      />
+    </label>
+  )
+
+  return (
+    <div className="rounded-lg border border-line p-2.5">
+      <p className="text-[12px] font-medium text-muted">
+        자동 젖히기
+        <span className="ml-1.5 text-[11px] font-normal text-faint">
+          씬 태그를 보고 옷 입은 채 필요한 곳만 드러냅니다 · 씬 배치 창에서 씬마다 끌 수 있습니다
+        </span>
+      </p>
+      <p className="mt-1 text-[11.5px] text-muted">
+        {preview.lower.length || preview.chest.length ? (
+          <>
+            이 옷이면 — 삽입 장면: <b className="font-mono text-ink">{preview.lower.join(', ') || '없음'}</b>
+            {' · '}가슴 장면: <b className="font-mono text-ink">{preview.chest.join(', ') || '없음'}</b>
+          </>
+        ) : (
+          '이 옷에선 젖힐 옷을 못 찾았습니다 (비키니·치마·바지·셔츠 같은 옷 이름이 있어야 합니다).'
+        )}
+      </p>
+      <button
+        className="mt-1.5 text-[11px] text-accent hover:underline"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? '장면 태그 목록 접기' : '어떤 태그를 장면으로 볼지 고치기'}
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          {field('lower', '아래가 드러나는 장면 (쉼표로 구분)')}
+          {field('chest', '가슴이 드러나는 장면 (쉼표로 구분)')}
+          <button
+            className="w-fit text-[11px] text-faint hover:text-ink"
+            onClick={() => setActs(DEFAULT_EXPOSE_ACTS)}
+          >
+            기본 목록으로 되돌리기
+          </button>
+        </div>
+      )}
     </div>
   )
 }

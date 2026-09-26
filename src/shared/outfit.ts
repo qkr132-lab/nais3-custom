@@ -39,6 +39,8 @@ export interface OutfitChoice {
   on?: string[]
   /** 기본으로 켜져 있지만 이 씬에서 끈 조각 */
   off?: string[]
+  /** false면 이 씬에서 자동 젖히기를 끈다 (기본은 켜짐) */
+  auto?: boolean
 }
 
 /** 이 선택에서 실제로 켜지는 조각 (복장에 적힌 순서대로) */
@@ -110,7 +112,8 @@ export function togglePiece(outfit: Outfit, choice: OutfitChoice, pieceId: strin
   return {
     outfitId: choice.outfitId,
     ...(on.size ? { on: [...on] } : {}),
-    ...(off.size ? { off: [...off] } : {})
+    ...(off.size ? { off: [...off] } : {}),
+    ...(choice.auto === false ? { auto: false } : {})
   }
 }
 

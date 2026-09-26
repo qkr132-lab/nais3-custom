@@ -5,6 +5,7 @@ import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
+import { autoExposeTags } from '@shared/auto-expose'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -230,6 +231,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   const drawn = placements.slice(0, modelCaps(base.model).maxCharacters)
   // 복장 (커스텀) — 씬(또는 큐 항목)에서 고른 옷 > 카드 기본 복장 > 없음
   const outfits = outfitMap()
+  const exposeActs = useOutfitsStore.getState().acts
+  // 역할이 걸린 캐릭터가 있으면 씬 전체 태그(삽입 등)는 당하는쪽에게만 적용한다
+  const anyRole = drawn.some(({ char: c, slotIndex }) => !!placementRole(c, slotIndex))
   /**
    * 상대 태그를 주는 쪽 (커스텀) — 이 그림에 실제로 나오는 캐릭터들.
    * 씬(또는 큐 항목)에 적은 게 있으면 그걸, 없으면 카드에 적힌 걸 쓴다.
@@ -269,6 +273,27 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       const outfitTag = resolveOutfitTags(c.outfitId, outfitChoice, outfits)
       const outfitNegative = resolveOutfitNegative(c.outfitId, outfitChoice, outfits)
       /**
+       * 옷 입은 채 자동으로 젖히기 (커스텀) — 이 캐릭터에게 걸린 장면 태그를 보고,
+       * 입은 옷에 맞게 필요한 곳만 드러낸다 (비키니 + 삽입 → bikini bottom aside).
+       * 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만 적용한다.
+       */
+      const exposeTag =
+        outfitTag && outfitChoice?.auto !== false
+          ? autoExposeTags(
+              outfitTag,
+              [
+                ...(role === 'target' || !anyRole ? [base.prompt, scene.prompt] : []),
+                roleTagsFor(role, scene),
+                charTag,
+                slotTag,
+                partnerTag
+              ],
+              exposeActs
+            )
+              .map((e) => e.tag)
+              .join(', ')
+          : ''
+      /**
        * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
        * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
        * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
@@ -284,6 +309,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
         // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
         prompt: [
           outfitTag,
+          exposeTag,
           withRole(charTag),
           withRole(slotTag),
           withRole(partnerTag),

@@ -57,6 +57,8 @@ export interface FileOutfitChoice {
   outfit: string
   on?: string[]
   off?: string[]
+  /** false면 자동 젖히기 끔 */
+  auto?: boolean
 }
 
 /** 파일에 싣는 복장 */
@@ -157,7 +159,8 @@ export function encodeSlotExtras(
     oc[uid] = {
       outfit,
       ...(choice.on?.length ? { on: [...choice.on] } : {}),
-      ...(choice.off?.length ? { off: [...choice.off] } : {})
+      ...(choice.off?.length ? { off: [...choice.off] } : {}),
+      ...(choice.auto === false ? { auto: false } : {})
     }
   }
   const outfits = nonEmpty(oc)
@@ -233,7 +236,12 @@ export function decodeSlotExtras(
     }
     const on = strs(fc.on)
     const off = strs(fc.off)
-    outfits[id] = { outfitId, ...(on ? { on } : {}), ...(off ? { off } : {}) }
+    outfits[id] = {
+      outfitId,
+      ...(on ? { on } : {}),
+      ...(off ? { off } : {}),
+      ...(fc.auto === false ? { auto: false } : {})
+    }
   }
   if (Object.keys(outfits).length) extras.outfits = outfits
 

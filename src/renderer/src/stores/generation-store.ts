@@ -10,9 +10,15 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
-import { appendPrompt, mergePromptParts, withPartnerTags } from '@shared/scene-request'
+import {
+  appendPrompt,
+  mergePromptParts,
+  partnerTagsFor,
+  withPartnerTags
+} from '@shared/scene-request'
 import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
-import { outfitMap } from './outfits-store'
+import { autoExposeTags } from '@shared/auto-expose'
+import { outfitMap, useOutfitsStore } from './outfits-store'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -236,13 +242,27 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const givers = enabled.map((c) => ({ id: c.id, role: c.role, partnerTags: c.partnerTags }))
     // 복장 (커스텀) — 메인 탭은 씬 선택이 없으니 카드의 기본 복장
     const outfits = outfitMap()
+    const exposeActs = useOutfitsStore.getState().acts
+    const anyRole = enabled.some((c) => !!c.role)
+    // 옷 입은 채 자동으로 젖히기 — 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게
+    const withOutfit = (c: (typeof enabled)[number]): string => {
+      const worn = resolveOutfitTags(c.outfitId, undefined, outfits)
+      const exposed = worn
+        ? autoExposeTags(
+            worn,
+            [
+              ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
+              partnerTagsFor(c.role, givers, c.id)
+            ],
+            exposeActs
+          )
+            .map((e) => e.tag)
+            .join(', ')
+        : ''
+      return appendPrompt(appendPrompt(c.prompt, worn), exposed)
+    }
     const characterPrompts = enabled.map((c) => ({
-      prompt: withPartnerTags(
-        appendPrompt(c.prompt, resolveOutfitTags(c.outfitId, undefined, outfits)),
-        c.role,
-        givers,
-        c.id
-      ),
+      prompt: withPartnerTags(withOutfit(c), c.role, givers, c.id),
       // 기본 복장의 네거티브도 붙는다 (커스텀)
       negativePrompt: appendPrompt(
         c.negativePrompt,

@@ -1,5 +1,6 @@
 import type { CharacterCard } from '@shared/types'
 import { activePieces, outfitTags, togglePiece, type OutfitChoice } from '@shared/outfit'
+import { exposePreview } from '@shared/auto-expose'
 import { cn } from '../lib/utils'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -84,6 +85,33 @@ export function OutfitPicker({
           <p className="truncate text-[11px] text-faint" title={outfitTags(outfit, current)}>
             {outfitTags(outfit, current) || '켜진 조각이 없어 옷 태그가 붙지 않습니다'}
           </p>
+          {(() => {
+            // 옷 입은 채 자동으로 젖히기 — 이 옷이면 장면에 따라 무엇이 붙는지
+            const preview = exposePreview(outfitTags(outfit, current))
+            if (!preview.lower.length && !preview.chest.length) return null
+            const autoOn = current?.auto !== false
+            return (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <button
+                  className={cn(
+                    'shrink-0 rounded px-1.5 py-0.5 font-medium transition-colors',
+                    autoOn ? 'bg-emerald-500 text-white' : 'bg-paper text-faint hover:text-muted'
+                  )}
+                  title="씬 태그를 보고 옷 입은 채 필요한 곳만 드러냅니다"
+                  onClick={() =>
+                    current &&
+                    onChange({ ...current, ...(autoOn ? { auto: false } : { auto: undefined }) })
+                  }
+                >
+                  자동 젖히기 {autoOn ? '켬' : '끔'}
+                </button>
+                <span className="min-w-0 text-faint">
+                  삽입 장면 → {preview.lower.join(', ') || '없음'} · 가슴 장면 →{' '}
+                  {preview.chest.join(', ') || '없음'}
+                </span>
+              </div>
+            )
+          })()}
           {outfit.negative?.trim() && (
             <p className="truncate text-[11px] text-faint" title={outfit.negative}>
               <span className="text-danger/80">네거티브</span> {outfit.negative}
