@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Check, Maximize2, Minimize2, Plus, RotateCcw, User } from 'lucide-react'
 import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
-import { seatSlots } from '@shared/scene-request'
+import { partnerTagsFor, sceneContextsFor, seatSlots } from '@shared/scene-request'
+import { requestForPromptMode } from '@shared/prompt-state'
 import { cn } from '../lib/utils'
 import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
@@ -85,6 +86,7 @@ export function ScenePlacementDialog({
   roles,
   sceneSize,
   rolePositions,
+  scene,
   onPatch
 }: {
   open: boolean
@@ -121,6 +123,8 @@ export function ScenePlacementDialog({
     source?: { x: number; y: number } | null
     target?: { x: number; y: number } | null
   }
+  /** 이 씬의 태그 — 복장의 nsfw 조각이 켜질지 보여줄 때 쓴다. 없으면 큐 항목 (씬을 모름) */
+  scene?: { prompt: string; sourceTags?: string; targetTags?: string }
   onPatch: (patch: {
     characterIds?: number[]
     positions?: CharPositions
@@ -139,6 +143,7 @@ export function ScenePlacementDialog({
   const items = useCharactersStore((s) => s.items)
   const updateCard = useCharactersStore((s) => s.updateCard)
   const request = useGenerationStore((s) => s.request)
+  const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const source = useGenerationStore((s) => s.source)
   const size = source ?? sceneSize ?? request
   const caps = modelCaps(request.model)
@@ -289,6 +294,43 @@ export function ScenePlacementDialog({
     if (choice) next[id] = choice
     else delete next[id]
     onPatch({ outfits: next })
+  }
+
+  /**
+   * 이 씬에서 이 캐릭터에게 걸린 장면 태그 — 복장의 nsfw 조각이 켜질지 본다 (생성과 같은 규칙).
+   * 여러 자리에 앉았으면 모든 자리의 태그를 합친다. 씬을 모르면(큐 항목) 없음.
+   */
+  const sceneContextsOf = (id: number): string[] | undefined => {
+    if (!scene) return undefined
+    const basePrompt = requestForPromptMode(request, promptSplitEnabled).prompt
+    // 자리 역할 > 이 씬 역할 > 카드 역할 (buildSceneRequest와 같은 순서)
+    const roleAt = (c: CharacterCard, slot: number | undefined): CharRole | undefined =>
+      (slot != null ? slotRoles?.[slot] : undefined) ?? roles?.[c.id] ?? c.role ?? undefined
+    const placements: { c: CharacterCard; slot?: number }[] = picked.flatMap((c) => {
+      const seats = seatsOf(c.id)
+      return seats.length ? seats.map((slot) => ({ c, slot })) : [{ c }]
+    })
+    const anyRole = placements.some(({ c, slot }) => !!roleAt(c, slot))
+    const givers = placements.map(({ c, slot }) => ({
+      id: c.id,
+      role: roleAt(c, slot) ?? null,
+      partnerTags: partnerTags?.[c.id] ?? c.partnerTags
+    }))
+    return placements
+      .filter(({ c }) => c.id === id)
+      .flatMap(({ c, slot }) =>
+        sceneContextsFor({
+          role: roleAt(c, slot),
+          anyRole,
+          prompts: [basePrompt, scene.prompt],
+          scene,
+          tags: [
+            charTags?.[id] ?? '',
+            slot != null ? (slotTags?.[slot] ?? '') : '',
+            partnerTagsFor(roleAt(c, slot), givers, id)
+          ]
+        })
+      )
   }
 
   /** 이 씬에서 이 캐릭터가 상대에게 줄 태그 — 비우면 카드에 적힌 상대 태그로 돌아간다 */
@@ -621,6 +663,7 @@ export function ScenePlacementDialog({
                   <OutfitPicker
                     card={selectedChar}
                     choice={outfits?.[selectedChar.id]}
+                    sceneContexts={sceneContextsOf(selectedChar.id)}
                     onChange={(c) => setOutfit(selectedChar.id, c)}
                   />
                 </div>

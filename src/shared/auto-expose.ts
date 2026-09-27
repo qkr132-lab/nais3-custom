@@ -1,20 +1,27 @@
-import { splitPromptTokens, tokenTags } from './outfit'
+import {
+  outfitTags,
+  splitPromptTokens,
+  tokenTags,
+  type Outfit,
+  type PieceTrigger,
+  type SceneAreas
+} from './outfit'
 
 /**
- * 옷 입은 채 자동으로 젖히기 (커스텀).
+ * nsfw 조각 (커스텀) — 장면에 따라 저절로 켜지는 복장 조각.
  *
- * 씬 태그를 보고 "아래가 드러나야 하는 장면(삽입 등)"이나 "가슴이 드러나야 하는 장면(파이즈리 등)"이면,
- * 입은 옷 중 그 부위를 가리는 옷을 찾아 그 옷에 맞게 젖히는 태그를 붙인다.
- *   비키니 + 삽입 → bikini bottom aside,   치마 + 팬티 + 삽입 → skirt lift, panties aside
- * 알몸으로 만들지 않는다 — 옷은 입은 채 필요한 곳만 드러난다.
+ * 씬 태그를 보고 "아래가 드러나야 하는 장면(삽입 등)"이나 "가슴이 드러나야 하는 장면(파이즈리 등)"이면
+ * 복장의 nsfw 아래·가슴 조각이 켜진다. 무엇을 젖힐지는 조각에 적힌 태그 그대로다 —
+ * 앱이 젖히는 태그를 따로 붙이지 않는다.
  *
+ * 복장 탭에선 기본 조각(평소 옷)을 보고 젖히는 태그를 후보로 보여준다. 누르면 nsfw 조각이 된다.
+ *   비키니 → bikini bottom aside,   치마 + 팬티 → skirt lift, panties aside
  * 젖히는 태그는 단보루에서 그 옷에 실제로 가장 많이 쓰인 것으로 정했다 (2026-09 사용 수 기준).
- * 복장(조각)에 적힌 옷만 본다 — 카드에 섞인 옷은 건드리지 않아, 복장을 안 쓰는 씬은 그대로다.
  */
 
 export type ExposeArea = 'lower' | 'chest'
 
-/** 부위를 드러내야 하는 행위 태그 목록 — 복장 탭에서 고칠 수 있다 */
+/** 부위를 드러내야 하는 행위 태그 목록 — nsfw 조각이 켜지는 장면. 복장 탭에서 고칠 수 있다 */
 export interface ExposeActs {
   lower: string[]
   chest: string[]
@@ -75,12 +82,6 @@ const GARMENTS: GarmentRule[] = [
   { nouns: ['coat'], chest: 'open coat' }
 ]
 
-/** 이미 드러나 있으면 더 젖힐 필요가 없다 */
-const ALREADY_BARE: Record<ExposeArea, string[]> = {
-  lower: ['nude', 'completely nude', 'bottomless'],
-  chest: ['nude', 'completely nude', 'topless', 'breasts out']
-}
-
 const norm = (t: string): string =>
   t.trim().toLowerCase().replace(/_/g, ' ').replace(/^(source|target|mutual)#/, '').replace(/\s+/g, ' ')
 
@@ -121,43 +122,54 @@ export function neededAreas(contexts: string[], acts: ExposeActs): Partial<Recor
   return out
 }
 
-export interface ExposeTag {
-  tag: string
-  area: ExposeArea
-  /** 이 태그를 붙이게 만든 행위 태그 */
-  because: string
+/**
+ * nsfw 조각이 켜지는 조건 — 이 캐릭터에게 걸린 장면 태그(contexts)로 본다.
+ * 씬에서 자동 켜기를 껐으면(choice.auto === false) 어느 부위도 켜지지 않는다.
+ */
+export function triggerAreas(
+  contexts: string[],
+  acts: ExposeActs,
+  choice?: { auto?: boolean }
+): SceneAreas {
+  if (choice?.auto === false) return {}
+  const need = neededAreas(contexts, acts)
+  return { lower: !!need.lower, chest: !!need.chest }
 }
 
 /**
- * 붙일 젖히기 태그. outfitText = 입은 복장의 켜진 조각 태그, contexts = 이 캐릭터에게 걸린 장면 태그들.
- * 이미 들어 있는 태그는 다시 붙이지 않고, 이미 드러난 부위(nude·topless 등)는 건너뛴다.
+ * 이 옷을 젖히는 태그 (장면과 무관하게). 그 부위를 가리는 옷 = 그 부위 짝이 있는 옷 —
+ * 셔츠만 입었으면 아래는 모르는 것이라 비워 둔다.
  */
-export function autoExposeTags(outfitText: string, contexts: string[], acts: ExposeActs): ExposeTag[] {
-  const need = neededAreas(contexts, acts)
-  if (!need.lower && !need.chest) return []
-  const garments = detectGarments(outfitText)
-  if (!garments.length) return []
-  const present = new Set([outfitText, ...contexts].flatMap(tagsOf))
-  const out: ExposeTag[] = []
-  for (const area of ['lower', 'chest'] as const) {
-    const because = need[area]
-    if (!because) continue
-    if (ALREADY_BARE[area].some((t) => present.has(t))) continue
-    // 그 부위를 가리는 옷 = 그 부위 짝이 있는 옷. 셔츠만 입었으면 아래는 모르는 것 — 안 건드린다
-    const tags = garments.flatMap((g) => (g[area] ? [g[area] as string] : []))
-    for (const tag of new Set(tags)) {
-      if (present.has(tag) || out.some((o) => o.tag === tag)) continue
-      out.push({ tag, area, because })
-    }
-  }
-  return out
-}
-
-/** 복장 탭에 보여줄 안내 — 이 옷이면 어떤 태그가 붙는지 (장면과 무관하게) */
 export function exposePreview(outfitText: string): Record<ExposeArea, string[]> {
   const g = detectGarments(outfitText)
   const pick = (area: ExposeArea): string[] => [
     ...new Set(g.flatMap((r) => (r[area] ? [r[area] as string] : [])))
   ]
   return { lower: pick('lower'), chest: pick('chest') }
+}
+
+/** 복장 탭의 nsfw 조각 후보 — 누르면 이 이름·태그·조건으로 조각이 생긴다 */
+export interface ExposeCandidate {
+  area: ExposeArea
+  name: string
+  tags: string
+  when: PieceTrigger
+}
+
+const CANDIDATE: Record<ExposeArea, { name: string; when: PieceTrigger }> = {
+  lower: { name: '젖히기(아래)', when: 'nsfw-lower' },
+  chest: { name: '젖히기(가슴)', when: 'nsfw-chest' }
+}
+
+/**
+ * 기본 조각(평소 옷)을 보고 부위마다 젖히는 태그를 한 조각으로 묶는다.
+ * 이미 어느 조각에 적힌 태그는 빼고, 남는 게 없으면 그 부위 후보도 없다.
+ */
+export function exposeCandidates(outfit: Outfit): ExposeCandidate[] {
+  const preview = exposePreview(outfitTags(outfit))
+  const present = new Set(outfit.pieces.flatMap((p) => tagsOf(p.tags)))
+  return (['lower', 'chest'] as const).flatMap((area) => {
+    const tags = preview[area].filter((t) => !present.has(t))
+    return tags.length ? [{ area, ...CANDIDATE[area], tags: tags.join(', ') }] : []
+  })
 }

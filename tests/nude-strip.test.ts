@@ -213,6 +213,28 @@ describe('복장의 nsfw(누드) 조각', () => {
     expect(undressOutfit(outfit, { on: ['d'] }, false, kind)).toContain('military uniform')
   })
 
+  it('nsfw 아래·가슴 조각에 적힌 누드도 장면이 맞아 켜지면 똑같이 벗긴다', () => {
+    const triggered: Outfit = {
+      ...outfit,
+      pieces: outfit.pieces.map((p) => (p.id === 'd' ? { ...p, when: 'nsfw-lower' } : p))
+    }
+    expect(undressOutfit(triggered, undefined, true, kind, { lower: true })).toBe(
+      'gas mask, helmet, holding rifle, nude, black thighhighs'
+    )
+    // 장면이 아니거나, 씬에서 그 조각을 끄면 평소대로
+    expect(undressOutfit(triggered, undefined, true, kind, { chest: true })).toContain(
+      'military uniform'
+    )
+    expect(undressOutfit(triggered, { off: ['d'] }, true, kind, { lower: true })).toContain(
+      'military uniform'
+    )
+    const outfits = new Map([[7, triggered]])
+    expect(wornOutfitTags(7, undefined, outfits, true, kind, { lower: true })).not.toContain(
+      'military uniform'
+    )
+    expect(wornOutfitTags(7, undefined, outfits, true, kind)).toContain('military uniform')
+  })
+
   it('카드 기본 복장에서도 같고, 카드의 옷 태그도 함께 걷어낸다', () => {
     const outfits = new Map([
       [7, { ...outfit, pieces: outfit.pieces.map((p) => ({ ...p, on: true })) }]

@@ -719,6 +719,7 @@ function PositionPanel({
         roles={roles}
         sceneSize={scene ? { width: scene.width, height: scene.height } : undefined}
         rolePositions={scene ? { source: scene.sourcePos, target: scene.targetPos } : undefined}
+        scene={scene}
         onPatch={onPatch}
       />
       {useCoords !== false &&

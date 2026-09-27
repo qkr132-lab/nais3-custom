@@ -57,7 +57,7 @@ export interface FileOutfitChoice {
   outfit: string
   on?: string[]
   off?: string[]
-  /** false면 자동 젖히기 끔 */
+  /** false면 nsfw 조각 자동 켜기 끔 */
   auto?: boolean
 }
 

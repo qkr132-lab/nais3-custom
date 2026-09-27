@@ -7,6 +7,7 @@ import {
   tokenTags,
   type Outfit,
   type OutfitChoice,
+  type SceneAreas,
   type TagKind
 } from './outfit'
 
@@ -21,7 +22,7 @@ import {
  * naked towel·naked apron처럼 "naked + 한 가지"는 단보루에서 "그것만 걸친 알몸"이라
  * 같이 본다 — 수건·앞치마는 장면 태그에 있으니 그대로 남는다.
  *
- * 복장 안의 누드 조각(상태 조각에 nude를 적어 둔 것)을 켜도 같다 — 그 복장의 다른 조각에서
+ * 복장 안의 누드 조각(상태·nsfw 조각에 nude를 적어 둔 것)이 켜져도 같다 — 그 복장의 다른 조각에서
  * 몸에 걸친 옷을 빼고, 카드의 옷 태그도 걷어낸다. 벗길 때도 머리·얼굴 장비(모자·두건·헬멧·
  * 가면·베일·안대·고글·머리 장식)는 남긴다 — 캐릭터의 얼굴을 정하는 설정이라.
  */
@@ -189,15 +190,17 @@ export function isNudePiece(tags: string): boolean {
  * 이 복장·선택으로 실제로 입히는 태그 — 켠 조각에 누드 조각이 있으면 누드 조각은 그대로 두고
  * 나머지 조각에선 몸에 걸친 옷만 뺀다 (머리·얼굴 장비·문장은 남김).
  * 누드 조각이 없거나 끈 설정이면 평소대로 켠 조각을 모두 입힌다.
+ * auto = 이 씬에서 드러나야 하는 부위 — 맞는 nsfw 조각도 켜진 조각에 든다 (activePieces).
  */
 export function undressOutfit(
   outfit: Outfit,
   choice: Pick<OutfitChoice, 'on' | 'off'> | undefined,
   enabled: boolean,
-  kindOf: (tag: string) => TagKind
+  kindOf: (tag: string) => TagKind,
+  auto?: SceneAreas
 ): string {
-  const pieces = activePieces(outfit, choice)
-  if (!enabled || !pieces.some((p) => isNudePiece(p.tags))) return outfitTags(outfit, choice)
+  const pieces = activePieces(outfit, choice, auto)
+  if (!enabled || !pieces.some((p) => isNudePiece(p.tags))) return outfitTags(outfit, choice, auto)
   return pieces
     .map((p) => pieceTags(isNudePiece(p.tags) ? p.tags : stripClothing(p.tags, kindOf)))
     .filter(Boolean)
@@ -210,10 +213,11 @@ export function wornOutfitTags(
   sceneChoice: OutfitChoice | undefined,
   outfits: ReadonlyMap<number, Outfit>,
   enabled: boolean,
-  kindOf: (tag: string) => TagKind
+  kindOf: (tag: string) => TagKind,
+  auto?: SceneAreas
 ): string {
   const r = resolveOutfit(cardOutfitId, sceneChoice, outfits)
-  return r ? undressOutfit(r.outfit, r.choice, enabled, kindOf) : ''
+  return r ? undressOutfit(r.outfit, r.choice, enabled, kindOf, auto) : ''
 }
 
 /** 옷 분류를 물어볼 태그들 — 프롬프트 여러 개에서 중복 없이 */

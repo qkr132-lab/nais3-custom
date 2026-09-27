@@ -159,6 +159,25 @@ export function roleTagsFor(
   return ''
 }
 
+/**
+ * 이 캐릭터에게 걸린 장면 태그 (커스텀) — 누드면 옷 벗기기·nsfw 조각이 이걸 보고 정한다.
+ * 씬 전체 태그(기본·씬 프롬프트)는 당하는쪽(역할 걸린 캐릭터가 없는 씬이면 전원)에게만.
+ * 생성과 씬 배치 창이 같은 규칙을 쓰도록 한 곳에 둔다.
+ */
+export function sceneContextsFor(input: {
+  role: CharRole | undefined
+  /** 이 그림에 역할이 걸린 캐릭터가 있는지 */
+  anyRole: boolean
+  /** 기본 프롬프트·씬 프롬프트 */
+  prompts: string[]
+  scene: { sourceTags?: string; targetTags?: string }
+  /** 이 씬 태그·자리 태그·상대 태그 */
+  tags: string[]
+}): string[] {
+  const { role, anyRole, prompts, scene, tags } = input
+  return [...(role === 'target' || !anyRole ? prompts : []), roleTagsFor(role, scene), ...tags]
+}
+
 /** 씬 프롬프트는 3분할의 가변(additional) 영역에만 합친다. */
 export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: string): PromptParts {
   return {

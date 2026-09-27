@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Copy, Plus, Shirt, Trash2, X } from 'lucide-react'
-import { newPieceId, outfitTags, type Outfit, type OutfitPiece } from '@shared/outfit'
+import { cyclePiece, newPieceId, outfitTags, type Outfit, type OutfitPiece } from '@shared/outfit'
 import { isNudePiece } from '@shared/nude-strip'
-import { DEFAULT_EXPOSE_ACTS, exposePreview, type ExposeActs } from '@shared/auto-expose'
+import {
+  DEFAULT_EXPOSE_ACTS,
+  exposeCandidates,
+  exposePreview,
+  type ExposeActs
+} from '@shared/auto-expose'
 import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
 import { useOutfitsStore } from '../stores/outfits-store'
@@ -17,7 +22,47 @@ import { Input } from './ui/input'
  *   ☑ 재킷 · ☑ 셔츠 · ☑ 치마 · ☐ 지퍼 오픈 · ☐ 치마 들춤
  * 씬에서 재킷을 끄면 벗고, 치마 들춤을 켜면 들춘다. 태그는 조각마다 직접 적는다 —
  * 옷마다 맞는 상태가 달라서(치마엔 skirt lift, 바지엔 pants pull) 미리 채우지 않는다.
+ * nsfw 아래·가슴 조각은 씬에서 켜지 않아도 그 부위가 드러나는 장면이면 저절로 켜진다.
  */
+
+/** 조각 앞 배지 — 이름·설명·색. 누를 때마다 기본 → 상태 → nsfw 아래 → nsfw 가슴 */
+function pieceBadge(p: OutfitPiece): { label: string; title: string; className: string } {
+  const cycle = '누를 때마다 기본 → 상태 → nsfw 아래 → nsfw 가슴 순으로 바뀝니다'
+  const nude = isNudePiece(p.tags)
+  const undress = nude
+    ? ' · 누드 태그가 있어 켜지면 이 복장의 다른 조각에서 몸의 옷을 뺍니다 (머리·얼굴 장비는 남김)'
+    : ''
+  const nsfw = 'bg-danger/15 text-danger'
+  if (p.on)
+    return {
+      label: '기본',
+      title: `기본 — 평소에 입음 (씬에서 끄면 벗음)\n${cycle}`,
+      className: 'bg-emerald-500 text-white'
+    }
+  if (p.when === 'nsfw-lower')
+    return {
+      label: 'nsfw 아래',
+      title: `nsfw 아래 — 아래가 드러나는 장면(삽입 등)이면 씬에서 저절로 켜짐${undress}\n${cycle}`,
+      className: nsfw
+    }
+  if (p.when === 'nsfw-chest')
+    return {
+      label: 'nsfw 가슴',
+      title: `nsfw 가슴 — 가슴이 드러나는 장면(파이즈리 등)이면 씬에서 저절로 켜짐${undress}\n${cycle}`,
+      className: nsfw
+    }
+  if (nude)
+    return {
+      label: 'nsfw',
+      title: `nsfw — 씬에서 켜면 이 복장의 다른 조각에서 몸의 옷을 빼고 누드로 (머리·얼굴 장비는 남김)\n${cycle}`,
+      className: nsfw
+    }
+  return {
+    label: '상태',
+    title: `상태 — 평소엔 꺼짐 (씬에서 켜는 상태)\n${cycle}`,
+    className: 'bg-paper text-faint hover:text-muted'
+  }
+}
 export function OutfitMode(): React.JSX.Element {
   const items = useOutfitsStore((s) => s.items)
   const load = useOutfitsStore((s) => s.load)
@@ -174,8 +219,10 @@ function OutfitEditor({
       </div>
 
       <p className="text-[11.5px] text-muted">
-        <b className="text-ink">기본</b>이 켜진 조각이 평소 모습입니다. 꺼진 조각은 씬에서 켤 수 있는
-        상태예요 — 씬에서 기본 조각을 끄면 벗고, 꺼진 조각을 켜면 그 상태가 됩니다.
+        <b className="text-ink">기본</b>이 켜진 조각이 평소 모습입니다. 꺼진 조각은 씬에서 켤 수
+        있는 상태예요 — 씬에서 기본 조각을 끄면 벗고, 꺼진 조각을 켜면 그 상태가 됩니다.{' '}
+        <b className="text-ink">nsfw 아래·가슴</b> 조각은 그 부위가 드러나는 장면이면 저절로
+        켜집니다. 조각 앞 배지를 누르면 종류가 바뀝니다.
       </p>
 
       <div className="flex flex-col gap-1.5">
@@ -185,24 +232,14 @@ function OutfitEditor({
             className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2"
           >
             <button
-              title={
-                p.on
-                  ? '평소에 입음 (씬에서 끄면 벗음)'
-                  : isNudePiece(p.tags)
-                    ? 'nsfw — 씬에서 켜면 이 복장의 다른 조각에서 몸의 옷을 빼고 누드로 (머리·얼굴 장비는 남김)'
-                    : '평소엔 꺼짐 (씬에서 켜는 상태)'
-              }
+              title={pieceBadge(p).title}
               className={cn(
-                'mt-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors',
-                p.on
-                  ? 'bg-emerald-500 text-white'
-                  : isNudePiece(p.tags)
-                    ? 'bg-danger/15 text-danger'
-                    : 'bg-paper text-faint hover:text-muted'
+                'mt-1 shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors',
+                pieceBadge(p).className
               )}
-              onClick={() => patchPiece(p.id, { on: !p.on })}
+              onClick={() => setPieces(pieces.map((x) => (x.id === p.id ? cyclePiece(x) : x)))}
             >
-              {p.on ? '기본' : isNudePiece(p.tags) ? 'nsfw' : '상태'}
+              {pieceBadge(p).label}
             </button>
             <Input
               className="mt-0.5 h-7 w-32 shrink-0 text-[12px]"
@@ -277,7 +314,7 @@ function OutfitEditor({
         />
       </div>
 
-      <ExposeSection outfit={outfit} />
+      <NsfwSection outfit={outfit} onAdd={addPiece} />
 
       {/* 상태 후보 — 입은 옷에 맞는 것만 */}
       <div className="rounded-lg border border-line p-2.5">
@@ -317,14 +354,21 @@ function OutfitEditor({
 }
 
 /**
- * 옷 입은 채 자동으로 젖히기 — 이 옷이면 무엇이 붙는지 보여주고,
- * 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 고친다 (모든 복장 공통).
+ * nsfw 조각 — 입은 옷에 맞는 젖히기 후보를 누르면 nsfw 아래·가슴 조각으로 들어가고,
+ * 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 고친다 (장면 목록은 모든 복장 공통).
  */
-function ExposeSection({ outfit }: { outfit: Outfit }): React.JSX.Element {
+function NsfwSection({
+  outfit,
+  onAdd
+}: {
+  outfit: Outfit
+  onAdd: (piece: Omit<OutfitPiece, 'id'>) => void
+}): React.JSX.Element {
   const acts = useOutfitsStore((s) => s.acts)
   const setActs = useOutfitsStore((s) => s.setActs)
   const [open, setOpen] = useState(false)
   const preview = exposePreview(outfitTags(outfit))
+  const candidates = exposeCandidates(outfit)
 
   const field = (area: keyof ExposeActs, label: string): React.JSX.Element => (
     <label className="flex flex-col gap-1">
@@ -349,31 +393,49 @@ function ExposeSection({ outfit }: { outfit: Outfit }): React.JSX.Element {
   return (
     <div className="rounded-lg border border-line p-2.5">
       <p className="text-[12px] font-medium text-muted">
-        자동 젖히기
+        nsfw 조각 후보
         <span className="ml-1.5 text-[11px] font-normal text-faint">
-          씬 태그를 보고 옷 입은 채 필요한 곳만 드러냅니다 · 씬 배치 창에서 씬마다 끌 수 있습니다
+          누르면 nsfw 조각으로 추가됩니다 · 태그는 추가한 뒤 고칠 수 있습니다
         </span>
       </p>
-      <p className="mt-1 text-[11.5px] text-muted">
-        {preview.lower.length || preview.chest.length ? (
-          <>
-            이 옷이면 — 삽입 장면: <b className="font-mono text-ink">{preview.lower.join(', ') || '없음'}</b>
-            {' · '}가슴 장면: <b className="font-mono text-ink">{preview.chest.join(', ') || '없음'}</b>
-          </>
-        ) : (
-          '이 옷에선 젖힐 옷을 못 찾았습니다 (비키니·치마·바지·셔츠 같은 옷 이름이 있어야 합니다).'
-        )}
+      {candidates.length ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {candidates.map((c) => (
+            <button
+              key={c.area}
+              className="rounded-md border border-line px-2 py-1 text-[11.5px] text-muted transition-colors hover:border-accent hover:text-ink"
+              title={c.tags}
+              onClick={() => onAdd({ name: c.name, tags: c.tags, on: false, when: c.when })}
+            >
+              <span className="mr-1 font-medium text-danger">
+                nsfw {c.area === 'lower' ? '아래' : '가슴'}
+              </span>
+              {c.name}
+              <span className="ml-1 font-mono text-[10px] text-faint">{c.tags}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-[11.5px] text-faint">
+          {preview.lower.length || preview.chest.length
+            ? '맞는 후보를 모두 조각으로 넣었습니다.'
+            : '기본 조각에서 젖힐 옷을 못 찾았습니다 (비키니·치마·바지·셔츠 같은 옷 이름이 있어야 합니다).'}
+        </p>
+      )}
+      <p className="mt-1.5 text-[11px] text-faint">
+        씬 태그가 장면 목록에 걸리면 nsfw 아래·가슴 조각이 저절로 켜집니다 · 씬 배치 창에서 씬마다
+        끌 수 있습니다
       </p>
       <button
-        className="mt-1.5 text-[11px] text-accent hover:underline"
+        className="mt-1 text-[11px] text-accent hover:underline"
         onClick={() => setOpen(!open)}
       >
         {open ? '장면 태그 목록 접기' : '어떤 태그를 장면으로 볼지 고치기'}
       </button>
       {open && (
         <div className="mt-2 flex flex-col gap-2">
-          {field('lower', '아래가 드러나는 장면 (쉼표로 구분)')}
-          {field('chest', '가슴이 드러나는 장면 (쉼표로 구분)')}
+          {field('lower', '아래가 드러나는 장면 — nsfw 아래 조각이 켜짐 (쉼표로 구분)')}
+          {field('chest', '가슴이 드러나는 장면 — nsfw 가슴 조각이 켜짐 (쉼표로 구분)')}
           <button
             className="w-fit text-[11px] text-faint hover:text-ink"
             onClick={() => setActs(DEFAULT_EXPOSE_ACTS)}

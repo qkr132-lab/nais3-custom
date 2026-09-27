@@ -5,7 +5,7 @@ import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { resolveOutfitNegative } from '@shared/outfit'
-import { autoExposeTags } from '@shared/auto-expose'
+import { triggerAreas } from '@shared/auto-expose'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -13,6 +13,7 @@ import {
   seatSlots,
   scenePositivePrompt,
   sceneNegativePrompt,
+  sceneContextsFor,
   prioritizeSceneCharacterIds,
   roleTagsFor
 } from '@shared/scene-request'
@@ -274,17 +275,20 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       const partnerTag = partnerTagsFor(role, givers, c.id)
       const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
       // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
-      const sceneContexts = [
-        ...(role === 'target' || !anyRole ? [base.prompt, scene.prompt] : []),
-        roleTagsFor(role, scene),
-        charTag,
-        slotTag,
-        partnerTag
-      ]
+      const sceneContexts = sceneContextsFor({
+        role,
+        anyRole,
+        prompts: [base.prompt, scene.prompt],
+        scene,
+        tags: [charTag, slotTag, partnerTag]
+      })
+      // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
+      // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
+      const auto = triggerAreas(sceneContexts, exposeActs, outfitChoice)
       // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
       // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
-      // 복장의 누드 조각을 켰으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
-      const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf)
+      // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+      const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf, auto)
       const dressed = undressForNude({
         card: c.prompt,
         outfit: worn,
@@ -295,16 +299,6 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
         kindOf
       })
       const outfitTag = dressed.outfit
-      /**
-       * 옷 입은 채 자동으로 젖히기 (커스텀) — 이 캐릭터에게 걸린 장면 태그를 보고,
-       * 입은 옷에 맞게 필요한 곳만 드러낸다 (비키니 + 삽입 → bikini bottom aside).
-       */
-      const exposeTag =
-        outfitTag && outfitChoice?.auto !== false
-          ? autoExposeTags(outfitTag, sceneContexts, exposeActs)
-              .map((e) => e.tag)
-              .join(', ')
-          : ''
       /**
        * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
        * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
@@ -321,7 +315,6 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
         // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
         prompt: [
           outfitTag,
-          exposeTag,
           withRole(charTag),
           withRole(slotTag),
           withRole(partnerTag),

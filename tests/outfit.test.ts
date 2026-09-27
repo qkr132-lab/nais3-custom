@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   activePieces,
+  cyclePiece,
   outfitTags,
   resolveOutfitTags,
   splitClothing,
@@ -61,6 +62,118 @@ describe('조각 켜고 끄기', () => {
     expect(c).toEqual({ outfitId: 1 })
     c = togglePiece(uniform, c, 'jacket')
     expect(c).toEqual({ outfitId: 1, off: ['jacket'] })
+  })
+})
+
+describe('nsfw 아래·가슴 조각', () => {
+  const school: Outfit = {
+    id: 3,
+    name: '치마 교복',
+    negative: '',
+    pieces: [
+      { id: 'jacket', name: '재킷', tags: 'school uniform jacket', on: true },
+      { id: 'skirt', name: '치마', tags: 'pleated skirt', on: true },
+      {
+        id: 'lift',
+        name: '젖히기',
+        tags: 'skirt lift, panties aside',
+        on: false,
+        when: 'nsfw-lower'
+      },
+      { id: 'open', name: '풀기', tags: 'open jacket, bra lift', on: false, when: 'nsfw-chest' },
+      { id: 'zip', name: '지퍼', tags: 'unzipped', on: false }
+    ]
+  }
+  const ids = (
+    auto?: { lower?: boolean; chest?: boolean },
+    choice?: { on?: string[]; off?: string[] }
+  ): string[] => activePieces(school, choice, auto).map((p) => p.id)
+
+  it('아래가 드러나는 장면이면 nsfw 아래 조각만 켜진다', () => {
+    expect(ids({ lower: true, chest: false })).toEqual(['jacket', 'skirt', 'lift'])
+  })
+
+  it('가슴이 드러나는 장면이면 nsfw 가슴 조각만 켜진다', () => {
+    expect(ids({ lower: false, chest: true })).toEqual(['jacket', 'skirt', 'open'])
+  })
+
+  it('둘 다면 둘 다, 아무 장면도 아니면 평소 옷만 — 상태 조각은 늘 꺼진 채', () => {
+    expect(ids({ lower: true, chest: true })).toEqual(['jacket', 'skirt', 'lift', 'open'])
+    expect(ids({})).toEqual(['jacket', 'skirt'])
+    expect(outfitTags(school, undefined, { lower: true })).toBe(
+      'school uniform jacket, pleated skirt, skirt lift, panties aside'
+    )
+  })
+
+  it('장면을 모르면(넘기지 않으면) nsfw 조각은 상태 조각처럼 꺼져 있다', () => {
+    expect(ids()).toEqual(['jacket', 'skirt'])
+    expect(ids(undefined, { on: ['lift'] })).toEqual(['jacket', 'skirt', 'lift'])
+  })
+
+  it('씬에서 끄고 켠 것이 장면보다 이긴다', () => {
+    const lower = { lower: true, chest: false }
+    // 저절로 켜진 조각을 이 씬에서 끈다 → 끈 기록으로 남는다
+    const off = togglePiece(school, { outfitId: 3 }, 'lift', lower)
+    expect(off).toEqual({ outfitId: 3, off: ['lift'] })
+    expect(ids(lower, off)).toEqual(['jacket', 'skirt'])
+    // 다시 누르면 기본값(켜짐)으로 돌아가 기록이 비워진다
+    expect(togglePiece(school, off, 'lift', lower)).toEqual({ outfitId: 3 })
+    // 장면이 아닌 조각을 이 씬에서 켠다
+    const on = togglePiece(school, { outfitId: 3 }, 'open', lower)
+    expect(on).toEqual({ outfitId: 3, on: ['open'] })
+    expect(ids(lower, on)).toEqual(['jacket', 'skirt', 'lift', 'open'])
+  })
+
+  it('장면이 바뀌어 남은 반대쪽 기록은 누를 때 지운다', () => {
+    // 아래 장면이 아니던 때 켜둔 기록(on)이 있는데 지금은 아래 장면 — 누르면 끈 기록만 남는다
+    expect(togglePiece(school, { outfitId: 3, on: ['lift'] }, 'lift', { lower: true })).toEqual({
+      outfitId: 3,
+      off: ['lift']
+    })
+  })
+
+  it('씬의 자동 켜기 끔(auto: false)은 켜고 끌 때도 지킨다', () => {
+    expect(togglePiece(school, { outfitId: 3, auto: false }, 'zip')).toEqual({
+      outfitId: 3,
+      on: ['zip'],
+      auto: false
+    })
+  })
+
+  it('조건이 없는 옛 복장은 장면과 상관없이 전과 같다', () => {
+    const all = { lower: true, chest: true }
+    expect(outfitTags(uniform, undefined, all)).toBe(outfitTags(uniform))
+    expect(outfitTags(uniform, { on: ['lift'], off: ['jacket'] }, all)).toBe(
+      outfitTags(uniform, { on: ['lift'], off: ['jacket'] })
+    )
+    expect(togglePiece(uniform, { outfitId: 1 }, 'lift', all)).toEqual({
+      outfitId: 1,
+      on: ['lift']
+    })
+  })
+
+  it('입는 옷 태그도 장면을 따른다 (씬 선택 > 카드 기본)', () => {
+    const lib3 = new Map([[3, school]])
+    expect(resolveOutfitTags(3, undefined, lib3, { chest: true })).toBe(
+      'school uniform jacket, pleated skirt, open jacket, bra lift'
+    )
+    expect(resolveOutfitTags(3, { outfitId: 3, off: ['open'] }, lib3, { chest: true })).toBe(
+      'school uniform jacket, pleated skirt'
+    )
+  })
+
+  it('배지를 누를 때마다 기본 → 상태 → nsfw 아래 → nsfw 가슴 → 기본', () => {
+    const base = { id: 'x', name: '치마', tags: 'pleated skirt', on: true }
+    const state = cyclePiece(base)
+    expect(state).toEqual({ id: 'x', name: '치마', tags: 'pleated skirt', on: false })
+    expect('when' in state).toBe(false)
+    const lower = cyclePiece(state)
+    expect(lower).toEqual({ ...state, when: 'nsfw-lower' })
+    const chest = cyclePiece(lower)
+    expect(chest).toEqual({ ...state, when: 'nsfw-chest' })
+    const back = cyclePiece(chest)
+    expect(back).toEqual(base)
+    expect('when' in back).toBe(false)
   })
 })
 
@@ -163,6 +276,26 @@ describe('복장이 파일로 갔다 돌아온다', () => {
       (u) => (u === 'o1' ? 10 : undefined)
     )
     expect(setup.outfits).toEqual({ 50: { outfitId: 10, on: ['lift'], off: ['jacket'] } })
+  })
+
+  it('씬에서 끈 nsfw 조각 자동 켜기도 파일로 따라간다', async () => {
+    const { decodeSetup, encodeSetup } = await import('../src/shared/scene-bundle')
+    const file = JSON.parse(
+      JSON.stringify(
+        encodeSetup(
+          { characterIds: [5], outfits: { 5: { outfitId: 1, auto: false } } },
+          (id) => `c${id}`,
+          (id) => `o${id}`
+        )
+      )
+    )
+    expect(file.outfits).toEqual({ c5: { outfit: 'o1', auto: false } })
+    const { setup } = decodeSetup(
+      file,
+      () => 50,
+      () => 10
+    )
+    expect(setup.outfits).toEqual({ 50: { outfitId: 10, auto: false } })
   })
 
   it('파일에 없는 복장을 가리키면 그 선택만 빠지고 센다', async () => {

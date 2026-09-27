@@ -28,11 +28,14 @@ export function normalizePieces(raw: unknown): OutfitPiece[] {
   for (const p of v as Partial<OutfitPiece>[]) {
     if (!p || typeof p.id !== 'string' || !p.id || seen.has(p.id)) continue
     seen.add(p.id)
+    const on = p.on !== false
     out.push({
       id: p.id,
       name: typeof p.name === 'string' ? p.name : '',
       tags: typeof p.tags === 'string' ? p.tags : '',
-      on: p.on !== false
+      on,
+      // nsfw 조각 조건은 꺼진 조각에만 뜻이 있다 — 모르는 값은 버려 손으로 켜는 상태 조각으로
+      ...(!on && (p.when === 'nsfw-lower' || p.when === 'nsfw-chest') ? { when: p.when } : {})
     })
   }
   return out

@@ -17,7 +17,7 @@ import {
   withPartnerTags
 } from '@shared/scene-request'
 import { resolveOutfitNegative } from '@shared/outfit'
-import { autoExposeTags } from '@shared/auto-expose'
+import { triggerAreas } from '@shared/auto-expose'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
 import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import { withTransparentBackground } from '@shared/transparent-background'
@@ -250,15 +250,17 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const anyRole = enabled.some((c) => !!c.role)
     /**
      * 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게.
-     * 누드면 옷 벗기기 → 옷 입은 채 자동으로 젖히기 순 (커스텀)
+     * nsfw 조각 켜기 → 누드면 옷 벗기기 순 (커스텀)
      */
     const dress = (c: (typeof enabled)[number]): { prompt: string; negative: string } => {
       const contexts = [
         ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
         partnerTagsFor(c.role, givers, c.id)
       ]
-      // 복장의 누드 조각을 켰으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
-      const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf)
+      // 아래·가슴이 드러나는 장면이면 nsfw 조각이 저절로 켜진다 (메인 탭엔 씬 선택이 없다)
+      const auto = triggerAreas(contexts, exposeActs)
+      // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+      const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf, auto)
       const dressed = undressForNude({
         card: c.prompt,
         outfit: worn,
@@ -267,13 +269,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         enabled: stripOnNude,
         kindOf
       })
-      const exposed = dressed.outfit
-        ? autoExposeTags(dressed.outfit, contexts, exposeActs)
-            .map((e) => e.tag)
-            .join(', ')
-        : ''
       return {
-        prompt: appendPrompt(appendPrompt(dressed.card, dressed.outfit), exposed),
+        prompt: appendPrompt(dressed.card, dressed.outfit),
         negative: dressed.outfitNegative
       }
     }

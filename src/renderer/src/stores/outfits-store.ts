@@ -13,7 +13,7 @@ const STRIP_KEY = 'nude_strip_clothes'
 interface OutfitsState {
   items: Outfit[]
   loaded: boolean
-  /** 자동 젖히기 — 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 (복장 탭에서 고친다) */
+  /** nsfw 조각이 켜지는 장면 — 어떤 태그를 "아래/가슴이 드러나는 장면"으로 볼지 (복장 탭에서 고친다) */
   acts: ExposeActs
   setActs: (acts: ExposeActs) => void
   /** 누드면 옷 벗기기 — 장면에 nude가 있으면 복장을 빼고 카드의 옷 태그를 걷어낸다 (설정, 기본 켬) */

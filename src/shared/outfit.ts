@@ -8,9 +8,14 @@
  *
  * 앱이 씬을 보고 옷을 정하지 않는다 — 직접 고른 것만 따른다. 아무것도 안 고른 씬은
  * 카드의 기본 복장(없으면 카드 태그 그대로)으로 나간다.
+ * 하나만 예외: nsfw 아래·가슴 조각은 그 부위가 드러나는 장면(씬 태그로 판단)이면 저절로 켜진다.
+ *   ☐ 젖히기(아래) = nsfw 아래 → sex·vaginal 같은 씬에서만 켜짐
  *
  * DB·파일 입출력 없이 순수 로직만 둔다 (테스트 가능하게).
  */
+
+/** 저절로 켜지는 조건 — nsfw 아래: 아래가 드러나는 장면 / nsfw 가슴: 가슴이 드러나는 장면 */
+export type PieceTrigger = 'nsfw-lower' | 'nsfw-chest'
 
 export interface OutfitPiece {
   /** 복장 안에서만 통하는 id — 씬의 켜고 끈 기록이 이걸 가리킨다 */
@@ -19,6 +24,33 @@ export interface OutfitPiece {
   tags: string
   /** 기본으로 켜짐 — 평소 모습에 들어가는 조각 */
   on: boolean
+  /** 꺼진 조각(on:false)만 — 이 장면이면 씬에서 켜지 않아도 켜진다. 없으면 손으로 켜는 상태 조각 */
+  when?: PieceTrigger
+}
+
+/**
+ * 이 씬에서 드러나야 하는 부위 — nsfw 조각이 저절로 켜지는 조건.
+ * 넘기지 않으면(undefined) nsfw 조각은 상태 조각처럼 꺼진 채로 둔다.
+ */
+export interface SceneAreas {
+  lower?: boolean
+  chest?: boolean
+}
+
+/** 이 씬에서 이 조각이 따로 안 건드려도 켜지는지 — 기본 조각이거나, 장면이 맞는 nsfw 조각 */
+export function pieceDefaultOn(piece: OutfitPiece, auto?: SceneAreas): boolean {
+  if (piece.on) return true
+  if (!auto || !piece.when) return false
+  return piece.when === 'nsfw-lower' ? !!auto.lower : !!auto.chest
+}
+
+/** 복장 탭 배지 — 누를 때마다 기본 → 상태 → nsfw 아래 → nsfw 가슴 → 기본 */
+export function cyclePiece(piece: OutfitPiece): OutfitPiece {
+  const { when, ...rest } = piece
+  if (piece.on) return { ...rest, on: false }
+  if (!when) return { ...rest, on: false, when: 'nsfw-lower' }
+  if (when === 'nsfw-lower') return { ...rest, on: false, when: 'nsfw-chest' }
+  return { ...rest, on: true }
 }
 
 export interface Outfit {
@@ -35,24 +67,36 @@ export interface Outfit {
  */
 export interface OutfitChoice {
   outfitId: number
-  /** 기본으로 꺼져 있지만 이 씬에서 켠 조각 */
+  /** 이 씬에서 기본으로 꺼져 있지만 켠 조각 */
   on?: string[]
-  /** 기본으로 켜져 있지만 이 씬에서 끈 조각 */
+  /** 이 씬에서 기본으로 켜져 있지만 끈 조각 (저절로 켜진 nsfw 조각을 끈 것도) */
   off?: string[]
-  /** false면 이 씬에서 자동 젖히기를 끈다 (기본은 켜짐) */
+  /** false면 이 씬에서 nsfw 조각 자동 켜기를 끈다 (기본은 켜짐) */
   auto?: boolean
 }
 
-/** 이 선택에서 실제로 켜지는 조각 (복장에 적힌 순서대로) */
-export function activePieces(outfit: Outfit, choice?: Pick<OutfitChoice, 'on' | 'off'>): OutfitPiece[] {
+/**
+ * 이 선택에서 실제로 켜지는 조각 (복장에 적힌 순서대로).
+ * auto = 이 씬에서 드러나야 하는 부위 — 맞는 nsfw 조각은 기본으로 켜진 것으로 본다.
+ * 씬에서 켜고 끈 기록(on/off)은 그 기본값 위에 얹힌다.
+ */
+export function activePieces(
+  outfit: Outfit,
+  choice?: Pick<OutfitChoice, 'on' | 'off'>,
+  auto?: SceneAreas
+): OutfitPiece[] {
   const on = new Set(choice?.on ?? [])
   const off = new Set(choice?.off ?? [])
-  return outfit.pieces.filter((p) => (p.on && !off.has(p.id)) || (!p.on && on.has(p.id)))
+  return outfit.pieces.filter((p) => (pieceDefaultOn(p, auto) ? !off.has(p.id) : on.has(p.id)))
 }
 
 /** 켜진 조각의 태그를 한 줄로 */
-export function outfitTags(outfit: Outfit, choice?: Pick<OutfitChoice, 'on' | 'off'>): string {
-  return activePieces(outfit, choice)
+export function outfitTags(
+  outfit: Outfit,
+  choice?: Pick<OutfitChoice, 'on' | 'off'>,
+  auto?: SceneAreas
+): string {
+  return activePieces(outfit, choice, auto)
     .map((p) => p.tags.trim().replace(/^,+|,+$/g, '').trim())
     .filter(Boolean)
     .join(', ')
@@ -82,10 +126,11 @@ export function resolveOutfit(
 export function resolveOutfitTags(
   cardOutfitId: number | null | undefined,
   sceneChoice: OutfitChoice | undefined,
-  outfits: ReadonlyMap<number, Outfit>
+  outfits: ReadonlyMap<number, Outfit>,
+  auto?: SceneAreas
 ): string {
   const r = resolveOutfit(cardOutfitId, sceneChoice, outfits)
-  return r ? outfitTags(r.outfit, r.choice) : ''
+  return r ? outfitTags(r.outfit, r.choice, auto) : ''
 }
 
 /** 입는 옷의 네거티브 — 조각을 켜고 끄는 것과 상관없이 그 복장을 입으면 붙는다 */
@@ -97,18 +142,32 @@ export function resolveOutfitNegative(
   return resolveOutfit(cardOutfitId, sceneChoice, outfits)?.outfit.negative?.trim() ?? ''
 }
 
-/** 조각 켜고 끄기 — 기본값과 같아지면 기록에서 뺀다 (기록이 기본값 대비 차이만 남게) */
-export function togglePiece(outfit: Outfit, choice: OutfitChoice, pieceId: string): OutfitChoice {
+/**
+ * 조각 켜고 끄기 — 기본값과 같아지면 기록에서 뺀다 (기록이 기본값 대비 차이만 남게).
+ * auto를 넘기면 저절로 켜진 nsfw 조각도 기본값으로 보고 끈 기록(off)으로 남긴다.
+ */
+export function togglePiece(
+  outfit: Outfit,
+  choice: OutfitChoice,
+  pieceId: string,
+  auto?: SceneAreas
+): OutfitChoice {
   const piece = outfit.pieces.find((p) => p.id === pieceId)
   if (!piece) return choice
   const on = new Set(choice.on ?? [])
   const off = new Set(choice.off ?? [])
-  const active = (piece.on && !off.has(pieceId)) || (!piece.on && on.has(pieceId))
-  if (piece.on) {
+  const byDefault = pieceDefaultOn(piece, auto)
+  const active = byDefault ? !off.has(pieceId) : on.has(pieceId)
+  // 반대쪽에 남은 옛 기록은 지운다 — 장면이 바뀌어 기본값이 달라졌을 때 남은 것
+  if (byDefault) {
+    on.delete(pieceId)
     if (active) off.add(pieceId)
     else off.delete(pieceId)
-  } else if (active) on.delete(pieceId)
-  else on.add(pieceId)
+  } else {
+    off.delete(pieceId)
+    if (active) on.delete(pieceId)
+    else on.add(pieceId)
+  }
   return {
     outfitId: choice.outfitId,
     ...(on.size ? { on: [...on] } : {}),

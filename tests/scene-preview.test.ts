@@ -19,6 +19,9 @@ import {
 } from '../src/renderer/src/stores/generation-store'
 import { useCharactersStore } from '../src/renderer/src/stores/characters-store'
 import { useSceneExtrasStore } from '../src/renderer/src/stores/scene-extras-store'
+import { useOutfitsStore } from '../src/renderer/src/stores/outfits-store'
+import { DEFAULT_EXPOSE_ACTS } from '../src/shared/auto-expose'
+import type { Outfit, OutfitChoice } from '../src/shared/outfit'
 
 const scene = {
   id: 4,
@@ -203,5 +206,79 @@ describe('scene token preview uses the actual generation request builder', () =>
     })
     expect(previewSceneRequests(scene)[0].request.characterPrompts).toHaveLength(6)
     expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('outfit nsfw pieces turn on from the scene tags', () => {
+  const school: Outfit = {
+    id: 9,
+    name: '치마 교복',
+    negative: '',
+    pieces: [
+      { id: 'skirt', name: '치마', tags: 'pleated skirt, white panties', on: true },
+      {
+        id: 'lift',
+        name: '젖히기(아래)',
+        tags: 'skirt lift, panties aside',
+        on: false,
+        when: 'nsfw-lower'
+      },
+      { id: 'open', name: '젖히기(가슴)', tags: 'shirt lift', on: false, when: 'nsfw-chest' }
+    ]
+  }
+  const charPrompt = (prompt: string): string =>
+    buildSceneRequest({ ...scene, prompt }).characterPrompts[0].prompt
+  const withChoice = (choice: OutfitChoice): void =>
+    useSceneExtrasStore.setState({
+      additionsEnabled: true,
+      additions: {
+        1: { 4: { characterIds: [], charRefIds: [], vibeIds: [], outfits: { 1: choice } } }
+      }
+    })
+
+  beforeEach(() => {
+    useOutfitsStore.setState({
+      items: [school],
+      acts: DEFAULT_EXPOSE_ACTS,
+      stripOnNude: false,
+      kinds: {}
+    })
+    useCharactersStore.setState({ items: [{ ...card(1, 'blue eyes', true), outfitId: 9 }] })
+  })
+
+  it('turns on only the piece whose area the scene needs', () => {
+    expect(charPrompt('bed, vaginal')).toBe(
+      'blue eyes, pleated skirt, white panties, skirt lift, panties aside'
+    )
+    expect(charPrompt('bed, paizuri')).toBe('blue eyes, pleated skirt, white panties, shirt lift')
+    expect(charPrompt('forest')).toBe('blue eyes, pleated skirt, white panties')
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('no longer appends expose tags on its own', () => {
+    useOutfitsStore.setState({ items: [{ ...school, pieces: [school.pieces[0]] }] })
+    expect(charPrompt('bed, vaginal, paizuri')).toBe('blue eyes, pleated skirt, white panties')
+  })
+
+  it('lets the scene choice override the trigger, and auto=false turns the triggers off', () => {
+    withChoice({ outfitId: 9, off: ['lift'], on: ['open'] })
+    expect(charPrompt('bed, vaginal')).toBe('blue eyes, pleated skirt, white panties, shirt lift')
+    withChoice({ outfitId: 9, auto: false })
+    expect(charPrompt('bed, vaginal, paizuri')).toBe('blue eyes, pleated skirt, white panties')
+  })
+
+  it('reads the tags given to this character only (scene-wide tags go to the target)', () => {
+    useCharactersStore.setState({
+      items: [
+        { ...card(1, 'blue eyes', true), outfitId: 9, role: 'target' },
+        { ...card(2, 'green eyes', true), outfitId: 9, role: 'source' }
+      ]
+    })
+    const [target, source] = buildSceneRequest({
+      ...scene,
+      prompt: 'bed, vaginal'
+    }).characterPrompts
+    expect(target.prompt).toContain('skirt lift, panties aside')
+    expect(source.prompt).not.toContain('skirt lift')
   })
 })

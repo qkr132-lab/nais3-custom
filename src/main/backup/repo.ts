@@ -67,7 +67,7 @@ const SETTINGS_KEYS = [
   'image_format',
   'date_folders',
   'scene_extras',
-  // 복장 — 자동 젖히기 장면 목록, 누드면 옷 벗기기 (커스텀)
+  // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기 (커스텀)
   'outfit_expose_acts',
   'nude_strip_clothes'
 ] as const
