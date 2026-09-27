@@ -1,3 +1,4 @@
+import { removeComments } from './nai-presets'
 import {
   outfitTags,
   splitPromptTokens,
@@ -108,13 +109,26 @@ export function detectGarments(outfitText: string): GarmentRule[] {
   return found
 }
 
+/**
+ * 실제로 보내는 장면 태그만 — 주석(#)은 지우고, 랜덤 선택지 `(a/b)`·와일드카드 토큰은
+ * 무엇이 뽑힐지 모르니 신호로 치지 않는다 (누드 판정과 같은 기준)
+ */
+function liveTagsOf(text: string): string[] {
+  const live = removeComments(text ?? '').replace(/\([^()]+\/[^()]+\)/g, ' ')
+  return splitPromptTokens(live)
+    .filter((t) => !/^-\d*\.?\d+::/.test(t.trim()) && !/[/<>{}|]/.test(t))
+    .flatMap(tokenTags)
+    .map(norm)
+    .filter(Boolean)
+}
+
 /** 어느 부위를 드러내야 하는지 — 처음 걸린 행위 태그를 이유로 함께 */
 export function neededAreas(contexts: string[], acts: ExposeActs): Partial<Record<ExposeArea, string>> {
   const lower = new Set(acts.lower.map(norm))
   const chest = new Set(acts.chest.map(norm))
   const out: Partial<Record<ExposeArea, string>> = {}
   for (const text of contexts) {
-    for (const tag of tagsOf(text)) {
+    for (const tag of liveTagsOf(text)) {
       if (!out.lower && lower.has(tag)) out.lower = tag
       if (!out.chest && chest.has(tag)) out.chest = tag
     }

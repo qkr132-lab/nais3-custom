@@ -52,6 +52,15 @@ describe('nsfw 조각이 켜지는 장면', () => {
     })
   })
 
+  it('주석·랜덤 선택지·와일드카드 안의 행위 태그는 장면으로 치지 않는다', () => {
+    expect(neededAreas(['standing # vaginal'], acts)).toEqual({})
+    expect(neededAreas(['standing\n# alt: sex, paizuri'], acts)).toEqual({})
+    expect(neededAreas(['(vaginal/standing)'], acts)).toEqual({})
+    expect(neededAreas(['<행위>, sex/kiss'], acts)).toEqual({})
+    expect(neededAreas(['-1::sex::, kiss'], acts)).toEqual({})
+    expect(neededAreas(['kiss, 1.2::sex::'], acts)).toEqual({ lower: 'sex' })
+  })
+
   it('더는 젖히는 태그를 몰래 붙이지 않는다', () => {
     expect('autoExposeTags' in autoExpose).toBe(false)
   })
