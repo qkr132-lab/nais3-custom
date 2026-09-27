@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { nudeTrigger, promptTags, stripClothing, undressForNude } from '../src/shared/nude-strip'
-import type { TagKind } from '../src/shared/outfit'
+import {
+  isNudePiece,
+  nudeTrigger,
+  promptTags,
+  stripClothing,
+  undressForNude,
+  undressOutfit,
+  wornOutfitTags
+} from '../src/shared/nude-strip'
+import type { Outfit, TagKind } from '../src/shared/outfit'
 
 /** 테스트용 옷 분류 — 실제 앱은 메인의 태그 자료로 나눈다 */
 const CLOTH = new Set([
@@ -158,6 +166,70 @@ describe('누드면 옷 벗기기', () => {
     })
     expect(r.outfit).toBe('nude, completely nude, pink nipples')
     expect(r.card).toBe('1girl, long hair')
+  })
+})
+
+describe('복장의 nsfw(누드) 조각', () => {
+  const kinds: Record<string, TagKind> = {
+    'military uniform': 'cloth',
+    'black gloves': 'cloth',
+    'combat boots': 'cloth',
+    'hooded cloak': 'cloth',
+    'gas mask': 'cloth',
+    helmet: 'cloth',
+    'witch hat': 'cloth',
+    'black thighhighs': 'cloth',
+    nude: 'bare'
+  }
+  const kind = (t: string): TagKind => kinds[t] ?? 'body'
+  const outfit: Outfit = {
+    id: 7,
+    name: '위장복',
+    negative: '',
+    pieces: [
+      { id: 'a', name: '군복', tags: 'military uniform, black gloves, combat boots', on: true },
+      { id: 'b', name: '위장', tags: 'hooded cloak, gas mask, helmet', on: true },
+      { id: 'c', name: '무기', tags: 'holding rifle', on: true },
+      { id: 'd', name: '누드', tags: 'nude, black thighhighs', on: false }
+    ]
+  }
+
+  it('누드 태그가 든 조각을 알아본다', () => {
+    expect(isNudePiece('nude, black thighhighs')).toBe(true)
+    expect(isNudePiece('completely nude')).toBe(true)
+    expect(isNudePiece('skirt lift')).toBe(false)
+    expect(isNudePiece('# nude')).toBe(false)
+  })
+
+  it('누드 조각을 켜면 다른 조각의 몸 옷만 빼고, 얼굴·머리 장비와 소품은 남긴다', () => {
+    const worn = undressOutfit(outfit, { on: ['d'] }, true, kind)
+    expect(worn).toBe('gas mask, helmet, holding rifle, nude, black thighhighs')
+  })
+
+  it('누드 조각이 꺼져 있거나 설정을 끄면 평소대로', () => {
+    expect(undressOutfit(outfit, undefined, true, kind)).toBe(
+      'military uniform, black gloves, combat boots, hooded cloak, gas mask, helmet, holding rifle'
+    )
+    expect(undressOutfit(outfit, { on: ['d'] }, false, kind)).toContain('military uniform')
+  })
+
+  it('카드 기본 복장에서도 같고, 카드의 옷 태그도 함께 걷어낸다', () => {
+    const outfits = new Map([
+      [7, { ...outfit, pieces: outfit.pieces.map((p) => ({ ...p, on: true })) }]
+    ])
+    const worn = wornOutfitTags(7, undefined, outfits, true, kind)
+    expect(worn).not.toContain('military uniform')
+    const dressed = undressForNude({
+      card: '1girl, witch hat, black thighhighs, long hair',
+      outfit: worn,
+      outfitNegative: '',
+      contexts: ['standing', worn],
+      enabled: true,
+      kindOf: kind
+    })
+    // 모자는 머리 장비라 남고, 스타킹은 카드에서 빠진다 (누드 조각에 적은 스타킹은 복장 쪽에 남음)
+    expect(dressed.card).toBe('1girl, witch hat, long hair')
+    expect(dressed.outfit).toBe(worn)
   })
 })
 

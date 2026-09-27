@@ -1,5 +1,14 @@
 import { commentStart, removeComments } from './nai-presets'
-import { splitPromptTokens, tokenTags, type TagKind } from './outfit'
+import {
+  activePieces,
+  outfitTags,
+  resolveOutfit,
+  splitPromptTokens,
+  tokenTags,
+  type Outfit,
+  type OutfitChoice,
+  type TagKind
+} from './outfit'
 
 /**
  * 누드면 옷 벗기기 (커스텀).
@@ -11,6 +20,10 @@ import { splitPromptTokens, tokenTags, type TagKind } from './outfit'
  *
  * naked towel·naked apron처럼 "naked + 한 가지"는 단보루에서 "그것만 걸친 알몸"이라
  * 같이 본다 — 수건·앞치마는 장면 태그에 있으니 그대로 남는다.
+ *
+ * 복장 안의 누드 조각(상태 조각에 nude를 적어 둔 것)을 켜도 같다 — 그 복장의 다른 조각에서
+ * 몸에 걸친 옷을 빼고, 카드의 옷 태그도 걷어낸다. 벗길 때도 머리·얼굴 장비(모자·두건·헬멧·
+ * 가면·베일·안대·고글·머리 장식)는 남긴다 — 캐릭터의 얼굴을 정하는 설정이라.
  */
 
 const NUDE_TAGS = new Set(['nude', 'completely nude'])
@@ -49,9 +62,10 @@ export function nudeTrigger(contexts: string[]): string | null {
 
 /**
  * 옷으로 분류돼도 벗기지 않는 것 — 머리끈·머리 장식(머리 모양의 일부)과
- * 가면·안대·베일(얼굴을 정하는 캐릭터 설정)
+ * 머리·얼굴 장비(가면·복면·베일·안대·고글·모자·두건·헬멧 — 얼굴을 정하는 캐릭터 설정)
  */
-const KEEP_WHEN_NUDE = /\bhair|scrunchie|kanzashi|headband|(mask|blindfold|eyepatch|veil)$/
+const KEEP_WHEN_NUDE =
+  /\bhair|scrunchie|kanzashi|headband|headdress|headwear|headgear|(mask|blindfold|eyepatch|veil|goggles|glasses|monocle|visor|balaclava|bandana|hood|hat|cap|beret|helmet|crown|tiara|circlet)$/
 
 /**
  * 태그를 걸러낸다 — remove(태그)가 참인 것만 뺀다. 줄 단위로 처리해 줄바꿈을 지키고,
@@ -158,6 +172,48 @@ export function undressForNude(input: {
     outfitNegative: keepOutfit ? outfitNegative : '',
     nude
   }
+}
+
+const pieceTags = (tags: string): string =>
+  tags
+    .trim()
+    .replace(/^,+|,+$/g, '')
+    .trim()
+
+/** 누드 조각인지 — 조각 태그에 nude·completely nude·naked … 가 있음 (화면에 nsfw로 표시) */
+export function isNudePiece(tags: string): boolean {
+  return nudeTrigger([tags]) !== null
+}
+
+/**
+ * 이 복장·선택으로 실제로 입히는 태그 — 켠 조각에 누드 조각이 있으면 누드 조각은 그대로 두고
+ * 나머지 조각에선 몸에 걸친 옷만 뺀다 (머리·얼굴 장비·문장은 남김).
+ * 누드 조각이 없거나 끈 설정이면 평소대로 켠 조각을 모두 입힌다.
+ */
+export function undressOutfit(
+  outfit: Outfit,
+  choice: Pick<OutfitChoice, 'on' | 'off'> | undefined,
+  enabled: boolean,
+  kindOf: (tag: string) => TagKind
+): string {
+  const pieces = activePieces(outfit, choice)
+  if (!enabled || !pieces.some((p) => isNudePiece(p.tags))) return outfitTags(outfit, choice)
+  return pieces
+    .map((p) => pieceTags(isNudePiece(p.tags) ? p.tags : stripClothing(p.tags, kindOf)))
+    .filter(Boolean)
+    .join(', ')
+}
+
+/** 이 캐릭터가 입는 복장의 태그 — 씬 선택 > 카드 기본 복장 (undressOutfit 규칙으로) */
+export function wornOutfitTags(
+  cardOutfitId: number | null | undefined,
+  sceneChoice: OutfitChoice | undefined,
+  outfits: ReadonlyMap<number, Outfit>,
+  enabled: boolean,
+  kindOf: (tag: string) => TagKind
+): string {
+  const r = resolveOutfit(cardOutfitId, sceneChoice, outfits)
+  return r ? undressOutfit(r.outfit, r.choice, enabled, kindOf) : ''
 }
 
 /** 옷 분류를 물어볼 태그들 — 프롬프트 여러 개에서 중복 없이 */

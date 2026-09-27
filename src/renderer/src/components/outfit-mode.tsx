@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Copy, Plus, Shirt, Trash2, X } from 'lucide-react'
 import { newPieceId, outfitTags, type Outfit, type OutfitPiece } from '@shared/outfit'
+import { isNudePiece } from '@shared/nude-strip'
 import { DEFAULT_EXPOSE_ACTS, exposePreview, type ExposeActs } from '@shared/auto-expose'
 import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
@@ -184,14 +185,24 @@ function OutfitEditor({
             className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2"
           >
             <button
-              title={p.on ? '평소에 입음 (씬에서 끄면 벗음)' : '평소엔 꺼짐 (씬에서 켜는 상태)'}
+              title={
+                p.on
+                  ? '평소에 입음 (씬에서 끄면 벗음)'
+                  : isNudePiece(p.tags)
+                    ? 'nsfw — 씬에서 켜면 이 복장의 다른 조각에서 몸의 옷을 빼고 누드로 (머리·얼굴 장비는 남김)'
+                    : '평소엔 꺼짐 (씬에서 켜는 상태)'
+              }
               className={cn(
                 'mt-1 shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors',
-                p.on ? 'bg-emerald-500 text-white' : 'bg-paper text-faint hover:text-muted'
+                p.on
+                  ? 'bg-emerald-500 text-white'
+                  : isNudePiece(p.tags)
+                    ? 'bg-danger/15 text-danger'
+                    : 'bg-paper text-faint hover:text-muted'
               )}
               onClick={() => patchPiece(p.id, { on: !p.on })}
             >
-              {p.on ? '기본' : '상태'}
+              {p.on ? '기본' : isNudePiece(p.tags) ? 'nsfw' : '상태'}
             </button>
             <Input
               className="mt-0.5 h-7 w-32 shrink-0 text-[12px]"

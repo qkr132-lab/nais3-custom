@@ -64,7 +64,9 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
 
   ensureKinds: async (prompts) => {
     const known = get().kinds
-    const missing = promptTags(prompts).filter((t) => !(t in known))
+    // 복장 조각 태그도 함께 — 누드 조각을 켜면 다른 조각의 옷을 가려내야 한다
+    const pieces = get().items.flatMap((o) => o.pieces.map((p) => p.tags))
+    const missing = promptTags([...prompts, ...pieces]).filter((t) => !(t in known))
     if (!missing.length) return
     const { kinds } = await window.nais.invoke('outfits:classifyTags', { tags: missing })
     set({ kinds: { ...get().kinds, ...kinds } })

@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
-import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
+import { resolveOutfitNegative } from '@shared/outfit'
 import { autoExposeTags } from '@shared/auto-expose'
 import {
   appendPrompt,
@@ -20,7 +20,7 @@ import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './chara
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
-import { undressForNude } from '@shared/nude-strip'
+import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import {
   enabledEntries,
   hasAddition,
@@ -283,12 +283,14 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       ]
       // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
       // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
+      // 복장의 누드 조각을 켰으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+      const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf)
       const dressed = undressForNude({
         card: c.prompt,
-        outfit: resolveOutfitTags(c.outfitId, outfitChoice, outfits),
+        outfit: worn,
         outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
         explicitOutfit: !!outfitChoice,
-        contexts: sceneContexts,
+        contexts: [...sceneContexts, worn],
         enabled: stripOnNude,
         kindOf
       })

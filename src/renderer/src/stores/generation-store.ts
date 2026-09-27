@@ -16,10 +16,10 @@ import {
   partnerTagsFor,
   withPartnerTags
 } from '@shared/scene-request'
-import { resolveOutfitNegative, resolveOutfitTags } from '@shared/outfit'
+import { resolveOutfitNegative } from '@shared/outfit'
 import { autoExposeTags } from '@shared/auto-expose'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
-import { undressForNude } from '@shared/nude-strip'
+import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -257,11 +257,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
         partnerTagsFor(c.role, givers, c.id)
       ]
+      // 복장의 누드 조각을 켰으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+      const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf)
       const dressed = undressForNude({
         card: c.prompt,
-        outfit: resolveOutfitTags(c.outfitId, undefined, outfits),
+        outfit: worn,
         outfitNegative: resolveOutfitNegative(c.outfitId, undefined, outfits),
-        contexts,
+        contexts: [...contexts, worn],
         enabled: stripOnNude,
         kindOf
       })

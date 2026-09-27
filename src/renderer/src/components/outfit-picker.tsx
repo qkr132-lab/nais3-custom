@@ -1,5 +1,6 @@
 import type { CharacterCard } from '@shared/types'
-import { activePieces, outfitTags, togglePiece, type OutfitChoice } from '@shared/outfit'
+import { activePieces, togglePiece, type OutfitChoice } from '@shared/outfit'
+import { isNudePiece, undressOutfit } from '@shared/nude-strip'
 import { exposePreview } from '@shared/auto-expose'
 import { cn } from '../lib/utils'
 import { useOutfitsStore } from '../stores/outfits-store'
@@ -21,6 +22,8 @@ export function OutfitPicker({
   onChange: (choice: OutfitChoice | undefined) => void
 }): React.JSX.Element {
   const items = useOutfitsStore((s) => s.items)
+  const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  const kinds = useOutfitsStore((s) => s.kinds)
   const cardOutfit = items.find((o) => o.id === card.outfitId)
   // 고른 복장이 지워졌으면 생성도 카드 기본으로 물러난다 (resolveOutfitTags) — 화면도 같게
   const chosenId = choice?.outfitId
@@ -30,6 +33,10 @@ export function OutfitPicker({
   // 카드 기본 복장을 그대로 입는 중이면 조각 켜고 끈 기록도 없다
   const current: OutfitChoice | undefined = choice ?? (outfit ? { outfitId: outfit.id } : undefined)
   const active = outfit ? new Set(activePieces(outfit, current).map((p) => p.id)) : new Set()
+  // 실제로 붙는 옷 태그 — nsfw(누드) 조각을 켜면 다른 조각의 몸 옷이 빠진 채로 보여준다
+  const worn = outfit
+    ? undressOutfit(outfit, current, stripOnNude, (tag) => kinds[tag] ?? 'unknown')
+    : ''
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -77,17 +84,20 @@ export function OutfitPicker({
                   )}
                   onClick={() => current && onChange(togglePiece(outfit, current, p.id))}
                 >
+                  {isNudePiece(p.tags) && (
+                    <span className="mr-1 font-medium text-danger">nsfw</span>
+                  )}
                   {p.name || p.tags || '(이름 없음)'}
                 </button>
               )
             })}
           </div>
-          <p className="truncate text-[11px] text-faint" title={outfitTags(outfit, current)}>
-            {outfitTags(outfit, current) || '켜진 조각이 없어 옷 태그가 붙지 않습니다'}
+          <p className="truncate text-[11px] text-faint" title={worn}>
+            {worn || '켜진 조각이 없어 옷 태그가 붙지 않습니다'}
           </p>
           {(() => {
             // 옷 입은 채 자동으로 젖히기 — 이 옷이면 장면에 따라 무엇이 붙는지
-            const preview = exposePreview(outfitTags(outfit, current))
+            const preview = exposePreview(worn)
             if (!preview.lower.length && !preview.chest.length) return null
             const autoOn = current?.auto !== false
             return (
