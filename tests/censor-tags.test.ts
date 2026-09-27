@@ -5,6 +5,7 @@ import {
   changeCensors,
   normalizeCensors,
   withCensorTags,
+  withoutCensorDuplicates,
   normalizeAnalSuppression,
   changeAnalSuppression,
   withAnalSuppression
@@ -14,7 +15,16 @@ import {
   sceneNegativePrompt,
   refreshScenePrompts
 } from '../src/shared/scene-request'
-import type { GenerationRequest } from '../src/shared/types'
+import type { CharacterPromptInput, GenerationRequest } from '../src/shared/types'
+
+const ALL = ['penis', 'vulva', 'anal', 'testicles'] as const
+const TAGS =
+  'completely white censored penis, completely white censored pussy, completely white censored anal, completely white censored testicles'
+const char = (prompt: string, enabled = true): CharacterPromptInput => ({
+  prompt,
+  negativePrompt: '',
+  enabled
+})
 
 describe('씬 검열 태그', () => {
   it('loads missing, malformed and duplicated settings safely', () => {
@@ -31,87 +41,107 @@ describe('씬 검열 태그', () => {
     expect(changeCensors(['vulva'], { anal: true })).toEqual(['vulva', 'anal'])
     expect(changeCensors(['penis', 'vulva'], { penis: false })).toEqual(['vulva'])
   })
-  it('preserves supplied weight signs and does not move suppression to negative prompt', () => {
-    expect(censorPrompt(['penis'])).toBe(
-      '2::completely white penis censor::, -2::veiny penis, pink penis, red penis, white skin, pale skin, white nipples::'
-    )
-    expect(censorPrompt(['vulva'])).toBe('2::completely white pussy censor::, -2::white nipples::')
-    expect(censorPrompt(['anal'])).toBe('2::completely white censored anal::')
-    expect(censorPrompt(['testicles'])).toBe(
-      '2::completely white censored testicles::, -2::white skin::'
-    )
+  it('uses the plain tags without weights or suppress tags, in option order', () => {
+    expect(censorPrompt(['penis'])).toBe('completely white censored penis')
+    expect(censorPrompt(['vulva'])).toBe('completely white censored pussy')
+    expect(censorPrompt(['anal'])).toBe('completely white censored anal')
+    expect(censorPrompt(['testicles'])).toBe('completely white censored testicles')
+    expect(censorPrompt(['testicles', 'anal', 'vulva', 'penis'])).toBe(TAGS)
+    expect(censorPrompt([])).toBe('')
+    for (const word of ['::', 'veiny', 'pink penis', 'white skin', 'pale skin', 'white nipples'])
+      expect(censorPrompt(ALL)).not.toContain(word)
   })
   it('replaces older selected censor spellings without changing unselected or scoped tags', () => {
     const original =
       '3::white pussy censor, clouds::, white censored anal, target#white pussy censor'
     const result = withCensorTags(original, ['vulva'])
-    expect(result).toContain('3:: clouds::')
-    expect(result).toContain('2::completely white pussy censor::')
-    expect(result).toContain('white censored anal')
-    expect(result).toContain('target#white pussy censor')
+    expect(result).toBe(
+      '3:: clouds::, white censored anal, target#white pussy censor, completely white censored pussy'
+    )
     expect(withCensorTags(result, ['vulva'])).toBe(result)
     expect(withCensorTags(original, [])).toBe(original)
+  })
+  it('removes old and new spellings of every selected kind so none is sent twice', () => {
+    const typed = [
+      'completely white penis censor',
+      'white penis censor',
+      'white censored penis',
+      'completely white censored penis',
+      '2::completely white pussy censor::',
+      'white pussy censor',
+      'white censored pussy',
+      'white censored anal',
+      'white censored testicles',
+      'sky'
+    ].join(', ')
+    expect(withoutCensorDuplicates(typed, ALL)).toBe('sky')
+    expect(withCensorTags(typed, ALL)).toBe(`sky, ${TAGS}`)
+    // 고르지 않은 부위의 표기는 그대로 둔다
+    expect(withoutCensorDuplicates(typed, ['anal'])).toContain('white penis censor')
+  })
+  it('no longer removes the former suppress tags the user typed', () => {
+    const typed = 'white skin, white nipples, pale skin, veiny penis'
+    expect(withCensorTags(typed, ['penis', 'vulva', 'testicles'])).toBe(
+      `${typed}, completely white censored penis, completely white censored pussy, completely white censored testicles`
+    )
+  })
+  it('puts the tags on a new line after a trailing comment and stays stable', () => {
+    const once = withCensorTags('blue eyes # note', ['penis'])
+    expect(once).toBe('blue eyes # note\ncompletely white censored penis')
+    expect(withCensorTags(once, ['penis'])).toBe(once)
+    expect(withoutCensorDuplicates('forest\nwhite penis censor\nsky', ['penis'])).not.toContain(
+      'censor'
+    )
   })
   for (let mask = 0; mask < 16; mask++) {
     it(`deduplicates combination ${mask} and repeated application`, () => {
       const options = CENSOR_OPTIONS.filter((_, i) => mask & (1 << i)).map((o) => o.id)
       const prompt = withCensorTags('landscape, blue sky', options)
       expect(withCensorTags(prompt, options)).toBe(prompt)
-      if (options.includes('penis') || options.includes('vulva'))
-        expect(prompt.match(/white nipples/g)).toHaveLength(1)
-      if (options.includes('penis') || options.includes('testicles'))
-        expect(prompt.match(/white skin/g)).toHaveLength(1)
+      expect(prompt).not.toContain('::')
+      expect(prompt.endsWith(censorPrompt(options))).toBe(true)
+      for (const o of CENSOR_OPTIONS)
+        expect(prompt.split(o.tag).length - 1).toBe(options.includes(o.id) ? 1 : 0)
     })
   }
-  it('selected controls override duplicates in request copies, preserving unrelated weighted tags', () => {
-    const original = '5::white skin, clouds::, white nipples, target#white skin, sky'
-    const result = withCensorTags(original, ['penis', 'vulva', 'testicles'])
-    expect(result).toContain('5:: clouds::')
-    expect(result).toContain('target#white skin')
-    expect(result).not.toContain('5::white skin')
-    expect(result.match(/white nipples/g)).toHaveLength(1)
-    expect(withCensorTags(original, [])).toBe(original)
-  })
   it('deduplicates across all split fields without changing original input', () => {
     const parts = {
-      base: 'white nipples, sky',
+      base: 'white penis censor, sky',
       additional: 'flowers',
-      detail: '2::white skin, clouds::'
+      detail: '2::completely white pussy censor, clouds::'
     }
     const result = scenePositivePrompt(
       '',
-      { prompt: '-2::white nipples::', censorKinds: ['penis', 'vulva'] },
+      { prompt: 'completely white censored penis', censorKinds: ['penis', 'vulva'] },
       parts
     )
-    expect(result.prompt.match(/white nipples/g)).toHaveLength(1)
-    expect(result.prompt.match(/white skin/g)).toHaveLength(1)
-    expect(parts.base).toBe('white nipples, sky')
-    expect(result.promptParts?.detail).toContain('clouds')
+    expect(result.prompt).toBe(
+      'sky, flowers, completely white censored penis, completely white censored pussy, 2:: clouds::'
+    )
+    expect(parts.base).toBe('white penis censor, sky')
+    expect(result.promptParts?.detail).toBe('2:: clouds::')
   })
-  it('refreshes pending requests and restores original split fields when controls are turned off', () => {
-    const parts = {
-      base: 'white skin, sky',
-      additional: 'flowers',
-      detail: 'white nipples, clouds'
+  it('ignores censor weights saved by older versions', () => {
+    const legacy = {
+      prompt: 'forest',
+      negativePrompt: '',
+      censorKinds: ['penis' as const],
+      censorWeights: { penis: 0.7, suppress: 3 }
     }
-    const scene = { prompt: 'trees', negativePrompt: 'blur', censorKinds: ['penis'] as const }
-    const initial = scenePositivePrompt('', { ...scene, censorKinds: ['penis'] }, parts)
-    const request = {
-      ...initial,
-      sceneId: 3,
-      sceneBasePrompt: 'base',
-      sceneBasePromptParts: parts,
-      sceneBaseAdditionalPrompt: parts.additional,
-      sceneBaseNegativePrompt: 'low quality',
-      seed: 17
-    } as GenerationRequest
-    const off = refreshScenePrompts(request, { ...scene, censorKinds: [] })
-    expect(off.prompt).toBe('white skin, sky, flowers, trees, white nipples, clouds')
-    expect(off.negativePrompt).toBe('low quality, blur')
-    expect(off.seed).toBe(17)
-    const on = refreshScenePrompts(off, { ...scene, censorKinds: ['vulva'] })
-    expect(on.prompt.match(/white nipples/g)).toHaveLength(1)
-    expect(on.prompt).not.toContain('completely white penis censor')
+    expect(scenePositivePrompt('sky', legacy).prompt).toBe(
+      'sky, forest, completely white censored penis'
+    )
+    const refreshed = refreshScenePrompts(
+      {
+        prompt: '',
+        sceneId: 1,
+        sceneBasePrompt: 'sky',
+        characterPrompts: [char('1girl')]
+      } as GenerationRequest,
+      legacy
+    )
+    expect(refreshed.prompt).toBe('sky, forest')
+    expect(refreshed.characterPrompts[0].prompt).toBe('1girl, completely white censored penis')
   })
 })
 
@@ -144,6 +174,30 @@ describe('independent negative-prompt suppression', () => {
     expect(scenePositivePrompt('sky', scene).prompt).toBe('sky, landscape')
     expect(scene.negativePrompt).toBe('blur')
   })
+  it('stays a negative-only option when the censor tags go to character 1', () => {
+    const scene = {
+      prompt: 'landscape',
+      negativePrompt: 'blur',
+      censorKinds: ['anal' as const],
+      suppressAnal: true
+    }
+    const queued = {
+      sceneId: 1,
+      sceneBasePrompt: 'sky',
+      sceneBaseNegativePrompt: 'low quality',
+      prompt: '',
+      negativePrompt: '',
+      characterPrompts: [char('1girl')],
+      seed: 7
+    } as GenerationRequest
+    const on = refreshScenePrompts(queued, scene)
+    expect(on.negativePrompt).toBe('low quality, blur, anal')
+    expect(on.prompt).toBe('sky, landscape')
+    expect(on.characterPrompts).toEqual([char('1girl, completely white censored anal')])
+    const off = refreshScenePrompts(on, { ...scene, suppressAnal: false })
+    expect(off.negativePrompt).toBe('low quality, blur')
+    expect(off.characterPrompts[0].prompt).toBe('1girl, completely white censored anal')
+  })
   it('rebuilds queued negatives on toggle, removing only the generated contribution', () => {
     const scene = { prompt: 'landscape', negativePrompt: 'blur', suppressAnal: true }
     const queued = {
@@ -165,59 +219,5 @@ describe('independent negative-prompt suppression', () => {
       refreshScenePrompts(userAuthored, { ...scene, suppressAnal: false }).negativePrompt
     ).toBe('anal, low quality, blur')
     expect(queued.negativePrompt).toBe('')
-  })
-})
-import { normalizeCensorWeights, changeCensorWeights } from '../src/shared/censor-tags'
-
-describe('adjustable censor weights', () => {
-  it('normalizes legacy defaults, limits and non-finite data', () => {
-    expect(normalizeCensorWeights(undefined)).toEqual({
-      penis: 2,
-      vulva: 2,
-      anal: 2,
-      testicles: 2,
-      suppress: 2
-    })
-    expect(normalizeCensorWeights({ penis: 99, vulva: -1, anal: NaN, suppress: -5 })).toMatchObject(
-      { penis: 5, vulva: 0.1, anal: 2, suppress: 0 }
-    )
-  })
-  it('preserves untouched per-scene weights during batch edits', () => {
-    expect(changeCensorWeights({ penis: 1.2, vulva: 2.3 }, { weights: { anal: 1 } })).toMatchObject(
-      { penis: 1.2, vulva: 2.3, anal: 1 }
-    )
-  })
-  it('applies positive and suppression weights once across duplicate controls', () => {
-    const prompt = censorPrompt(['penis', 'vulva', 'testicles'], {
-      penis: 1.2,
-      vulva: 1.4,
-      testicles: 0.8,
-      suppress: 0.5
-    })
-    expect(prompt).toContain('1.2::completely white penis censor::')
-    expect(prompt).toContain('-0.5::')
-    expect(prompt.match(/white skin/g)).toHaveLength(1)
-    expect(censorPrompt(['penis'], { suppress: 0 })).not.toContain('white skin')
-  })
-  it('updates weights for queued split prompts without changing raw fields', () => {
-    const original = { base: 'sky', additional: 'smile', detail: 'clouds' }
-    const result = refreshScenePrompts(
-      {
-        prompt: '',
-        promptParts: original,
-        sceneBasePromptParts: original,
-        sceneBaseAdditionalPrompt: 'smile',
-        sceneBasePrompt: '',
-        sceneId: 1
-      } as GenerationRequest,
-      {
-        prompt: '',
-        negativePrompt: '',
-        censorKinds: ['anal'],
-        censorWeights: normalizeCensorWeights({ anal: 0.7 })
-      }
-    )
-    expect(result.prompt).toContain('0.7::completely white censored anal::')
-    expect(original.additional).toBe('smile')
   })
 })

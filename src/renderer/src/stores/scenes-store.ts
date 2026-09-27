@@ -393,7 +393,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   }
 
   // 분할 사용 시 씬 프롬프트는 가변 뒤·디테일 앞 (전체 끝에 붙이면 디테일에 묻힘 — 커스텀 수정)
-  const positive = scenePositivePrompt(base.prompt, scene, base.promptParts)
+  // 검열 태그는 첫 캐릭터 끝에 붙는다 (캐릭터가 없으면 기본 프롬프트 끝)
+  const positive = scenePositivePrompt(base.prompt, scene, base.promptParts, characterPrompts)
   const result: GenerationRequest = {
     ...base,
     ...positive,
@@ -405,7 +406,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     variety: scene.varietyPlus ? true : base.variety,
     // 위치 적용 오버라이드 (커스텀) — 큐/씬별 설정 > 씬 역할 위치가 잡혔으면 자동 on > 메인 설정
     useCoords: finalUseCoords,
-    characterPrompts,
+    characterPrompts: positive.characterPrompts ?? characterPrompts,
     vibeIds,
     charRefIds,
     sceneId: scene.id,
@@ -414,6 +415,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     sceneBasePromptParts: base.promptParts,
     sceneBaseNegativePrompt: base.negativePrompt,
     sceneBaseAdditionalPrompt: base.promptParts?.additional,
+    sceneBaseCharacterPrompts: characterPrompts.map((c) => c.prompt),
     // 대기 항목 재구성(생성 중 편집 반영) 시 같은 큐 반복 조합으로 복원하기 위한 스냅샷
     sceneSequenceEntry: entry ?? null,
     source: src
@@ -704,7 +706,6 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
         varietyPlus: patch.varietyPlus,
         background: patch.background,
         censorKinds: patch.censorKinds,
-        censorWeights: patch.censorWeights,
         suppressAnal: patch.suppressAnal,
         sourceTags: patch.sourceTags,
         targetTags: patch.targetTags,

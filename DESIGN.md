@@ -63,13 +63,10 @@ Clicking inserts only on pointer release after a stable
 row identity check. Escape dismisses only the suggestion layer. Ctrl+Space opens
 search/history; user-confirmed insertion retains native undo and an undo toast.
 
-## Censor strength and unified suggestions
-Censor option rows contain a checkbox and a separate labelled native range control,
-with a numeric value (0.1 steps), weak/strong endpoints and existing accent styling.
-Positive ranges 0.1–5; common suppression magnitude 0–3 (rendered as a negative
-weight). Preserve per-scene mixed values until explicitly edited. Use 24px range
-height, 12px labels, 12px padding and existing borders/radii; keep footer visible
-while the settings body scrolls. Reset weights is separate from enabling options.
+## Censor tags and unified suggestions
+Censor option rows contain only a checkbox. Tags are added without weights or
+suppression tags, so there are no strength controls; keep the footer visible
+while the settings body scrolls.
 Tag suggestions use a single list: relevance first, then recent/frequent history,
 deduplicated by canonical tag. Remove the search/recent/frequent tab navigation.
 

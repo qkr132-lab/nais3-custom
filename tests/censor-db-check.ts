@@ -80,32 +80,28 @@ async function main(): Promise<void> {
   assert.deepEqual(getScene(ids[15])?.censorKinds, ['vulva'])
   assert.throws(() => setSceneCensors([ids[0], -999], { anal: true }))
   assert.equal(getScene(ids[0])?.censorKinds?.includes('anal'), false)
-  setSceneCensors([ids[0]], { weights: { penis: 1.2, suppress: 0.4 } })
+  // Weights saved by older versions stay in the column but are never read.
+  db.prepare('UPDATE gen_scenes SET censor_weights = ? WHERE id = ?').run(
+    '{"penis":1.2,"suppress":0.4}',
+    ids[0]
+  )
   setSceneCensors([ids[0]], { suppressAnal: true })
-  setSceneCensors([ids[15]], { weights: { penis: 2.1 } })
-  setSceneCensors([ids[0], ids[15]], { weights: { anal: 0.7 } })
-  assert.equal(getScene(ids[0])?.censorWeights?.penis, 1.2)
-  assert.equal(getScene(ids[15])?.censorWeights?.penis, 2.1)
   assert.equal(getScene(ids[0])?.suppressAnal, true)
   assert.equal(getScene(ids[15])?.suppressAnal, false)
+  assert.equal('censorWeights' in getScene(ids[0])!, false)
   assert.throws(() => setSceneCensors([ids[0], -999], { suppressAnal: false }))
   assert.equal(getScene(ids[0])?.suppressAnal, true)
-  assert.throws(() => setSceneCensors([ids[0], -999], { weights: { penis: 4 } }))
-  assert.equal(getScene(ids[0])?.censorWeights?.penis, 1.2)
   const duplicate = getScene(duplicateScene(ids[0]))
-  assert.equal(duplicate?.censorWeights?.suppress, 0.4)
   assert.equal(duplicate?.suppressAnal, true)
   assert.deepEqual(getScene(duplicateScene(ids[0]))?.censorKinds, ['penis', 'vulva', 'testicles'])
   const copyPreset = duplicatePreset(1)
   assert.equal(listScenes(copyPreset).filter((s) => s.censorKinds?.length).length, 18)
-  assert.equal(listScenes(copyPreset).find((s) => s.name === 'scene-0')?.censorWeights?.penis, 1.2)
   assert.equal(listScenes(copyPreset).find((s) => s.name === 'scene-0')?.suppressAnal, true)
   const dest = createPreset('destination')
   const copied = bulkCopyScenes([ids[0]], dest)
   assert.deepEqual(getScene(copied[0])?.background, background)
   assert.deepEqual(listScenes(copyPreset).find((s) => s.name === 'scene-0')?.background, background)
   assert.deepEqual(getScene(copied[0])?.censorKinds, ['penis', 'vulva', 'testicles'])
-  assert.equal(getScene(copied[0])?.censorWeights?.penis, 1.2)
   assert.equal(getScene(copied[0])?.suppressAnal, true)
   bulkMove([ids[0]], dest)
   deleteScene(ids[0])
@@ -127,11 +123,7 @@ async function main(): Promise<void> {
     listScenes(imported).every((s) => JSON.stringify(s.background) === JSON.stringify(background))
   )
   assert.ok(listScenes(imported).every((s) => s.suppressAnal === true))
-  assert.ok(
-    listScenes(imported).every(
-      (s) => s.censorWeights?.penis === 1.2 && s.censorWeights?.suppress === 0.4
-    )
-  )
+  assert.equal(JSON.parse(readFileSync(exportPath, 'utf8')).scenes[0].censorWeights, undefined)
   assert.deepEqual(
     listScenes(imported).map((s) => s.censorKinds),
     [

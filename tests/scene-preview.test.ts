@@ -94,7 +94,15 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(preview[0].entryId).toBeNull()
     expect(preview[0].request).toEqual(buildSceneRequest(scene))
     expect(preview[0].request.prompt).toContain('sky, clouds, forest')
-    expect(preview[0].request.prompt).toContain('white censored anal')
+    // 검열 태그는 기본 프롬프트가 아니라 캐릭터 1 맨 끝 — 토큰 미리보기도 같은 요청을 센다
+    expect(preview[0].request.prompt).not.toContain('censored')
+    expect(preview[0].request.characterPrompts[0].prompt).toBe(
+      'blue eyes, completely white censored anal'
+    )
+    expect(preparePromptCaptions(preview[0].request).positive.characters).toEqual([
+      'blue eyes, completely white censored anal'
+    ])
+    expect(preview[0].request.sceneBaseCharacterPrompts).toEqual(['blue eyes'])
     expect(preview[0].request.negativePrompt).toBe('low quality, blur, anal')
     expect(scene).toEqual(originalScene)
     expect(useGenerationStore.getState().request).toEqual(originalRequest)
@@ -137,6 +145,38 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(queued.prompt).toContain('transparent background')
   })
 
+  it('puts the censor tags on the first character that is actually sent', () => {
+    useCharactersStore.setState({
+      items: [card(1, '# memo only', true), card(2, 'green eyes', true)]
+    })
+    const request = buildSceneRequest(scene)
+    expect(request.characterPrompts.map((c) => c.prompt)).toEqual([
+      '# memo only',
+      'green eyes, completely white censored anal'
+    ])
+    expect(request.prompt).not.toContain('censored')
+  })
+
+  it('falls back to the end of the base prompt when no character is sent', () => {
+    useCharactersStore.setState({ items: [card(1, 'blue eyes', false)] })
+    const request = buildSceneRequest(scene)
+    expect(request.characterPrompts).toEqual([])
+    expect(request.prompt).toBe('sky, clouds, forest, completely white censored anal, detailed')
+    expect(request.promptParts?.additional).toBe('clouds, forest, completely white censored anal')
+  })
+
+  it('rebuilds character 1 from the saved original when the queue refreshes the scene', async () => {
+    const request = buildSceneRequest(scene)
+    const { refreshScenePrompts } = await import('../src/shared/scene-request')
+    const off = refreshScenePrompts(request, { ...scene, censorKinds: [] })
+    expect(off.characterPrompts[0].prompt).toBe('blue eyes')
+    const on = refreshScenePrompts(off, { ...scene, censorKinds: ['penis', 'anal'] })
+    expect(on.characterPrompts[0].prompt).toBe(
+      'blue eyes, completely white censored penis, completely white censored anal'
+    )
+    expect(on.prompt).toBe(request.prompt)
+  })
+
   it('includes each active queue entry, scene additions, duplicate seats and their role/tag overrides', () => {
     const entries = [
       entry('round A', [2]),
@@ -171,7 +211,7 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(preview.map((item) => item.entryId)).toEqual(['round A', 'round B'])
     expect(preview[0].request).toEqual(buildSceneRequest(scene, entries[0]))
     expect(preview[0].request.characterPrompts.map((character) => character.prompt)).toEqual([
-      'pink hair',
+      'pink hair, completely white censored anal',
       'green eyes, blush, sitting, source#hug',
       'green eyes, blush, standing, target#hug'
     ])
@@ -226,8 +266,9 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       { id: 'open', name: '젖히기(가슴)', tags: 'shirt lift', on: false, when: 'nsfw-chest' }
     ]
   }
+  // 복장 조각만 보려고 검열 태그는 끈다
   const charPrompt = (prompt: string): string =>
-    buildSceneRequest({ ...scene, prompt }).characterPrompts[0].prompt
+    buildSceneRequest({ ...scene, prompt, censorKinds: [] }).characterPrompts[0].prompt
   const withChoice = (choice: OutfitChoice): void =>
     useSceneExtrasStore.setState({
       additionsEnabled: true,

@@ -7,8 +7,7 @@ actual editors with delayed/error search fixtures, usage history and alias edits
 nested placement dialog. Search quality and settings reload are tested separately
 against the shipped dictionary in `tests/tag-search.test.ts`.
 
-Strength/synchronization checks: `node tests/ui/censor-strength-qa.cjs` and
-`node tests/ui/prompt-state-qa.cjs`. The latter renders actual split fields,
+Synchronization check: `node tests/ui/prompt-state-qa.cjs`. It renders actual split fields,
 preset selection and generation stores with in-memory queue/settings adapters;
 all enqueue calls are captured locally and never sent to an image service.
 

@@ -1,65 +1,27 @@
+/**
+ * 씬 검열 태그 (커스텀) — 가중치 없이 첫 캐릭터 프롬프트 맨 끝에 붙인다.
+ * legacy = 예전 버전이 넣던 표기. 프롬프트에 직접 적어 둔 것이 있으면 요청 사본에서 걷어낸다.
+ */
 export const CENSOR_OPTIONS = [
   {
     id: 'penis',
     label: '음경',
-    weight: 2,
-    tag: 'completely white penis censor',
-    suppress: ['veiny penis', 'pink penis', 'red penis', 'white skin', 'pale skin', 'white nipples']
+    tag: 'completely white censored penis',
+    legacy: ['completely white penis censor']
   },
   {
     id: 'vulva',
     label: '외음부',
-    weight: 2,
-    tag: 'completely white pussy censor',
-    suppress: ['white nipples']
+    tag: 'completely white censored pussy',
+    legacy: ['completely white pussy censor']
   },
-  { id: 'anal', label: '항문', weight: 2, tag: 'completely white censored anal', suppress: [] },
-  {
-    id: 'testicles',
-    label: '고환',
-    weight: 2,
-    tag: 'completely white censored testicles',
-    suppress: ['white skin']
-  }
+  { id: 'anal', label: '항문', tag: 'completely white censored anal', legacy: [] },
+  { id: 'testicles', label: '고환', tag: 'completely white censored testicles', legacy: [] }
 ] as const
 
 export type CensorKind = (typeof CENSOR_OPTIONS)[number]['id']
-export type CensorWeights = Record<CensorKind | 'suppress', number>
 export type CensorChanges = Partial<Record<CensorKind, boolean>> & {
-  weights?: Partial<CensorWeights>
   suppressAnal?: boolean
-}
-export const DEFAULT_CENSOR_WEIGHTS: CensorWeights = {
-  penis: 2,
-  vulva: 2,
-  anal: 2,
-  testicles: 2,
-  suppress: 2
-}
-
-export function normalizeCensorWeights(value: unknown): CensorWeights {
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value)
-    } catch {
-      value = null
-    }
-  }
-  const result = { ...DEFAULT_CENSOR_WEIGHTS }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return result
-  for (const key of Object.keys(result) as (keyof CensorWeights)[]) {
-    const v = (value as Record<string, unknown>)[key]
-    if (typeof v === 'number' && Number.isFinite(v))
-      result[key] =
-        Math.round(
-          Math.min(key === 'suppress' ? 3 : 5, Math.max(key === 'suppress' ? 0 : 0.1, v)) * 10
-        ) / 10
-  }
-  return result
-}
-
-export function changeCensorWeights(value: unknown, changes: CensorChanges): CensorWeights {
-  return normalizeCensorWeights({ ...normalizeCensorWeights(value), ...changes.weights })
 }
 
 /** The independent negative-prompt control is opt-in, including for older imports. */
@@ -109,42 +71,46 @@ export function censorLabel(value: unknown): string {
     .join(' · ')
 }
 
-function censorWeights(value: unknown, weights?: unknown): Map<string, number> {
+/** 고른 부위의 태그 — CENSOR_OPTIONS 순서, 가중치 없이 콤마로 잇는다 */
+export function censorPrompt(value: unknown): string {
   const active = normalizeCensors(value)
-  const strength = normalizeCensorWeights(weights)
-  const tags = new Map<string, number>()
-  for (const o of CENSOR_OPTIONS) {
-    if (!active.includes(o.id)) continue
-    tags.set(o.tag, strength[o.id])
-    if (strength.suppress > 0) for (const tag of o.suppress) tags.set(tag, -strength.suppress)
-  }
-  return tags
+  return CENSOR_OPTIONS.filter((o) => active.includes(o.id))
+    .map((o) => o.tag)
+    .join(', ')
 }
 
-export function censorPrompt(value: unknown, weights?: unknown): string {
-  const groups = new Map<number, string[]>()
-  for (const [tag, weight] of censorWeights(value, weights)) {
-    groups.set(weight, [...(groups.get(weight) ?? []), tag])
+/** 고른 부위의 지금 표기와 예전 표기 (completely를 뺀 표기 포함) — 소문자 */
+function censorSpellings(value: unknown): Set<string> {
+  const active = normalizeCensors(value)
+  const spellings = new Set<string>()
+  for (const o of CENSOR_OPTIONS) {
+    if (!active.includes(o.id)) continue
+    for (const tag of [o.tag, ...o.legacy]) {
+      spellings.add(tag)
+      if (tag.startsWith('completely ')) spellings.add(tag.slice('completely '.length))
+    }
   }
-  return [...groups].map(([weight, tags]) => `${weight}::${tags.join(', ')}::`).join(', ')
+  return spellings
 }
 
 /** Remove only selected control tags from plain/flat numeric tag groups.
  * Other content (including role-qualified tags) stays in its original scope.
  * This runs on request copies; user-authored prompt fields are never rewritten.
  */
-export function withoutCensorDuplicates(prompt: string, value: unknown, weights?: unknown): string {
-  const tags = censorWeights(value, weights)
+export function withoutCensorDuplicates(prompt: string, value: unknown): string {
+  const tags = censorSpellings(value)
   if (!tags.size) return prompt
-  // Selected controls replace their older spelling in request copies as well.
-  for (const [tag, weight] of tags) {
-    if (tag.startsWith('completely ')) tags.set(tag.slice('completely '.length), weight)
-  }
+  // 줄 단위로도 나눈다 — 주석 뒤에 줄을 바꿔 붙인 태그도 한 태그로 본다
   const strip = (text: string): string =>
     text
-      .split(',')
-      .filter((t) => !tags.has(t.trim().toLowerCase()))
-      .join(',')
+      .split('\n')
+      .map((line) =>
+        line
+          .split(',')
+          .filter((t) => !tags.has(t.trim().toLowerCase()))
+          .join(',')
+      )
+      .join('\n')
   const chunks: string[] = []
   const weighted = /(-?\d+(?:\.\d+)?)::([\s\S]*?)::/g
   let at = 0
@@ -162,10 +128,11 @@ export function withoutCensorDuplicates(prompt: string, value: unknown, weights?
     .trim()
 }
 
-export function withCensorTags(prompt: string, value: unknown, weights?: unknown): string {
-  const extra = censorPrompt(value, weights)
+/** 프롬프트 맨 끝에 검열 태그를 붙인다. 마지막 줄이 주석이면 줄을 바꿔 붙인다 */
+export function withCensorTags(prompt: string, value: unknown): string {
+  const extra = censorPrompt(value)
   if (!extra) return prompt
-  const clean = withoutCensorDuplicates(prompt, value, weights)
+  const clean = withoutCensorDuplicates(prompt, value)
   return clean
     ? `${clean}${commentStart(clean.slice(clean.lastIndexOf('\n') + 1)) !== -1 ? '\n' : ', '}${extra}`
     : extra

@@ -134,6 +134,9 @@ export interface GenerationRequest {
   sceneBaseAdditionalPrompt?: string
   /** Original split fields, before generation-time censor normalization. */
   sceneBasePromptParts?: PromptParts
+  /** 검열 태그를 붙이기 전 캐릭터 프롬프트 (characterPrompts와 같은 순서).
+   *  실행 직전 최신 검열 설정으로 다시 붙인다 */
+  sceneBaseCharacterPrompts?: string[]
   /** 지정 시 enabled 대신 이 id들의 바이브를 사용 (빈 배열 = 바이브 미적용). 씬 큐 반복/씬별 추가용 */
   vibeIds?: number[]
   /** 지정 시 enabled 대신 이 id들의 캐릭레퍼를 사용 (빈 배열 = 미적용). 씬 큐 반복/씬별 추가용 */
@@ -461,7 +464,6 @@ export interface Scene {
   background?: import('./background-tags').SceneBackground
   /** Separate generation-time censor controls. Missing in older exports = off. */
   censorKinds?: import('./censor-tags').CensorKind[]
-  censorWeights?: import('./censor-tags').CensorWeights
   /** Independent negative-prompt suppression. Missing in older scenes = off. */
   suppressAnal?: boolean
   id: number
@@ -832,7 +834,6 @@ export interface IpcInvokeMap {
           | 'exportNo'
           | 'background'
           | 'censorKinds'
-          | 'censorWeights'
           | 'suppressAnal'
         >
       >
@@ -847,7 +848,6 @@ export interface IpcInvokeMap {
       items: {
         id: number
         censorKinds: import('./censor-tags').CensorKind[]
-        censorWeights: import('./censor-tags').CensorWeights
         suppressAnal: boolean
       }[]
     }

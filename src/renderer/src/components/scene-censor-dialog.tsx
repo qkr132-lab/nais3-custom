@@ -6,11 +6,8 @@ import {
   censorLabel,
   censorPrompt,
   changeCensors,
-  changeCensorWeights,
   changeAnalSuppression,
   normalizeAnalSuppression,
-  DEFAULT_CENSOR_WEIGHTS,
-  type CensorWeights,
   type CensorChanges
 } from '@shared/censor-tags'
 import { useScenesStore } from '../stores/scenes-store'
@@ -75,68 +72,13 @@ export function SceneCensorDialog({
   ).length
   const suppressionMixed = suppressionCount > 0 && suppressionCount < n
   const previews = [
-    ...new Set(
-      scenes.map((s) =>
-        censorPrompt(
-          changeCensors(s.censorKinds, changes),
-          changeCensorWeights(s.censorWeights, changes)
-        )
-      )
-    )
+    ...new Set(scenes.map((s) => censorPrompt(changeCensors(s.censorKinds, changes))))
   ]
   const setAll = (value: boolean): void =>
     setChanges((prev) => ({
       ...prev,
       ...Object.fromEntries(CENSOR_OPTIONS.map((o) => [o.id, value]))
     }))
-
-  const weightControl = (
-    key: keyof CensorWeights,
-    label: string,
-    disabled = false
-  ): React.JSX.Element => {
-    const values = scenes.map((s) => changeCensorWeights(s.censorWeights, changes)[key])
-    const mixed = new Set(values).size > 1
-    const value = mixed ? DEFAULT_CENSOR_WEIGHTS[key] : (values[0] ?? DEFAULT_CENSOR_WEIGHTS[key])
-    const suppress = key === 'suppress'
-    return (
-      <div className="space-y-1.5">
-        <label
-          className="flex items-center justify-between gap-2 text-[12px]"
-          htmlFor={`censor-weight-${key}`}
-        >
-          <span className="text-muted">{label}</span>
-          <span className="font-mono text-accent">
-            {mixed ? '서로 다름' : `${suppress && value ? '−' : ''}${value.toFixed(1)}`}
-          </span>
-        </label>
-        <input
-          id={`censor-weight-${key}`}
-          type="range"
-          min={suppress ? 0 : 0.1}
-          max={suppress ? 3 : 5}
-          step={0.1}
-          aria-label={label}
-          aria-valuetext={
-            mixed ? '씬마다 다름, 조절하면 같은 값으로 적용' : `${suppress ? -value : value}`
-          }
-          value={value}
-          disabled={disabled || saving || !n}
-          className="h-6 w-full cursor-pointer accent-accent disabled:cursor-default disabled:opacity-40"
-          onChange={(e) =>
-            setChanges((prev) => ({
-              ...prev,
-              weights: { ...prev.weights, [key]: Number(e.target.value) }
-            }))
-          }
-        />
-        <div className="flex justify-between text-[11px] text-muted">
-          <span>{suppress ? '억제 없음' : '약하게'}</span>
-          <span>{suppress ? '강하게 억제' : '강하게'}</span>
-        </div>
-      </div>
-    )
-  }
 
   async function apply(): Promise<void> {
     setSaving(true)
@@ -211,7 +153,7 @@ export function SceneCensorDialog({
                 <div
                   key={o.id}
                   className={cn(
-                    'space-y-3 rounded-lg border p-3 text-[13px] focus-within:ring-2 focus-within:ring-accent',
+                    'rounded-lg border p-3 text-[13px] focus-within:ring-2 focus-within:ring-accent',
                     count ? 'border-accent/40 bg-accent-soft' : 'border-line bg-paper',
                     saving && 'pointer-events-none opacity-50'
                   )}
@@ -235,7 +177,6 @@ export function SceneCensorDialog({
                       {mixed ? `일부 적용 ${count}/${n}` : checked ? '적용' : '미적용'}
                     </span>
                   </label>
-                  {count > 0 && weightControl(o.id, `${o.label} 검열 강도`)}
                 </div>
               )
             })}
@@ -277,25 +218,10 @@ export function SceneCensorDialog({
               수 있어요.
             </p>
           </div>
-          <div className="space-y-3 rounded-lg border border-line p-3">
-            {weightControl('suppress', '보정 태그 억제 강도')}
-            <p className="text-[11px] leading-relaxed text-muted">
-              색상·혈관 등 함께 넣는 보정 태그의 음수 가중치예요. 0이면 보정 태그를 추가하지 않아요.
-            </p>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={saving || !n}
-              onClick={() =>
-                setChanges((prev) => ({ ...prev, weights: { ...DEFAULT_CENSOR_WEIGHTS } }))
-              }
-            >
-              가중치 기본값 복원
-            </Button>
-          </div>
           <p className="text-[12px] leading-relaxed text-muted">
             {n > 1 && '바꾸지 않은 항목은 씬별 설정을 유지해요. '}
-            생성할 때 태그를 추가하며, 기존 이미지는 바뀌지 않아요.
+            생성할 때 첫 캐릭터 프롬프트 끝에 태그를 붙여요. 캐릭터가 없으면 기본 프롬프트 끝에
+            붙여요. 기존 이미지는 바뀌지 않아요.
           </p>
           <details className="rounded-md border border-line p-3 text-[12px]">
             <summary className="cursor-pointer text-muted">

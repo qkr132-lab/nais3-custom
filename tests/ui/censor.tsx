@@ -4,11 +4,7 @@ import { PageNav } from '../../src/renderer/src/components/page-nav'
 import { useLayoutStore } from '../../src/renderer/src/stores/layout-store'
 import { useCharactersStore } from '../../src/renderer/src/stores/characters-store'
 import { useVibesStore, useCharRefsStore } from '../../src/renderer/src/stores/refs-store'
-import {
-  changeCensors,
-  changeCensorWeights,
-  changeAnalSuppression
-} from '../../src/shared/censor-tags'
+import { changeCensors, changeAnalSuppression } from '../../src/shared/censor-tags'
 import { SceneMode } from '../../src/renderer/src/components/scene-mode'
 import { TooltipProvider } from '../../src/renderer/src/components/ui/tooltip'
 import { useScenesStore } from '../../src/renderer/src/stores/scenes-store'
@@ -188,7 +184,6 @@ window.nais = {
             ? {
                 ...s,
                 censorKinds: changeCensors(s.censorKinds, changes),
-                censorWeights: changeCensorWeights(s.censorWeights, changes),
                 suppressAnal: changeAnalSuppression(s.suppressAnal, changes)
               }
             : s
@@ -197,12 +192,7 @@ window.nais = {
         result = {
           items: records
             .filter((s) => ids.includes(s.id))
-            .map(({ id, censorKinds, censorWeights, suppressAnal }) => ({
-              id,
-              censorKinds,
-              censorWeights,
-              suppressAnal
-            }))
+            .map(({ id, censorKinds, suppressAnal }) => ({ id, censorKinds, suppressAnal }))
         }
         break
       }

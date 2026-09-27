@@ -3,15 +3,22 @@ import {
   stripSimpleBackgrounds,
   type SceneBackground
 } from './background-tags'
-import type { CharRole, GenerationRequest, PromptParts } from './types'
-import { commentStart } from './nai-presets'
+import type { CharacterPromptInput, CharRole, GenerationRequest, PromptParts } from './types'
+import { commentStart, removeComments } from './nai-presets'
 import {
   withCensorTags,
   withoutCensorDuplicates,
   withAnalSuppression,
-  type CensorKind,
-  type CensorWeights
+  type CensorKind
 } from './censor-tags'
+
+/**
+ * 검열 태그를 붙일 캐릭터 — 요청에 실제로 들어가는 첫 캐릭터 (꺼졌거나 주석뿐인 칸은 건너뜀).
+ * 전송 직전 걸러내는 규칙(preparePromptCaptions)과 같아야 한다. 없으면 -1
+ */
+export function censorCharacterIndex(characters: { prompt: string; enabled: boolean }[]): number {
+  return characters.findIndex((c) => c.enabled && removeComments(c.prompt).trim())
+}
 
 export function scenePositivePrompt(
   base: string,
@@ -20,10 +27,11 @@ export function scenePositivePrompt(
     kind?: 'scene' | 'background'
     background?: SceneBackground
     censorKinds?: CensorKind[]
-    censorWeights?: CensorWeights
   },
-  parts?: PromptParts
-): { prompt: string; promptParts?: PromptParts } {
+  parts?: PromptParts,
+  /** 검열 태그 전 캐릭터 프롬프트. 주면 첫 캐릭터 끝에 검열 태그를 붙여 돌려준다 */
+  characters?: CharacterPromptInput[]
+): { prompt: string; promptParts?: PromptParts; characterPrompts?: CharacterPromptInput[] } {
   const background = normalizeBackground(scene.background)
   // A background card's prompt is the background itself, with no scene action tags.
   if (scene.kind === 'background') background.prompt = scene.prompt
@@ -34,24 +42,34 @@ export function scenePositivePrompt(
     background.placement === 'before-scene'
       ? appendPrompt(background.prompt, clean(actionPrompt))
       : appendPrompt(clean(actionPrompt), background.prompt)
-  if (!parts)
-    return {
-      prompt: withCensorTags(
-        appendPrompt(clean(base), scenePrompt),
-        scene.censorKinds,
-        scene.censorWeights
-      )
-    }
+  // 검열 태그는 첫 캐릭터 맨 끝에 붙이고, 캐릭터가 없을 때만 기본 프롬프트 끝(예전 자리)에 붙인다.
+  // 어느 쪽이든 기본 프롬프트에 적힌 같은 태그(예전 표기 포함)는 요청 사본에서 걷어낸다
+  const kinds = scene.censorKinds
+  const target = characters ? censorCharacterIndex(characters) : -1
+  const tagged = (value: string): string =>
+    target < 0 ? withCensorTags(value, kinds) : withoutCensorDuplicates(value, kinds)
+  const withCharacters = <T extends { prompt: string; promptParts?: PromptParts }>(
+    result: T
+  ): T & { characterPrompts?: CharacterPromptInput[] } =>
+    characters
+      ? {
+          ...result,
+          characterPrompts: characters.map((c, i) =>
+            i === target ? { ...c, prompt: withCensorTags(c.prompt, kinds) } : c
+          )
+        }
+      : result
+  if (!parts) return withCharacters({ prompt: tagged(appendPrompt(clean(base), scenePrompt)) })
   const merged = mergeSceneIntoPromptParts(
     { base: clean(parts.base), additional: clean(parts.additional), detail: clean(parts.detail) },
     scenePrompt
   )
   const result = {
-    base: withoutCensorDuplicates(merged.base, scene.censorKinds, scene.censorWeights),
-    additional: withCensorTags(merged.additional, scene.censorKinds, scene.censorWeights),
-    detail: withoutCensorDuplicates(merged.detail, scene.censorKinds, scene.censorWeights)
+    base: withoutCensorDuplicates(merged.base, kinds),
+    additional: tagged(merged.additional),
+    detail: withoutCensorDuplicates(merged.detail, kinds)
   }
-  return { prompt: mergePromptParts(result), promptParts: result }
+  return withCharacters({ prompt: mergePromptParts(result), promptParts: result })
 }
 
 /** 기본 프롬프트 뒤에 씬 프롬프트를 붙이되 경계의 중복 콤마만 정리한다. */
@@ -323,27 +341,45 @@ export function refreshScenePrompts(
     background?: SceneBackground
     negativePrompt: string
     censorKinds?: CensorKind[]
-    censorWeights?: CensorWeights
     suppressAnal?: boolean
   }
 ): GenerationRequest {
   if (request.sceneId == null || request.sceneBasePrompt == null) return request
 
   const negativePrompt = sceneNegativePrompt(request.sceneBaseNegativePrompt ?? '', latestScene)
+  // 검열 태그 전 캐릭터 프롬프트로 되돌린 뒤 최신 검열 설정으로 다시 붙인다.
+  // 원문이 없는 항목(이 필드가 생기기 전 예약)은 캐릭터에 검열 태그가 붙은 적이 없어 그대로 쓴다
+  const chars = Array.isArray(request.characterPrompts) ? request.characterPrompts : undefined
+  const texts = request.sceneBaseCharacterPrompts
+  const characters =
+    chars && texts?.length === chars.length
+      ? chars.map((c, i) => ({ ...c, prompt: texts[i] }))
+      : chars
+  // 다시 최신화해도 같은 원문에서 시작하도록 원문을 함께 넘긴다
+  const baseCharacters = characters
+    ? { sceneBaseCharacterPrompts: characters.map((c) => c.prompt) }
+    : {}
 
   // 분할 사용 시: 씬 프롬프트를 가변 뒤·디테일 앞에 끼워 전송 프롬프트를 파츠에서 재조립.
   // (전체 병합문 끝에 붙이면 디테일 뒤 꼬리가 되어 긴 디테일에 묻힌다 — 적용 약해지던 버그)
   if (request.promptParts && request.sceneBaseAdditionalPrompt != null) {
-    const positive = scenePositivePrompt(request.sceneBasePrompt, latestScene, {
-      ...(request.sceneBasePromptParts ?? request.promptParts),
-      additional: request.sceneBaseAdditionalPrompt
-    })
-    return { ...request, ...positive, negativePrompt }
+    const positive = scenePositivePrompt(
+      request.sceneBasePrompt,
+      latestScene,
+      {
+        ...(request.sceneBasePromptParts ?? request.promptParts),
+        additional: request.sceneBaseAdditionalPrompt
+      },
+      characters
+    )
+    return { ...request, ...positive, ...baseCharacters, negativePrompt }
   }
 
+  const positive = scenePositivePrompt(request.sceneBasePrompt, latestScene, undefined, characters)
   return {
     ...request,
-    prompt: scenePositivePrompt(request.sceneBasePrompt, latestScene).prompt,
+    ...positive,
+    ...baseCharacters,
     negativePrompt,
     promptParts: request.promptParts
   }

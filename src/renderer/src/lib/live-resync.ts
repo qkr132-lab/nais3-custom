@@ -48,8 +48,7 @@ export function initLiveResync(): void {
           old &&
           (scene.prompt !== old.prompt ||
             scene.negativePrompt !== old.negativePrompt ||
-            JSON.stringify(scene.censorKinds) !== JSON.stringify(old.censorKinds) ||
-            JSON.stringify(scene.censorWeights) !== JSON.stringify(old.censorWeights))
+            JSON.stringify(scene.censorKinds) !== JSON.stringify(old.censorKinds))
         )
       })
     )
