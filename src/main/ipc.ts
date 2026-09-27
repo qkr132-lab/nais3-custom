@@ -94,6 +94,9 @@ import {
   createPreset,
   renamePreset,
   deletePreset,
+  listTrashedPresets,
+  restorePreset,
+  purgePreset,
   reorderPresets,
   setPresetDefaultResolution,
   listScenes,
@@ -137,6 +140,7 @@ import {
   reorderPromptPresets
 } from './prompts/repo'
 import { exportAll, importAll } from './backup/repo'
+import { importBackupPresets, listBackupFiles, listBackupPresets } from './backup/preset-import'
 import {
   createOutfit,
   deleteOutfit,
@@ -290,6 +294,15 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     deletePreset(id)
     scheduleSync(id)
   })
+  handle('scenePresets:trash', (req) => ({ items: listTrashedPresets(req?.kind) }))
+  handle('scenePresets:restore', ({ id }) => {
+    restorePreset(id)
+    scheduleSync(id)
+  })
+  handle('scenePresets:purge', async ({ id }) => {
+    await purgePreset(id)
+    scheduleSync(id)
+  })
   handle('scenePresets:reorder', ({ ids }) => {
     reorderPresets(ids)
   })
@@ -384,6 +397,28 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('backup:now', () => ({ path: backupNow() }))
   handle('backup:info', () => backupInfo())
+  // 백업에서 프리셋 가져오기 (커스텀) — 렌더러는 파일 이름만 넘기고, 경로는 백업 폴더 안으로 한정
+  const backupsDir = (): string => join(app.getPath('userData'), 'backups')
+  const backupFile = (name: string): string => {
+    if (typeof name !== 'string' || !name.endsWith('.db') || basename(name) !== name)
+      throw new Error('백업 파일 이름이 올바르지 않습니다')
+    return join(backupsDir(), name)
+  }
+  handle('backup:files', () => ({ items: listBackupFiles(backupsDir()) }))
+  handle('backup:presets', ({ name }) => {
+    try {
+      return { items: listBackupPresets(backupFile(name)) }
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+  handle('backup:importPresets', ({ name, presetIds }) => {
+    try {
+      return importBackupPresets(backupFile(name), presetIds)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  })
 
   // 웹 모드 프록시 (커스텀 — 단보루 등 우회). persist:webmode 세션에만 적용
   handle('web:setProxy', async ({ rules }) => {

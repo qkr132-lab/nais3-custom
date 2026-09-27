@@ -109,12 +109,13 @@ function toScene(
 }
 
 // ── 프리셋 ──────────────────────────────────────────────
+/** 살아 있는 프리셋 목록. 휴지통 프리셋은 제외 */
 export function listPresets(kind: 'scene' | 'background' = 'scene'): ScenePreset[] {
   return getDb()
     .prepare(
       `SELECT id, name, kind, default_width AS defaultWidth, default_height AS defaultHeight,
               (SELECT COUNT(*) FROM gen_scenes WHERE preset_id = scene_presets.id AND deleted_at IS NULL) AS sceneCount
-       FROM scene_presets WHERE kind = ? ORDER BY sort_order, id`
+       FROM scene_presets WHERE kind = ? AND deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all(kind) as ScenePreset[]
 }
@@ -142,21 +143,88 @@ export function renamePreset(id: number, name: string): void {
   getDb().prepare('UPDATE scene_presets SET name = ? WHERE id = ?').run(name, id)
 }
 
-/** 프리셋 삭제 — 마지막 하나는 못 지움. 안의 씬도 함께 삭제(이미지는 scene_id만 끊김) */
+/**
+ * 프리셋 삭제 = 소프트삭제(휴지통으로, 커스텀). 같은 종류의 마지막 살아 있는 프리셋은 못 지움.
+ * 안의 살아 있는 씬에도 같은 시각을 찍는다 — 복원 때 그 시각이 같은 씬만 함께 돌아온다
+ * (먼저 따로 지운 씬은 씬 휴지통 몫). 시각은 밀리초까지 — 초 단위인 씬 삭제 시각과 겹치지 않게.
+ */
 export function deletePreset(id: number): void {
   const db = getDb()
+  const preset = db
+    .prepare('SELECT kind FROM scene_presets WHERE id = ? AND deleted_at IS NULL')
+    .get(id) as { kind: string } | undefined
+  if (!preset) return
   const count = (
     db
-      .prepare(
-        'SELECT COUNT(*) AS c FROM scene_presets WHERE kind = (SELECT kind FROM scene_presets WHERE id = ?)'
-      )
-      .get(id) as { c: number }
+      .prepare('SELECT COUNT(*) AS c FROM scene_presets WHERE kind = ? AND deleted_at IS NULL')
+      .get(preset.kind) as { c: number }
   ).c
   if (count <= 1) return
+  const at = (db.prepare("SELECT strftime('%Y-%m-%d %H:%M:%f', 'now') AS t").get() as { t: string })
+    .t
   db.transaction(() => {
-    db.prepare('DELETE FROM gen_scenes WHERE preset_id = ?').run(id)
+    db.prepare(
+      'UPDATE gen_scenes SET deleted_at = ? WHERE preset_id = ? AND deleted_at IS NULL'
+    ).run(at, id)
+    db.prepare('UPDATE scene_presets SET deleted_at = ? WHERE id = ?').run(at, id)
+  })()
+}
+
+/** 휴지통 프리셋 목록 — 최근 삭제 순. sceneCount = 복원하면 함께 돌아올 씬 수 */
+export function listTrashedPresets(
+  kind: 'scene' | 'background' = 'scene'
+): (ScenePreset & { deletedAt: string })[] {
+  return getDb()
+    .prepare(
+      `SELECT id, name, kind, default_width AS defaultWidth, default_height AS defaultHeight,
+              deleted_at AS deletedAt,
+              (SELECT COUNT(*) FROM gen_scenes WHERE preset_id = scene_presets.id AND deleted_at = scene_presets.deleted_at) AS sceneCount
+       FROM scene_presets WHERE kind = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`
+    )
+    .all(kind) as (ScenePreset & { deletedAt: string })[]
+}
+
+/** 휴지통 프리셋 복원 — 프리셋과 함께 지운 씬만 되살린다 */
+export function restorePreset(id: number): void {
+  const db = getDb()
+  const row = db.prepare('SELECT deleted_at FROM scene_presets WHERE id = ?').get(id) as
+    { deleted_at: string | null } | undefined
+  if (!row?.deleted_at) return
+  db.transaction(() => {
+    db.prepare(
+      'UPDATE gen_scenes SET deleted_at = NULL WHERE preset_id = ? AND deleted_at = ?'
+    ).run(id, row.deleted_at)
+    db.prepare('UPDATE scene_presets SET deleted_at = NULL WHERE id = ?').run(id)
+  })()
+}
+
+/**
+ * 휴지통 프리셋 영구 삭제. 함께 지운 씬은 예전 프리셋 삭제처럼 씬만 지우고
+ * 이미지는 scene_id만 끊어 기록에 남긴다(즐겨찾기 포함).
+ * 먼저 따로 지운 씬은 씬 휴지통과 같게 이미지까지 지운다(파일은 OS 휴지통으로)
+ */
+export async function purgePreset(id: number): Promise<void> {
+  const db = getDb()
+  const row = db
+    .prepare('SELECT deleted_at FROM scene_presets WHERE id = ? AND deleted_at IS NOT NULL')
+    .get(id) as { deleted_at: string } | undefined
+  if (!row) return
+  const separate = (
+    db
+      .prepare(
+        'SELECT id FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NOT NULL AND deleted_at <> ?'
+      )
+      .all(id, row.deleted_at) as { id: number }[]
+  ).map((r) => r.id)
+  const together = 'preset_id = ? AND (deleted_at IS NULL OR deleted_at = ?)'
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE images SET scene_id = NULL WHERE scene_id IN (SELECT id FROM gen_scenes WHERE ${together})`
+    ).run(id, row.deleted_at)
+    db.prepare(`DELETE FROM gen_scenes WHERE ${together}`).run(id, row.deleted_at)
     db.prepare('DELETE FROM scene_presets WHERE id = ?').run(id)
   })()
+  await purgeScenes(separate)
 }
 
 // ── 씬 ──────────────────────────────────────────────────
@@ -178,7 +246,8 @@ export function listScenes(presetId: number): Scene[] {
   return rows.map(toScene)
 }
 
-/** 휴지통에 있는(소프트삭제된) 씬 목록 — 최근 삭제 순. 프리셋 무관 전체 */
+/** 휴지통에 있는(소프트삭제된) 씬 목록 — 최근 삭제 순. 프리셋 무관 전체.
+ *  휴지통 프리셋의 씬은 프리셋 항목으로만 보인다 (여기선 제외) */
 export function listTrashedScenes(
   kind: 'scene' | 'background' = 'scene'
 ): (Scene & { deletedAt: string; presetName: string })[] {
@@ -190,7 +259,9 @@ export function listTrashedScenes(
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
-       FROM gen_scenes s WHERE s.deleted_at IS NOT NULL AND (SELECT kind FROM scene_presets WHERE id = s.preset_id) = ? ORDER BY s.deleted_at DESC`
+       FROM gen_scenes s WHERE s.deleted_at IS NOT NULL AND (SELECT kind FROM scene_presets WHERE id = s.preset_id) = ?
+         AND (SELECT deleted_at FROM scene_presets WHERE id = s.preset_id) IS NULL
+       ORDER BY s.deleted_at DESC`
     )
     .all(kind) as (Row & {
     deleted_at: string
@@ -206,22 +277,32 @@ export function listTrashedScenes(
   }))
 }
 
-/** 소프트삭제된 씬 복원 (deleted_at 해제). 프리셋이 지워졌으면 첫 프리셋으로 */
+/** 소프트삭제된 씬 복원 (deleted_at 해제). 프리셋이 지워졌거나 휴지통에 있으면
+ *  같은 종류의 첫 프리셋으로 (프리셋 행이 아예 없으면 아무 첫 프리셋) */
 export function restoreScenes(ids: number[]): void {
   if (ids.length === 0) return
   const db = getDb()
-  const firstPreset = (
-    db.prepare('SELECT id FROM scene_presets ORDER BY sort_order, id LIMIT 1').get() as
-      { id: number } | undefined
-  )?.id
   const tx = db.transaction(() => {
     for (const id of ids) {
       const row = db.prepare('SELECT preset_id FROM gen_scenes WHERE id = ?').get(id) as
         { preset_id: number } | undefined
       if (!row) continue
-      const presetExists = db.prepare('SELECT 1 FROM scene_presets WHERE id = ?').get(row.preset_id)
+      const presetAlive = db
+        .prepare('SELECT 1 FROM scene_presets WHERE id = ? AND deleted_at IS NULL')
+        .get(row.preset_id)
+      const firstPreset = presetAlive
+        ? undefined
+        : (
+            db
+              .prepare(
+                `SELECT id FROM scene_presets WHERE deleted_at IS NULL
+                   AND kind = COALESCE((SELECT kind FROM scene_presets WHERE id = ?), kind)
+                 ORDER BY sort_order, id LIMIT 1`
+              )
+              .get(row.preset_id) as { id: number } | undefined
+          )?.id
       db.prepare('UPDATE gen_scenes SET deleted_at = NULL, preset_id = ? WHERE id = ?').run(
-        presetExists ? row.preset_id : (firstPreset ?? row.preset_id),
+        presetAlive ? row.preset_id : (firstPreset ?? row.preset_id),
         id
       )
     }
@@ -241,13 +322,20 @@ export async function purgeScenes(ids: number[]): Promise<void> {
   for (const r of imgRows) await trashFile(r.file_path)
 }
 
-/** 보관 기간 지난 휴지통 씬 자동 영구 삭제 (앱 시작 시 호출).
+/** 보관 기간 지난 휴지통 프리셋·씬 자동 영구 삭제 (앱 시작 시 호출).
  *  기간은 설정 trash_retention_days (기본 30, 0 = 무제한 보관) */
 export async function purgeOldTrash(): Promise<void> {
   const raw = Number(getSetting('trash_retention_days') ?? '30')
   const days = Number.isFinite(raw) ? raw : 30
   if (days <= 0) return // 무제한 보관
-  const rows = getDb()
+  const db = getDb()
+  const presets = db
+    .prepare(
+      `SELECT id FROM scene_presets WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
+    )
+    .all(`-${days} days`) as { id: number }[]
+  for (const p of presets) await purgePreset(p.id)
+  const rows = db
     .prepare(
       `SELECT id FROM gen_scenes WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', ?)`
     )

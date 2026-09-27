@@ -145,9 +145,12 @@ export async function exportCharacterBackup(includeThumbnails: boolean): Promise
 
   // 씬별 캐릭터 추가 — presetId/sceneId를 이름으로 바꿔 적는다
   const presetName = new Map(
-    (db.prepare('SELECT id, name FROM scene_presets').all() as { id: number; name: string }[]).map(
-      (p) => [p.id, p.name]
-    )
+    (
+      db.prepare('SELECT id, name FROM scene_presets WHERE deleted_at IS NULL').all() as {
+        id: number
+        name: string
+      }[]
+    ).map((p) => [p.id, p.name])
   )
   // 씬 id → 이름과, 같은 모듈에서 같은 이름 중 몇 번째인지 (목록 순서) — 복사해 이름이 겹친 씬 구분용
   const sceneName = new Map<number, string>()
@@ -451,10 +454,14 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
   })()
 
   // ── 연결 복원 ──
+  // 휴지통 프리셋은 빼야 같은 이름의 살아 있는 프리셋 대신 거기 붙는 일이 없다
   const presetIds = new Map(
-    (db.prepare('SELECT id, name FROM scene_presets').all() as { id: number; name: string }[]).map(
-      (p) => [p.name, p.id]
-    )
+    (
+      db.prepare('SELECT id, name FROM scene_presets WHERE deleted_at IS NULL').all() as {
+        id: number
+        name: string
+      }[]
+    ).map((p) => [p.name, p.id])
   )
   const extras = readExtras()
   const additions = extras.additions ?? {}

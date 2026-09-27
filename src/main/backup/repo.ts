@@ -36,7 +36,12 @@ const IMAGE_TABLES = new Set(['vibe_images', 'charref_images'])
  * 통째로 뜨면 휴지통 씬·캐릭터까지 따라가 "지운 게 백업에 같이 들어간다"가 된다.
  * 실수 복구용 휴지통은 자동 DB 스냅샷(backups/*.db)이 따로 들고 있다.
  */
-const SOFT_DELETE = new Set<string>(['character_folders', 'character_prompts', 'gen_scenes'])
+const SOFT_DELETE = new Set<string>([
+  'character_folders',
+  'character_prompts',
+  'scene_presets',
+  'gen_scenes'
+])
 
 /** scene_extras에서 백업에 안 실린 씬·캐릭터의 흔적을 걷어낸다. 손상돼 있으면 그대로 둔다 */
 function pruneExtrasSetting(raw: string, liveScenes: Set<number>, liveChars: Set<number>): string {

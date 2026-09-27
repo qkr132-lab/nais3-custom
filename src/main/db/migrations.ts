@@ -506,6 +506,8 @@ export function reconcileSchema(db: Database.Database): void {
   }
   ensureColumn('outfits', 'negative', "negative TEXT NOT NULL DEFAULT ''")
   ensureColumn('character_folders', 'deleted_at', 'deleted_at TEXT')
+  // 프리셋 휴지통 (커스텀) — 버전드 마이그레이션 없이 여기서만 붙인다 (새 DB도 이 경로로)
+  ensureColumn('scene_presets', 'deleted_at', 'deleted_at TEXT')
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_gen_scenes_deleted ON gen_scenes(deleted_at)')
     db.exec('CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(deleted_at)')

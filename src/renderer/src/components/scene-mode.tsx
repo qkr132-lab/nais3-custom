@@ -21,6 +21,7 @@ import {
   Hash,
   ImageOff,
   Images as ImageIcon,
+  Layers,
   Loader2,
   Minus,
   MoreVertical,
@@ -316,7 +317,7 @@ function PresetDropdown(): React.JSX.Element {
                               onClick={async () => {
                                 if (
                                   await askConfirm('프리셋 삭제', {
-                                    message: `"${p.name}" 프리셋과 그 안의 씬을 모두 삭제합니다.`,
+                                    message: `"${p.name}" 프리셋과 그 안의 씬을 휴지통으로 옮깁니다.`,
                                     confirmLabel: '삭제',
                                     danger: true
                                   })
@@ -845,10 +846,10 @@ function SceneGrid(): React.JSX.Element {
             }
           }}
         />
-        {/* 휴지통 — 삭제한 씬 복원 (커스텀) */}
+        {/* 휴지통 — 삭제한 프리셋·씬 복원 (커스텀) */}
         <IconBtn
           icon={<Trash2 size={16} />}
-          tip="휴지통 — 삭제한 씬 복원"
+          tip="휴지통 — 삭제한 프리셋·씬 복원"
           onClick={() => {
             void useScenesStore.getState().loadTrash()
             setTrashOpen(true)
@@ -2209,7 +2210,19 @@ function MenuItem({
   )
 }
 
-/** 씬 휴지통 — 삭제한 씬을 되살리거나 영구 삭제 (커스텀). 보관 기간은 설정 가능 */
+/** 'YYYY-MM-DD HH:MM:SS[.SSS]'(UTC) → 로컬 표시 */
+function formatDeletedAt(utc: string): string {
+  const date = new Date(utc.replace(' ', 'T') + 'Z')
+  if (Number.isNaN(date.getTime())) return utc
+  return date.toLocaleString('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+/** 씬 휴지통 — 삭제한 프리셋·씬을 되살리거나 영구 삭제 (커스텀). 보관 기간은 설정 가능 */
 function SceneTrashDialog({
   open,
   onOpenChange
@@ -2218,8 +2231,12 @@ function SceneTrashDialog({
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
   const trashed = useScenesStore((s) => s.trashed)
+  const trashedPresets = useScenesStore((s) => s.trashedPresets)
+  const libraryKind = useScenesStore((s) => s.libraryKind)
   const restoreScenes = useScenesStore((s) => s.restoreScenes)
   const purgeScenes = useScenesStore((s) => s.purgeScenes)
+  const restorePreset = useScenesStore((s) => s.restorePreset)
+  const purgePreset = useScenesStore((s) => s.purgePreset)
   const [retention, setRetention] = useState('30')
 
   useEffect(() => {
@@ -2237,7 +2254,7 @@ function SceneTrashDialog({
             <Trash2 size={15} /> 휴지통
           </DialogTitle>
           <DialogDescription className="mt-0.5">
-            삭제한 씬을 되살릴 수 있습니다.
+            삭제한 프리셋과 씬을 되살릴 수 있습니다.
             {retention === '0'
               ? ' 자동 삭제 없이 계속 보관합니다.'
               : ` ${retention}일이 지나면 자동으로 영구 삭제됩니다.`}
@@ -2265,10 +2282,57 @@ function SceneTrashDialog({
           </Select>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          {trashed.length === 0 ? (
+          {trashed.length === 0 && trashedPresets.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-faint">휴지통이 비어 있습니다</p>
           ) : (
             <div className="space-y-1.5">
+              {/* 삭제한 프리셋 — 안의 씬은 프리셋째로 되살리거나 지운다 */}
+              {trashedPresets.length > 0 && (
+                <div className="px-1 text-[11px] font-medium text-muted">프리셋</div>
+              )}
+              {trashedPresets.map((p) => (
+                <div
+                  key={`preset-${p.id}`}
+                  className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 p-2"
+                >
+                  <div className="grid size-12 shrink-0 place-items-center rounded-md bg-paper text-faint">
+                    <Layers size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-ink">{p.name}</div>
+                    <div className="truncate text-[11px] text-faint">
+                      {p.kind === 'background' ? '배경' : '씬'} {p.sceneCount ?? 0}개 ·{' '}
+                      {formatDeletedAt(p.deletedAt)}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => void restorePreset(p.id)}>
+                    <RotateCcw size={13} /> 복원
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-danger"
+                    title="영구 삭제"
+                    onClick={async () => {
+                      if (
+                        await askConfirm('영구 삭제', {
+                          message: `"${p.name}" 프리셋과 그 안의 씬을 영구 삭제합니다. 생성한 이미지는 기록에 남습니다. 먼저 따로 지운 씬은 이미지 파일까지 OS 휴지통으로 이동합니다.`,
+                          confirmLabel: '영구 삭제',
+                          danger: true
+                        })
+                      )
+                        void purgePreset(p.id)
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </div>
+              ))}
+              {trashedPresets.length > 0 && trashed.length > 0 && (
+                <div className="px-1 pt-2 text-[11px] font-medium text-muted">
+                  {libraryKind === 'background' ? '배경' : '씬'}
+                </div>
+              )}
               {trashed.map((s) => (
                 <div
                   key={s.id}

@@ -84,9 +84,13 @@ interface ScenesState {
 
   // 휴지통 (소프트삭제 복원) — 커스텀
   trashed: (Scene & { deletedAt: string; presetName: string })[]
+  /** 휴지통 프리셋 — 안의 씬은 프리셋째로 복원·영구 삭제 */
+  trashedPresets: (ScenePreset & { deletedAt: string })[]
   loadTrash: () => Promise<void>
   restoreScenes: (ids: number[]) => Promise<void>
   purgeScenes: (ids: number[]) => Promise<void>
+  restorePreset: (id: number) => Promise<void>
+  purgePreset: (id: number) => Promise<void>
 
   create: (name: string) => Promise<void>
   update: (id: number, patch: Partial<Scene>) => Promise<void>
@@ -525,6 +529,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   selection: new Set(),
   lastSelectedId: null,
   trashed: [],
+  trashedPresets: [],
   columns: Number(localStorage.getItem('scene_columns')) || 3,
   cardOrientation:
     (localStorage.getItem('scene_orientation') as 'portrait' | 'landscape') || 'portrait',
@@ -654,9 +659,12 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
 
   loadTrash: async () => {
     const kind = get().libraryKind
-    const { items } = await window.nais.invoke('scenes:trash', { kind })
+    const [{ items }, { items: presets }] = await Promise.all([
+      window.nais.invoke('scenes:trash', { kind }),
+      window.nais.invoke('scenePresets:trash', { kind })
+    ])
     if (get().libraryKind !== kind) return
-    set({ trashed: items })
+    set({ trashed: items, trashedPresets: presets })
   },
   restoreScenes: async (ids) => {
     if (ids.length === 0) return
@@ -666,6 +674,15 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   purgeScenes: async (ids) => {
     if (ids.length === 0) return
     await window.nais.invoke('scenes:purge', { ids })
+    await get().loadTrash()
+  },
+  restorePreset: async (id) => {
+    await window.nais.invoke('scenePresets:restore', { id })
+    // 먼저 따로 지운 씬은 이제 씬 휴지통에 따로 보인다
+    await Promise.all([get().loadTrash(), get().refreshPresetCounts()])
+  },
+  purgePreset: async (id) => {
+    await window.nais.invoke('scenePresets:purge', { id })
     await get().loadTrash()
   },
 

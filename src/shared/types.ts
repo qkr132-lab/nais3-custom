@@ -409,6 +409,22 @@ export interface ScenePreset {
   sceneCount?: number
 }
 
+/** 백업 폴더의 DB 파일 (커스텀 — 백업에서 프리셋 가져오기). mtime = 수정 시각(ms) */
+export interface BackupDbFile {
+  name: string
+  size: number
+  mtime: number
+}
+
+/** 백업 DB 속 씬 프리셋 (커스텀). exists = 지금 같은 종류·같은 이름의 살아 있는 프리셋이 있음 */
+export interface BackupPreset {
+  id: number
+  name: string
+  kind: 'scene' | 'background'
+  sceneCount: number
+  exists: boolean
+}
+
 /** 프리셋에 함께 저장되는 생성 파라미터 (시드·캐릭터는 제외).
  *  promptParts: 3분할(고정/가변/디테일)도 프리셋마다 저장/복원 (커스텀) — params_json에 함께 실림 */
 export type PresetParams = Partial<
@@ -720,7 +736,17 @@ export interface IpcInvokeMap {
     res: { id: number }
   }
   'scenePresets:rename': { req: { id: number; name: string }; res: void }
+  /** 프리셋 삭제 = 휴지통으로 (안의 씬도 함께, 커스텀) */
   'scenePresets:delete': { req: { id: number }; res: void }
+  /** 휴지통 프리셋 목록 (커스텀). sceneCount = 복원하면 함께 돌아올 씬 수 */
+  'scenePresets:trash': {
+    req: { kind?: 'scene' | 'background' } | void
+    res: { items: (ScenePreset & { deletedAt: string })[] }
+  }
+  /** 휴지통 프리셋 복원 — 함께 지운 씬도 되살린다 */
+  'scenePresets:restore': { req: { id: number }; res: void }
+  /** 휴지통 프리셋 영구 삭제 (씬·이미지 포함, 파일은 OS 휴지통으로) */
+  'scenePresets:purge': { req: { id: number }; res: void }
   'scenePresets:reorder': { req: { ids: number[] }; res: void }
   /** 프리셋의 새 씬 기본 해상도 (N3) */
   'scenePresets:setDefaultResolution': {
@@ -754,6 +780,18 @@ export interface IpcInvokeMap {
   'backup:now': { req: void; res: { path: string } }
   /** 백업 폴더 현황 — 개수/총 용량 (커스텀, 설정 UI 표시용) */
   'backup:info': { req: void; res: { dir: string; count: number; totalBytes: number } }
+  /** 백업 폴더의 DB 파일 목록 — 최근 것부터 (커스텀) */
+  'backup:files': { req: void; res: { items: BackupDbFile[] } }
+  /** 백업 DB 속 씬 프리셋 목록 — 백업은 읽기 전용으로만 연다 (커스텀) */
+  'backup:presets': {
+    req: { name: string }
+    res: { items: BackupPreset[] } | { error: string }
+  }
+  /** 백업 DB에서 고른 프리셋과 그 안의 씬을 가져온다 (커스텀) */
+  'backup:importPresets': {
+    req: { name: string; presetIds: number[] }
+    res: { presets: number; scenes: number } | { error: string }
+  }
   /** 웹 모드 프록시 설정 (커스텀 — 단보루 등 우회). rules 빈 문자열이면 직접 연결 */
   'web:setProxy': { req: { rules: string }; res: { ok: boolean } }
   /** JSON 가져오기 (열기 다이얼로그). NAIS3/NAIS2 포맷 자동 감지. summary=사람이 읽는 결과 */

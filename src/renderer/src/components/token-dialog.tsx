@@ -1,4 +1,5 @@
 import {
+  ArchiveRestore,
   Coins,
   Download,
   Eye,
@@ -16,7 +17,8 @@ import {
   Trash2,
   Upload
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { BackupDbFile, BackupPreset } from '@shared/types'
 import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { THEME_PRESETS } from '../lib/theme-presets'
@@ -42,7 +44,7 @@ import {
 } from '../stores/shortcuts-store'
 import { ThemeToggle } from './theme-toggle'
 import { Button } from './ui/button'
-import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Slider } from './ui/slider'
@@ -380,6 +382,13 @@ function StorageSection(): React.JSX.Element {
   )
 }
 
+/** 용량 표시 — 1GB 이상은 GB, 아래는 MB */
+function sizeLabel(bytes: number): string {
+  return bytes >= 1024 * 1024 * 1024
+    ? `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+    : `${Math.round(bytes / (1024 * 1024))} MB`
+}
+
 /** 자동 DB 백업 섹션 (커스텀) — 사용량 표시 + 용량 상한 설정 */
 function AutoBackupSection(): React.JSX.Element {
   const [info, setInfo] = useState<{ count: number; totalBytes: number }>({
@@ -387,6 +396,7 @@ function AutoBackupSection(): React.JSX.Element {
     totalBytes: 0
   })
   const [maxMb, setMaxMb] = useState('512')
+  const [importOpen, setImportOpen] = useState(false)
 
   const refresh = (): void => {
     void window.nais.invoke('backup:info', undefined).then(setInfo)
@@ -398,10 +408,7 @@ function AutoBackupSection(): React.JSX.Element {
     })
   }, [])
 
-  const usedLabel =
-    info.totalBytes >= 1024 * 1024 * 1024
-      ? `${(info.totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-      : `${Math.round(info.totalBytes / (1024 * 1024))} MB`
+  const usedLabel = sizeLabel(info.totalBytes)
 
   return (
     <div className="mt-1 border-t border-line pt-3">
@@ -439,7 +446,7 @@ function AutoBackupSection(): React.JSX.Element {
           </SelectContent>
         </Select>
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button
           variant="default"
           className="gap-1.5"
@@ -458,8 +465,186 @@ function AutoBackupSection(): React.JSX.Element {
         >
           <FolderOpen size={14} /> 백업 폴더 열기
         </Button>
+        <Button variant="default" className="gap-1.5" onClick={() => setImportOpen(true)}>
+          <ArchiveRestore size={14} /> 백업에서 프리셋 가져오기
+        </Button>
       </div>
+      <BackupPresetImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
+  )
+}
+
+/** 백업 날짜 표시 — 파일 수정 시각 */
+function backupDateLabel(mtime: number): string {
+  return new Date(mtime).toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+/**
+ * 백업에서 프리셋 가져오기 (커스텀) — 휴지통이 생기기 전에 지운 프리셋을 되찾는 길.
+ * 백업을 고르면 그 안의 프리셋이 나오고, 고른 것만 안의 씬과 함께 지금 목록 끝에 붙는다.
+ */
+function BackupPresetImportDialog({
+  open,
+  onOpenChange
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  return (
+    <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
+      <DialogContent className="flex max-h-[82vh] max-w-[560px] flex-col">
+        {/* 내용은 열 때마다 새로 마운트된다 — 고른 백업·체크가 다음에 남지 않게 */}
+        <BackupPresetImportBody busy={busy} setBusy={setBusy} onDone={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BackupPresetImportBody({
+  busy,
+  setBusy,
+  onDone
+}: {
+  busy: boolean
+  setBusy: (busy: boolean) => void
+  onDone: () => void
+}): React.JSX.Element {
+  const [files, setFiles] = useState<BackupDbFile[]>([])
+  const [file, setFile] = useState('')
+  // null = 불러오는 중
+  const [presets, setPresets] = useState<BackupPreset[] | null>(null)
+  const [picked, setPicked] = useState<Set<number>>(new Set())
+  // 백업을 빠르게 바꿔 고를 때 늦게 온 예전 응답이 목록을 덮지 않게
+  const fileRef = useRef('')
+
+  useEffect(() => {
+    void window.nais.invoke('backup:files', undefined).then((r) => setFiles(r.items))
+  }, [])
+
+  const pickFile = async (name: string): Promise<void> => {
+    fileRef.current = name
+    setFile(name)
+    setPresets(null)
+    setPicked(new Set())
+    const r = await window.nais.invoke('backup:presets', { name })
+    if (fileRef.current !== name) return
+    if ('error' in r) {
+      toast(`백업을 열 수 없습니다: ${r.error}`, 'error')
+      setPresets([])
+      return
+    }
+    setPresets(r.items)
+  }
+
+  const togglePicked = (id: number): void => {
+    setPicked((old) => {
+      const next = new Set(old)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const runImport = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await window.nais.invoke('backup:importPresets', {
+        name: file,
+        presetIds: [...picked]
+      })
+      if ('error' in r) {
+        toast(`가져오기 오류: ${r.error}`, 'error')
+        return
+      }
+      // 배경 프리셋만 가져왔으면 「배경」, 섞였으면 「씬·배경」
+      const kinds = new Set((presets ?? []).filter((p) => picked.has(p.id)).map((p) => p.kind))
+      const unit = kinds.size > 1 ? '씬·배경' : kinds.has('background') ? '배경' : '씬'
+      toast(`프리셋 ${r.presets}개(${unit} ${r.scenes}개)를 가져왔습니다`, 'success')
+      void useScenesStore.getState().loadPresets()
+      // 씬별 설정을 메인이 고쳤다 — 안 다시 읽으면 다음 편집 때 예전 값으로 덮어쓴다
+      void useSceneExtrasStore.getState().reload()
+      onDone()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="border-b border-line px-4 py-3">
+        <DialogTitle className="flex items-center gap-2">
+          <ArchiveRestore size={15} /> 백업에서 프리셋 가져오기
+        </DialogTitle>
+        <DialogDescription className="mt-0.5">
+          고른 프리셋과 그 안의 씬을 지금 목록 끝에 추가합니다.
+        </DialogDescription>
+      </div>
+      <div className="border-b border-line px-4 py-2">
+        <Select value={file} onValueChange={(v) => void pickFile(v)} disabled={busy}>
+          <SelectTrigger className="h-8 w-full">
+            <SelectValue placeholder={files.length ? '백업 선택' : '백업이 없습니다'} />
+          </SelectTrigger>
+          <SelectContent>
+            {files.map((f) => (
+              <SelectItem key={f.name} value={f.name}>
+                {backupDateLabel(f.mtime)} · {sizeLabel(f.size)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {!file ? (
+          <p className="py-10 text-center text-[13px] text-faint">백업을 고르세요</p>
+        ) : presets === null ? (
+          <p className="flex items-center justify-center gap-1.5 py-10 text-[13px] text-faint">
+            <Loader2 size={13} className="animate-spin" /> 불러오는 중…
+          </p>
+        ) : presets.length === 0 ? (
+          <p className="py-10 text-center text-[13px] text-faint">가져올 프리셋이 없습니다</p>
+        ) : (
+          presets.map((p) => (
+            <label
+              key={p.id}
+              className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-surface-2"
+            >
+              <input
+                type="checkbox"
+                checked={picked.has(p.id)}
+                disabled={busy}
+                onChange={() => togglePicked(p.id)}
+              />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{p.name}</span>
+              {!p.exists && (
+                <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10.5px] font-medium text-accent">
+                  지금 없음
+                </span>
+              )}
+              <span className="shrink-0 text-[11.5px] text-faint">
+                {p.kind === 'background' ? '배경' : '씬'} {p.sceneCount}개
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+      <div className="flex justify-end border-t border-line px-4 py-3">
+        <Button
+          variant="accent"
+          className="gap-1.5"
+          disabled={busy || picked.size === 0}
+          onClick={() => void runImport()}
+        >
+          {busy && <Loader2 size={14} className="animate-spin" />} 가져오기
+        </Button>
+      </div>
+    </>
   )
 }
 
