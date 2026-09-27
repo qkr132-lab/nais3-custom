@@ -1,8 +1,8 @@
 /**
- * 자동 검열 (커스텀) — 탐지 결과 해석·박스 넓히기·모자이크를 순수 함수로 둔다 (테스트 가능하게).
+ * 자동 검열 (커스텀) — 탐지 결과 해석·박스 넓히기·가리기를 순수 함수로 둔다 (테스트 가능하게).
  *
- * 흐름: 이미지 → 탐지기(YOLO ONNX)가 부위 박스 → 부위별로 넓혀 모자이크 격자에 맞춤 →
- * 겹치는 박스 합치기 → 모자이크(또는 가림막). 원본 파일은 건드리지 않는다.
+ * 흐름: 이미지 → 탐지기(YOLO ONNX)가 부위 박스 → 부위별로 넓혀 격자에 맞춤 →
+ * 겹치는 박스 합치기 → 고른 색으로 덮기(또는 NAI 인페인팅). 원본 파일은 건드리지 않는다.
  */
 
 export type CensorPart = 'vulva' | 'penis' | 'testicles' | 'anus' | 'nipples'
@@ -34,7 +34,8 @@ export interface Box {
 }
 
 /** 검열 방식 — 모자이크·검은 막대·흰 가림은 이 PC에서 바로, NAI는 인페인팅으로 검열 태그를 그린다 */
-export type CensorMethod = 'mosaic' | 'black' | 'white' | 'nai'
+/** 가리는 방식 — 고른 색으로 덮기 / NAI 인페인팅 (모자이크는 쓰지 않는다 — 사용자 요청) */
+export type CensorMethod = 'fill' | 'nai'
 
 /** 자동 검열 설정 — settings의 censor_options에 JSON으로 저장 */
 export interface CensorOptions {
@@ -46,8 +47,8 @@ export interface CensorOptions {
   outputFolder: string
   parts: CensorPart[]
   method: CensorMethod
-  /** 모자이크 칸 배율 (1 = 긴 변 1/100) */
-  mosaicScale: number
+  /** 덮는 색 (#rrggbb) */
+  fillColor: string
   /** 가리는 범위 배율 (1 = 부위별 기본) */
   expandScale: number
   /** 민감도 — 높이면 더 많이 잡고 엉뚱한 곳도 더 가린다 */
@@ -60,28 +61,45 @@ export interface CensorOptions {
   copyClean: boolean
   /** 저장 폴더에 같은 이름이 있으면 덮어쓰기 (끄면 건너뜀) */
   overwrite: boolean
-  /** NAI 방식에서 그릴 검열 태그 */
-  naiTag: 'mosaic censoring' | 'bar censor' | 'blank censor' | 'heart censor'
+  /** NAI 방식에서 프롬프트 끝에 붙일 검열 태그 — 적은 그대로 (가중치 포함) */
+  naiTag: string
 }
+
+export const DEFAULT_NAI_CENSOR_TAG = '3::completely white censor::'
+/** 예전 칩으로 고르던 값 — 가중치 없이 저장돼 있으면 새 기본값으로 */
+const OLD_NAI_TAGS = ['mosaic censoring', 'bar censor', 'blank censor', 'heart censor']
 
 export const DEFAULT_CENSOR_OPTIONS: CensorOptions = {
   folder: '',
   recursive: true,
   outputFolder: '',
   parts: CENSOR_PARTS_DEFAULT(),
-  method: 'mosaic',
-  mosaicScale: 1,
+  method: 'fill',
+  fillColor: '#ffffff',
   expandScale: 1,
   sensitivity: 'normal',
   extraModel: true,
   gemma: false,
   copyClean: true,
   overwrite: false,
-  naiTag: 'mosaic censoring'
+  naiTag: DEFAULT_NAI_CENSOR_TAG
 }
 
 function CENSOR_PARTS_DEFAULT(): CensorPart[] {
   return ['vulva', 'penis', 'testicles', 'anus']
+}
+
+/** 덮는 색 — 예전 설정(검은 막대·흰 가림·모자이크)은 그 색으로 옮긴다 */
+function fillColorOf(v: { fillColor?: unknown; method?: unknown }): string {
+  if (typeof v.fillColor === 'string' && /^#[0-9a-f]{6}$/i.test(v.fillColor))
+    return v.fillColor.toLowerCase()
+  return (v.method as string) === 'black' ? '#000000' : '#ffffff'
+}
+
+/** #rrggbb → [r, g, b] (잘못된 값이면 흰색) */
+export function hexToRgb(hex: string): [number, number, number] {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [255, 255, 255]
 }
 
 /** 저장해둔 설정을 읽어 모르는 값은 기본으로 */
@@ -97,21 +115,18 @@ export function normalizeCensorOptions(value: unknown): CensorOptions {
     recursive: bool(v.recursive, d.recursive),
     outputFolder: typeof v.outputFolder === 'string' ? v.outputFolder : d.outputFolder,
     parts: Array.isArray(v.parts) ? allParts.filter((p) => v.parts!.includes(p)) : d.parts,
-    method: (['mosaic', 'black', 'white', 'nai'] as const).includes(v.method as CensorMethod)
-      ? (v.method as CensorMethod)
-      : d.method,
-    mosaicScale: num(v.mosaicScale, 1, 4, d.mosaicScale),
+    method: v.method === 'nai' ? 'nai' : 'fill',
+    fillColor: fillColorOf(v),
     expandScale: num(v.expandScale, 0.8, 2.5, d.expandScale),
     sensitivity: v.sensitivity === 'high' ? 'high' : 'normal',
     extraModel: bool(v.extraModel, d.extraModel),
     gemma: bool(v.gemma, d.gemma),
     copyClean: bool(v.copyClean, d.copyClean),
     overwrite: bool(v.overwrite, d.overwrite),
-    naiTag: (['mosaic censoring', 'bar censor', 'blank censor', 'heart censor'] as const).includes(
-      v.naiTag as CensorOptions['naiTag']
-    )
-      ? (v.naiTag as CensorOptions['naiTag'])
-      : d.naiTag
+    naiTag:
+      typeof v.naiTag === 'string' && v.naiTag.trim() && !OLD_NAI_TAGS.includes(v.naiTag.trim())
+        ? v.naiTag.trim().slice(0, 300)
+        : d.naiTag
   }
 }
 
@@ -291,7 +306,7 @@ export function expandBox(
 }
 
 /**
- * 모자이크 칸 크기 — 일본 판매처(FANZA·DLsite) 기준 "긴 변의 1/100, 최소 4px".
+ * 영역을 맞추는 격자 칸 — 긴 변의 1/100, 최소 4px (일본 판매처 모자이크 기준에서 따옴).
  * multiplier로 더 거칠게 할 수 있다.
  */
 export function mosaicBlockSize(width: number, height: number, multiplier = 1): number {
@@ -371,48 +386,6 @@ export function censorRegions(dets: Detection[], opts: CensorRegionOptions): Box
   return mergeBoxes(boxes)
 }
 
-/**
- * 모자이크 — box 안을 block 칸마다 평균색으로 채운다. RGB만 바꾸고 알파는 그대로 둔다
- * (NAI PNG의 알파 채널에 숨은 메타데이터를 덜 건드리게). buf는 제자리에서 바뀐다.
- */
-export function pixelateRegion(
-  buf: Uint8Array,
-  width: number,
-  height: number,
-  channels: number,
-  box: Box,
-  block: number
-): void {
-  const x0 = clamp(Math.floor(box.x0), 0, width)
-  const y0 = clamp(Math.floor(box.y0), 0, height)
-  const x1 = clamp(Math.ceil(box.x1), 0, width)
-  const y1 = clamp(Math.ceil(box.y1), 0, height)
-  const color = Math.min(3, channels)
-  for (let by = y0; by < y1; by += block) {
-    for (let bx = x0; bx < x1; bx += block) {
-      const ex = Math.min(bx + block, x1)
-      const ey = Math.min(by + block, y1)
-      const sum = [0, 0, 0]
-      let n = 0
-      for (let y = by; y < ey; y++) {
-        for (let x = bx; x < ex; x++) {
-          const o = (y * width + x) * channels
-          for (let c = 0; c < color; c++) sum[c] += buf[o + c]
-          n++
-        }
-      }
-      if (!n) continue
-      const avg = sum.map((s) => Math.round(s / n))
-      for (let y = by; y < ey; y++) {
-        for (let x = bx; x < ex; x++) {
-          const o = (y * width + x) * channels
-          for (let c = 0; c < color; c++) buf[o + c] = avg[c]
-        }
-      }
-    }
-  }
-}
-
 /** 가림막 — box 안을 한 색으로 채운다 (알파는 그대로) */
 export function fillRegion(
   buf: Uint8Array,
@@ -476,27 +449,54 @@ export function thresholdsFor(sensitivity: 'normal' | 'high'): Thresholds {
  */
 const GEMMA_CONFIRMS: ReadonlySet<CensorPart> = new Set(['vulva', 'penis', 'anus'])
 
+/** Gemma 좌표는 거칠어서 이만큼 넓혀 겹침을 본다 */
+const GEMMA_BOX_SLACK = 1.5
+
+const overlaps = (a: Box, b: Box): boolean =>
+  a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+
+const centerInside = (b: Box, outer: Box): boolean => {
+  const cx = (b.x0 + b.x1) / 2
+  const cy = (b.y0 + b.y1) / 2
+  return cx >= outer.x0 && cx <= outer.x1 && cy >= outer.y0 && cy <= outer.y1
+}
+
 /**
  * 탐지기 두 개와 Gemma 결과를 합친다.
  *  - 모델 점수가 부위 기준 이상이면 채택
- *  - Gemma가 같은 부위를 봤으면 낮은 점수(confirm 이상) 박스도 채택 (성기·항문만)
+ *  - 낮은 점수(confirm 이상) 박스는 Gemma가 **그 자리에서** 같은 부위를 봤을 때만 채택
+ *    (성기·항문만). 그림 어딘가에 있다는 것만으로 살리면 입 같은 엉뚱한 곳까지 가렸다
+ *  - 얼굴 안에 중심이 있는 여성 성기·항문 박스는 버린다(입을 잘못 본 것). 남성 성기는
+ *    입에 물린 경우가 있어 얼굴 안이면 모델 점수만으로 넘은 것만 남긴다
  * 고환은 따로 잡는 모델이 없어, 고른 경우 남성 성기 박스를 더 넓혀 함께 덮는다(censorRegions 쪽).
  */
 export function combineDetections(input: {
   primary: Detection[]
   extra: Detection[]
   gemma: { part: CensorPart; box: Box }[] | null
+  faces?: Box[]
   thresholds: Thresholds
 }): { accepted: Detection[] } {
   const { thresholds: th } = input
-  const gemmaParts = new Set(
-    (input.gemma ?? []).map((g) => g.part).filter((p) => GEMMA_CONFIRMS.has(p))
-  )
+  const gemma = (input.gemma ?? [])
+    .filter((g) => GEMMA_CONFIRMS.has(g.part))
+    .map((g) => ({ part: g.part, box: expandBox(g.box, GEMMA_BOX_SLACK, Infinity, Infinity) }))
+  const faces = input.faces ?? []
   const accepted: Detection[] = []
   const take = (d: Detection, limit: number): void => {
-    if (d.score >= limit) accepted.push({ ...d, source: 'detector' })
-    else if (gemmaParts.has(d.part) && d.score >= th.confirm)
-      accepted.push({ ...d, source: 'confirmed' })
+    let source: Detection['source'] | null = null
+    if (d.score >= limit) source = 'detector'
+    else if (
+      d.score >= th.confirm &&
+      gemma.some((g) => g.part === d.part && overlaps(g.box, d.box))
+    )
+      source = 'confirmed'
+    if (!source) return
+    if (faces.some((f) => centerInside(d.box, f))) {
+      if (d.part === 'vulva' || d.part === 'anus') return
+      if (d.part === 'penis' && source !== 'detector') return
+    }
+    accepted.push({ ...d, source })
   }
   for (const d of input.primary) take(d, th.primary[d.part])
   for (const d of input.extra) take(d, th.extra[d.part])

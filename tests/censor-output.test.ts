@@ -136,7 +136,7 @@ describe('검열본 메타데이터', () => {
     const original = await naiWebp()
     expect(original.includes(THUMB)).toBe(true)
     const before = metadataFromWebp(original)!
-    const out = await renderCensored(original, REGION, 'black', 8)
+    const out = await renderCensored(original, REGION, [0, 0, 0])
     expect(out.includes(THUMB)).toBe(false)
     const after = metadataFromWebp(out)!
     expect(after).not.toBeNull()
@@ -154,7 +154,7 @@ describe('검열본 메타데이터', () => {
 
   it('PNG: 텍스트 청크만 옮기고 eXIf는 버린다', async () => {
     const original = await naiPng()
-    const out = await renderCensored(original, REGION, 'mosaic', 8)
+    const out = await renderCensored(original, REGION, [255, 255, 255])
     expect(out.includes(THUMB)).toBe(false)
     expect(out.includes(Buffer.from('eXIf'))).toBe(false)
     const meta = await metadataFromImage(out)
@@ -186,7 +186,7 @@ describe('검열본 픽셀', () => {
     const png = await sharp(raw, { raw: { width: w, height: w, channels: 4 } })
       .png()
       .toBuffer()
-    const out = await renderCensored(png, REGION, 'black', 8)
+    const out = await renderCensored(png, REGION, [0, 0, 0])
     const got = await sharp(out).raw().toBuffer()
     for (let y = 0; y < w; y++) {
       for (let x = 0; x < w; x++) {

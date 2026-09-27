@@ -53,7 +53,6 @@ let proc: ChildProcess | null = null
 /** 앱이 전에 켜 두고 못 끈 서버(비정상 종료 등)를 이어 쓸 때 그 PID */
 let adopted: number | null = null
 let starting: Promise<void> | null = null
-let idleTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 켠 서버의 PID를 적어 둔다 — 앱이 갑자기 꺼져도 다음에 찾아 끌 수 있게 */
 const pidFile = (): string => join(defaultGemmaDir(), 'server.pid')
@@ -116,16 +115,6 @@ async function servedModel(): Promise<string | null> {
   }
 }
 
-/**
- * 마지막으로 쓴 뒤 3분 동안 안 쓰면 끈다 — 12B는 그래픽 메모리를 8GB쯤 잡고 있어서,
- * 검열이 끝난 뒤까지 붙잡아 두지 않는다. 미리보기 → 시작처럼 이어 쓰면 다시 올리지 않는다.
- */
-function keepAliveForAWhile(): void {
-  if (idleTimer) clearTimeout(idleTimer)
-  idleTimer = setTimeout(stopGemma, 180_000)
-  idleTimer.unref?.()
-}
-
 async function healthy(): Promise<boolean> {
   try {
     const r = await fetch(`http://127.0.0.1:${PORT}/health`, { signal: AbortSignal.timeout(1500) })
@@ -135,8 +124,12 @@ async function healthy(): Promise<boolean> {
   }
 }
 
-/** 서버를 켠다 (이미 켜져 있으면 그대로). 모델을 올리는 데 수십 초 걸릴 수 있다 */
-export function startGemma(setup: GemmaSetup): Promise<void> {
+/**
+ * 서버를 켠다 (이미 켜져 있으면 그대로). 모델을 올리는 데 수십 초 걸릴 수 있다.
+ * 켜 두는 것은 검열 작업·미리보기가 도는 동안뿐 — 끝나거나 중단하면 부른 쪽이 바로 끈다
+ * (12B는 그래픽 카드를 계속 붙잡아 전기를 많이 쓴다 — 사용자 요청 "on off가 확실해야").
+ */
+export function startGemma(setup: GemmaSetup, signal?: AbortSignal): Promise<void> {
   starting ??= (async () => {
     // 이미 떠 있는 서버가 이 모델이면 그대로 쓰고, 다른 프로그램이면 건드리지 않는다
     const served = await servedModel()
@@ -146,7 +139,6 @@ export function startGemma(setup: GemmaSetup): Promise<void> {
           `포트 ${PORT}을 다른 서버가 쓰고 있습니다${served ? ` (${basename(served)})` : ''} — 끄고 다시 시도하세요`
         )
       if (!proc) adopted = readPid()
-      keepAliveForAWhile()
       return
     }
     // 앱이 지난번에 못 끈 서버(모델을 올리다 멈춘 것 등)가 남아 있으면 정리
@@ -193,12 +185,13 @@ export function startGemma(setup: GemmaSetup): Promise<void> {
     })
     const deadline = Date.now() + 180_000
     while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        stopGemma()
+        throw new Error('중단했습니다')
+      }
       if (exited)
         throw new Error('Gemma 서버가 켜지다 꺼졌습니다 (그래픽 메모리 부족일 수 있습니다)')
-      if (await healthy()) {
-        keepAliveForAWhile()
-        return
-      }
+      if (await healthy()) return
       await new Promise((r) => setTimeout(r, 1000))
     }
     stopGemma()
@@ -210,8 +203,6 @@ export function startGemma(setup: GemmaSetup): Promise<void> {
 }
 
 export function stopGemma(): void {
-  if (idleTimer) clearTimeout(idleTimer)
-  idleTimer = null
   if (proc) {
     proc.kill()
     proc = null
@@ -233,7 +224,8 @@ One entry per visible part (two nipples = two entries). Return [] if none are ex
 export async function askGemma(
   input: string,
   width: number,
-  height: number
+  height: number,
+  signal?: AbortSignal
 ): Promise<{ part: CensorPart; box: Box }[]> {
   const png = await sharp(input, { failOn: 'none' })
     .removeAlpha()
@@ -243,7 +235,9 @@ export async function askGemma(
   const res = await fetch(`http://127.0.0.1:${PORT}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(120_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      : AbortSignal.timeout(120_000),
     body: JSON.stringify({
       messages: [
         {
@@ -263,7 +257,6 @@ export async function askGemma(
       chat_template_kwargs: { enable_thinking: false }
     })
   })
-  keepAliveForAWhile()
   if (!res.ok) throw new Error(`Gemma 응답 오류 (HTTP ${res.status})`)
   const json = (await res.json()) as { choices?: { message?: { content?: string } }[] }
   return parseGemmaBoxes(json.choices?.[0]?.message?.content ?? '', width, height)

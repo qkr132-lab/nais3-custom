@@ -23,7 +23,7 @@ export async function previewWithNai(
   boxes: number
 }> {
   // 탐지·영역은 로컬 미리보기와 같은 경로로 구한다
-  const local = await previewCensor({ ...options, method: 'mosaic' }, file, report)
+  const local = await previewCensor({ ...options, method: 'fill' }, file, report)
   if (!local.boxes) return local
   await naiPreflight(ctx)
   const dir = mkdtempSync(join(tmpdir(), 'nais3-censor-'))

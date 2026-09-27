@@ -15,7 +15,7 @@ import { pasteNaiResult, writeAtomic } from './apply'
  * NAI 인페인팅으로 검열 태그를 그리기 (커스텀, 시험 기능).
  *
  * Anlas를 아끼려고 겹겹이 막는다 (사용자 요청 "nai 토큰 아껴다오"):
- *  1) Opus 무료 조건(1024×1024 이하 화소, 64 배수, 28스텝 이하, 1장, 캐릭레퍼·바이브 없음)을
+ *  1) Opus 무료 조건(1024×1024 이하 화소, 64 배수, 28스텝 이하 — 18로 고정, 1장, 캐릭레퍼·바이브 없음)을
  *     벗어나는 그림은 보내지 않는다 — 실패 목록에 이유를 적는다
  *  2) V5 무료 한도가 '남아 있다'고 확인될 때만 보낸다 — 바닥났거나 알 수 없으면 멈춘다
  *  3) 요청마다 같은 토큰으로 전후 잔액을 읽어, 줄었으면 멈춘다. 요청이 실패해도(연결 끊김 등)
@@ -40,7 +40,8 @@ export class StopJob extends Error {
 }
 
 const FREE_PIXELS = 1048576
-const MAX_STEPS = 28
+/** 인페인팅 스텝 — 사용자 지정 18 (Opus 무료 조건 28 이하) */
+const INPAINT_STEPS = 18
 
 interface Balance {
   anlas: number
@@ -109,7 +110,8 @@ async function buildRequest(
   options: CensorOptions
 ): Promise<GenerationRequest> {
   const meta = await metadataFromImage(readFileSync(file))
-  const tag = `1.3::${options.naiTag}::, censored`
+  // 검열 태그는 사용자가 적은 그대로 (예: 3::completely white censor::)
+  const tag = options.naiTag
   const base = 'nai-diffusion-5-full'
   return {
     prompt: meta?.prompt ? `${meta.prompt}, ${tag}` : tag,
@@ -119,7 +121,7 @@ async function buildRequest(
     model: modelCaps(base).inpaintModel,
     width,
     height,
-    steps: Math.min(MAX_STEPS, meta?.steps ?? 23),
+    steps: INPAINT_STEPS,
     cfgScale: meta?.cfgScale ?? 5,
     cfgRescale: meta?.cfgRescale ?? 0,
     sampler: meta?.sampler ?? 'k_euler_ancestral',

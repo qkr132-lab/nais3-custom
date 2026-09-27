@@ -1,9 +1,7 @@
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import sharp from 'sharp'
-import { fillRegion, pixelateRegion, type Box } from '../../shared/censor'
+import { fillRegion, type Box } from '../../shared/censor'
 import { copyPngText, copyWebpExif } from './meta-copy'
-
-export type CensorPaint = 'mosaic' | 'black' | 'white'
 
 interface Raw {
   data: Buffer
@@ -38,29 +36,17 @@ async function encode(original: Buffer, raw: Raw, format: string | undefined): P
 }
 
 /**
- * 가린 그림 — 픽셀을 직접 고친다(모자이크 칸 평균·단색). RGB만 바꾸고 알파는 그대로라
+ * 가린 그림 — 픽셀을 직접 고친 색으로 덮는다. RGB만 바꾸고 알파는 그대로라
  * 반투명 픽셀 아래로 원본이 비치지 않는다.
  */
 export async function renderCensored(
   input: string | Buffer,
   regions: Box[],
-  paint: CensorPaint,
-  block: number
+  rgb: readonly [number, number, number]
 ): Promise<Buffer> {
   const original = Buffer.isBuffer(input) ? input : readFileSync(input)
   const raw = await decode(original)
-  for (const r of regions) {
-    if (paint === 'mosaic') pixelateRegion(raw.data, raw.width, raw.height, raw.channels, r, block)
-    else
-      fillRegion(
-        raw.data,
-        raw.width,
-        raw.height,
-        raw.channels,
-        r,
-        paint === 'black' ? [0, 0, 0] : [255, 255, 255]
-      )
-  }
+  for (const r of regions) fillRegion(raw.data, raw.width, raw.height, raw.channels, r, rgb)
   return encode(original, raw, raw.format)
 }
 
@@ -79,10 +65,9 @@ export async function writeCensored(
   input: string,
   output: string,
   regions: Box[],
-  paint: CensorPaint,
-  block: number
+  rgb: readonly [number, number, number]
 ): Promise<void> {
-  writeAtomic(output, await renderCensored(input, regions, paint, block))
+  writeAtomic(output, await renderCensored(input, regions, rgb))
 }
 
 /**

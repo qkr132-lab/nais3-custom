@@ -3,7 +3,7 @@ import { EyeOff, FolderOpen, Loader2, Play, ScanEye, Square, Sparkles } from 'lu
 import {
   CENSOR_PARTS,
   DEFAULT_CENSOR_OPTIONS,
-  mosaicBlockSize,
+  DEFAULT_NAI_CENSOR_TAG,
   type CensorFileResult,
   type CensorMethod,
   type CensorOptions,
@@ -15,6 +15,7 @@ import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { Button } from './ui/button'
+import { Input } from './ui/input'
 import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
 
@@ -26,17 +27,8 @@ const PART_LABEL: Record<CensorPart, string> = Object.fromEntries(
 ) as Record<CensorPart, string>
 
 const METHODS: { id: CensorMethod; label: string; hint: string }[] = [
-  { id: 'mosaic', label: '모자이크', hint: '긴 변의 1/100 칸 (판매처 기준), 이 PC에서 바로' },
-  { id: 'black', label: '검은 막대', hint: '검은색으로 덮기' },
-  { id: 'white', label: '흰 가림', hint: '흰색으로 덮기' },
+  { id: 'fill', label: '색 가림', hint: '고른 색으로 덮기, 이 PC에서 바로' },
   { id: 'nai', label: 'NAI 인페인팅', hint: '검열 태그를 NAI가 그림 — Opus 무료 조건만, 시험 기능' }
-]
-
-const NAI_TAGS: CensorOptions['naiTag'][] = [
-  'mosaic censoring',
-  'bar censor',
-  'blank censor',
-  'heart censor'
 ]
 
 const PHASE_LABEL: Record<CensorProgress['phase'], string> = {
@@ -142,7 +134,7 @@ export function CensorMode(): React.JSX.Element {
     if (options.method === 'nai') {
       const ok = await askConfirm('NAI 인페인팅으로 검열', {
         message:
-          '찾은 그림마다 NAI 인페인팅을 한 번씩 보냅니다. Opus 무료 조건(1024×1024 이하·64 배수·28스텝)만 보내고, 한 번이라도 Anlas가 줄거나 V5 무료 한도가 바닥나면 그 자리에서 멈춥니다. 그래도 무료 한도는 장수만큼 줄어듭니다. 먼저 「NAI로 1장 시험」을 해보길 권합니다.',
+          '찾은 그림마다 NAI 인페인팅을 한 번씩 보냅니다. Opus 무료 조건(1024×1024 이하·64 배수·18스텝)만 보내고, 한 번이라도 Anlas가 줄거나 V5 무료 한도가 바닥나면 그 자리에서 멈춥니다. 그래도 무료 한도는 장수만큼 줄어듭니다. 먼저 「NAI로 1장 시험」을 해보길 권합니다.',
         confirmLabel: '시작',
         important: true
       })
@@ -167,6 +159,9 @@ export function CensorMode(): React.JSX.Element {
     <div className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-hidden p-4">
       {/* 설정 */}
       <div className="flex w-[380px] min-w-[260px] max-w-[45%] shrink flex-col gap-3 overflow-auto pr-1">
+        <div className="rounded-md border border-accent/40 bg-accent-soft px-3 py-2 text-[12px] text-ink">
+          테스트 중인 기능입니다 — 가린 결과를 직접 확인한 뒤 쓰세요.
+        </div>
         {status?.runtime && (
           <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] text-danger">
             {status.runtime}
@@ -249,24 +244,14 @@ export function CensorMode(): React.JSX.Element {
           <p className="text-[11px] text-faint">
             {METHODS.find((m) => m.id === options.method)?.hint}
           </p>
-          {options.method === 'mosaic' && (
-            <SliderRow
-              label={(v) => `모자이크 칸 — 1024px 그림 기준 ${mosaicBlockSize(1024, 1024, v)}px`}
-              value={options.mosaicScale}
-              min={1}
-              max={3}
-              step={0.25}
-              onChange={(v) => update({ mosaicScale: v })}
+          {options.method === 'fill' && (
+            <FillColorField
+              value={options.fillColor}
+              onChange={(fillColor) => update({ fillColor })}
             />
           )}
           {options.method === 'nai' && (
-            <div className="flex flex-wrap gap-1.5">
-              {NAI_TAGS.map((t) => (
-                <Chip key={t} active={options.naiTag === t} onClick={() => update({ naiTag: t })}>
-                  {t}
-                </Chip>
-              ))}
-            </div>
+            <NaiTagField value={options.naiTag} onChange={(naiTag) => update({ naiTag })} />
           )}
         </Section>
 
@@ -292,13 +277,17 @@ export function CensorMode(): React.JSX.Element {
           <Toggle
             label={
               status?.gemma.model
-                ? 'Gemma로 한 번 더 확인 — 여성 성기를 더 찾음 (장당 2초)'
-                : 'Gemma로 한 번 더 확인 (없음)'
+                ? 'Gemma로 한 번 더 확인 (실험적 기능) — 여성 성기를 더 찾음'
+                : 'Gemma로 한 번 더 확인 (실험적 기능, 없음)'
             }
             checked={options.gemma}
             disabled={!status?.gemma.model && !options.gemma}
             onChange={(v) => update({ gemma: v })}
           />
+          <p className="text-[11px] text-faint">
+            권장 사양: NVIDIA 그래픽카드, 그래픽 메모리 12GB 이상 (16GB에서 장당 약 2초로 시험). PC
+            성능에 따라 느리거나 켜지지 않을 수 있습니다.
+          </p>
           {!status?.gemma.model && (
             <p className="text-[11px] text-faint">
               {status?.gemma.dir} 에 llama-server와 Gemma GGUF(모델·mmproj)를 두면 켤 수 있습니다.
@@ -626,6 +615,88 @@ function Empty(): React.JSX.Element {
     <div className="flex flex-col items-center gap-2 text-[12px] text-faint">
       <EyeOff size={22} />
       「미리보기」로 첫 그림을 확인하세요
+    </div>
+  )
+}
+
+/** NAI 검열 태그 — 적는 동안은 따로 들고, 칸을 벗어나거나 Enter면 저장 */
+function NaiTagField({
+  value,
+  onChange
+}: {
+  value: string
+  onChange: (v: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value)
+  // 밖에서 값이 바뀌면(설정 불러오기 등) 적던 것을 새 값으로 — 렌더 중에 맞춘다
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value)
+  }
+  const commit = (): void => {
+    const v = draft.trim()
+    if (v && v !== value) onChange(v)
+    else setDraft(value)
+  }
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[12px] text-muted">검열 태그 (프롬프트 끝에 그대로 붙음)</span>
+      <Input
+        value={draft}
+        spellCheck={false}
+        placeholder={DEFAULT_NAI_CENSOR_TAG}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
+      />
+    </label>
+  )
+}
+
+const FILL_PRESETS = ['#ffffff', '#000000']
+
+/** 덮는 색 — 흰색·검은색 바로 고르기 + 색 고르기 (고르는 동안은 따로 들고 놓으면 저장) */
+function FillColorField({
+  value,
+  onChange
+}: {
+  value: string
+  onChange: (v: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value)
+  // 밖에서 값이 바뀌면(설정 불러오기 등) 적던 것을 새 값으로 — 렌더 중에 맞춘다
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value)
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[12px] text-muted">색</span>
+      {FILL_PRESETS.map((c) => (
+        <button
+          key={c}
+          title={c}
+          className={cn(
+            'h-6 w-6 rounded-md border',
+            value === c ? 'border-accent ring-1 ring-accent' : 'border-line'
+          )}
+          style={{ background: c }}
+          onClick={() => onChange(c)}
+        />
+      ))}
+      <input
+        type="color"
+        value={draft}
+        title="색 고르기"
+        className="h-6 w-8 cursor-pointer rounded-md border border-line bg-transparent p-0"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft !== value && onChange(draft)}
+      />
+      <span className="font-mono text-[11px] text-faint">{draft}</span>
     </div>
   )
 }

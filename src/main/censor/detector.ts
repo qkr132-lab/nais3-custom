@@ -6,6 +6,7 @@ import {
   nms,
   partOfLabel,
   unletterbox,
+  type Box,
   type Detection
 } from '../../shared/censor'
 import { parseImgsz, parseNames, readOnnxMetadata } from './onnx-meta'
@@ -66,7 +67,12 @@ export interface DetectResult {
   width: number
   height: number
   detections: Detection[]
+  /** 얼굴 박스 (얼굴 클래스가 있는 모델만) — 입을 성기로 잘못 본 박스를 거르는 데 쓴다 */
+  faces: Box[]
 }
+
+/** 얼굴로 인정하는 점수 */
+const FACE_SCORE = 0.3
 
 export class Detector {
   private constructor(
@@ -125,8 +131,13 @@ export class Detector {
       decodeYolo(tensor.data as Float32Array, tensor.dims, this.info.labels.length, conf)
     )
     const detections: Detection[] = []
+    const faces: Box[] = []
     for (const d of decoded) {
       const label = this.info.labels[d.labelIndex] ?? ''
+      if (/face/i.test(label)) {
+        if (d.score >= FACE_SCORE) faces.push(unletterbox(d.box, lb))
+        continue
+      }
       const part = partOfLabel(label)
       if (!part) continue
       detections.push({
@@ -137,7 +148,7 @@ export class Detector {
         source: 'detector'
       })
     }
-    return { width, height, detections }
+    return { width, height, detections, faces }
   }
 
   async close(): Promise<void> {

@@ -6,6 +6,7 @@ import {
   decodeYolo,
   expandBox,
   fillRegion,
+  hexToRgb,
   letterbox,
   mergeBoxes,
   mosaicBlockSize,
@@ -13,7 +14,6 @@ import {
   normalizeCensorOptions,
   parseGemmaBoxes,
   partOfLabel,
-  pixelateRegion,
   thresholdsFor,
   unletterbox,
   type Detection
@@ -96,7 +96,6 @@ describe('가릴 영역', () => {
     expect(mosaicBlockSize(1024, 1024)).toBe(11)
     expect(mosaicBlockSize(832, 1216)).toBe(13)
     expect(mosaicBlockSize(300, 200)).toBe(4)
-    expect(mosaicBlockSize(1024, 1024, 2)).toBe(22)
   })
 
   it('넓히기는 가운데 기준, 최소 한 변, 이미지 밖은 자름', () => {
@@ -147,20 +146,6 @@ describe('가릴 영역', () => {
 })
 
 describe('모자이크·가림막', () => {
-  it('칸마다 평균색, 알파는 그대로', () => {
-    const w = 4
-    const h = 2
-    const buf = new Uint8Array(w * h * 4)
-    for (let i = 0; i < w * h; i++) buf.set([i * 10, 0, 0, 200 + i], i * 4)
-    pixelateRegion(buf, w, h, 4, { x0: 0, y0: 0, x1: 2, y1: 2 }, 2)
-    // (0,0)(1,0)(0,1)(1,1) = 0,10,40,50 → 평균 25
-    expect(buf[0]).toBe(25)
-    expect(buf[4]).toBe(25)
-    expect(buf[16]).toBe(25)
-    expect(buf[3]).toBe(200) // 알파 유지
-    expect(buf[8]).toBe(20) // 영역 밖
-  })
-
   it('가림막은 한 색으로', () => {
     const buf = new Uint8Array(2 * 1 * 3).fill(7)
     fillRegion(buf, 2, 1, 3, { x0: 1, y0: 0, x1: 2, y1: 1 }, [0, 0, 0])
@@ -196,6 +181,47 @@ describe('탐지기 + Gemma 합치기', () => {
     expect(r.accepted).toEqual([])
   })
 
+  it('Gemma가 다른 자리에서 본 부위로는 살리지 않는다 (입 같은 엉뚱한 곳)', () => {
+    const low = det('vulva', 0.08, { x0: 100, y0: 100, x1: 120, y1: 120 }) // 입 근처
+    const r = combineDetections({
+      primary: [low],
+      extra: [],
+      gemma: [{ part: 'vulva', box: { x0: 400, y0: 600, x1: 460, y1: 660 } }], // 실제 보지
+      thresholds: th
+    })
+    expect(r.accepted).toEqual([])
+    // Gemma 좌표가 조금 빗나가도(1.5배 안) 겹치면 살린다
+    const near = combineDetections({
+      primary: [low],
+      extra: [],
+      gemma: [{ part: 'vulva', box: { x0: 122, y0: 100, x1: 142, y1: 120 } }],
+      thresholds: th
+    })
+    expect(near.accepted).toHaveLength(1)
+  })
+
+  it('얼굴 안의 여성 성기·항문은 버리고, 남성 성기는 점수로 넘은 것만 남긴다', () => {
+    const face = { x0: 80, y0: 80, x1: 160, y1: 160 }
+    const inFace = { x0: 100, y0: 120, x1: 130, y1: 140 }
+    const r = combineDetections({
+      primary: [det('vulva', 0.9, inFace), det('penis', 0.9, inFace), det('penis', 0.08, inFace)],
+      extra: [det('anus', 0.9, inFace)],
+      gemma: [{ part: 'penis', box: inFace }],
+      faces: [face],
+      thresholds: th
+    })
+    expect(r.accepted.map((d) => [d.part, d.source])).toEqual([['penis', 'detector']])
+    // 얼굴 밖이면 그대로
+    const out = combineDetections({
+      primary: [det('vulva', 0.9, { x0: 300, y0: 300, x1: 330, y1: 330 })],
+      extra: [],
+      gemma: null,
+      faces: [face],
+      thresholds: th
+    })
+    expect(out.accepted).toHaveLength(1)
+  })
+
   it('Gemma 혼자 본 부위는 가리지 않는다', () => {
     const gemma = [{ part: 'anus' as const, box: { x0: 0, y0: 0, x1: 5, y1: 5 } }]
     expect(combineDetections({ primary: [], extra: [], gemma, thresholds: th })).toEqual({
@@ -228,11 +254,30 @@ describe('Gemma 응답 읽기', () => {
 
 describe('설정 읽기', () => {
   it('모르는 값은 기본값, 범위 밖은 자름', () => {
-    const o = normalizeCensorOptions({ method: 'laser', mosaicScale: 99, parts: ['vulva', 'x'] })
-    expect(o.method).toBe('mosaic')
-    expect(o.mosaicScale).toBe(4)
+    const o = normalizeCensorOptions({ method: 'laser', parts: ['vulva', 'x'] })
+    expect(o.method).toBe('fill')
+    expect(o.fillColor).toBe('#ffffff')
+    // 예전 방식은 색 가림으로 — 검은 막대는 검은색, 모자이크·흰 가림은 흰색
+    expect(normalizeCensorOptions({ method: 'black' })).toMatchObject({
+      method: 'fill',
+      fillColor: '#000000'
+    })
+    expect(normalizeCensorOptions({ method: 'mosaic' }).fillColor).toBe('#ffffff')
+    expect(normalizeCensorOptions({ method: 'nai' }).method).toBe('nai')
+    expect(normalizeCensorOptions({ fillColor: '#FF00aa' }).fillColor).toBe('#ff00aa')
+    expect(normalizeCensorOptions({ fillColor: 'red' }).fillColor).toBe('#ffffff')
+    expect(hexToRgb('#ff8000')).toEqual([255, 128, 0])
     expect(o.parts).toEqual(['vulva'])
     expect(normalizeCensorOptions(null).parts).toEqual(['vulva', 'penis', 'testicles', 'anus'])
+    // NAI 검열 태그 — 적은 그대로, 예전 칩 값·빈 값은 새 기본값
+    expect(normalizeCensorOptions(null).naiTag).toBe('3::completely white censor::')
+    expect(normalizeCensorOptions({ naiTag: 'mosaic censoring' }).naiTag).toBe(
+      '3::completely white censor::'
+    )
+    expect(normalizeCensorOptions({ naiTag: '  ' }).naiTag).toBe('3::completely white censor::')
+    expect(normalizeCensorOptions({ naiTag: ' 2.5::bar censor:: ' }).naiTag).toBe(
+      '2.5::bar censor::'
+    )
   })
 })
 

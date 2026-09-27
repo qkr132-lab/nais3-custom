@@ -10,6 +10,7 @@ import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import {
   censorRegions,
   combineDetections,
+  hexToRgb,
   mosaicBlockSize,
   thresholdsFor,
   type CensorFileResult,
@@ -20,7 +21,14 @@ import {
 } from '../../shared/censor'
 import { previewDataUrl, renderCensored, writeCensored } from './apply'
 import { Detector, runtimeProblem } from './detector'
-import { askGemma, defaultGemmaDir, findGemma, startGemma, type GemmaSetup } from './gemma'
+import {
+  askGemma,
+  defaultGemmaDir,
+  findGemma,
+  startGemma,
+  stopGemma,
+  type GemmaSetup
+} from './gemma'
 import { BUILTIN_MODELS, builtinPath, downloadModel, isInstalled } from './models'
 import { censorWithNai, naiPreflight, type NaiCensorContext } from './nai'
 
@@ -58,8 +66,11 @@ export function censorResults(): CensorFileResult[] {
 }
 
 /** 중단 — 파일 사이는 물론, NAI 대기·요청 중에도 멈춘다 */
+/** 중단 — 하던 요청도 끊고 Gemma를 바로 끈다 (탐지기는 이번 그림이 끝나면 닫힌다) */
 export function cancelCensor(): void {
-  if (progress.running) abort?.abort()
+  if (!progress.running) return
+  abort?.abort()
+  stopGemma()
 }
 
 /** 실제 경로 (정션·대소문자까지 풀어서) — 아직 없는 폴더는 있는 조상까지 풀고 나머지를 붙인다 */
@@ -129,7 +140,8 @@ interface Detectors {
 
 async function prepare(
   options: CensorOptions,
-  report: (patch: Partial<CensorProgress>) => void
+  report: (patch: Partial<CensorProgress>) => void,
+  signal?: AbortSignal
 ): Promise<Detectors> {
   const problem = await runtimeProblem()
   if (problem) throw new Error(problem)
@@ -142,7 +154,7 @@ async function prepare(
         `Gemma를 찾지 못했습니다 — ${defaultGemmaDir()} 에 llama-server와 GGUF를 두세요`
       )
     report({ phase: 'gemma', message: '처음엔 1분쯤 걸립니다' })
-    await startGemma(gemma)
+    await startGemma(gemma, signal)
   }
   const wanted = BUILTIN_MODELS.filter((_, i) => i === 0 || options.extraModel)
   for (const model of wanted) {
@@ -167,13 +179,16 @@ async function askGemmaSafely(
   setup: GemmaSetup,
   file: string,
   width: number,
-  height: number
+  height: number,
+  signal?: AbortSignal
 ): Promise<Awaited<ReturnType<typeof askGemma>>> {
   try {
-    return await askGemma(file, width, height)
-  } catch {
-    await startGemma(setup)
-    return askGemma(file, width, height)
+    return await askGemma(file, width, height, signal)
+  } catch (e) {
+    // 중단해서 끊긴 것이면 다시 켜지 않는다
+    if (signal?.aborted) throw e
+    await startGemma(setup, signal)
+    return askGemma(file, width, height, signal)
   }
 }
 
@@ -181,7 +196,8 @@ async function askGemmaSafely(
 async function analyze(
   file: string,
   det: Detectors,
-  options: CensorOptions
+  options: CensorOptions,
+  signal?: AbortSignal
 ): Promise<{
   width: number
   height: number
@@ -191,17 +207,19 @@ async function analyze(
 }> {
   const th = thresholdsFor(options.sensitivity)
   const primary = await det.primary.detect(file, th.confirm)
-  const extra = det.extra ? (await det.extra.detect(file, th.confirm)).detections : []
+  const extra = det.extra ? await det.extra.detect(file, th.confirm) : null
   const { width, height } = primary
-  const gemma = det.gemma ? await askGemmaSafely(det.gemma, file, width, height) : null
+  const gemma = det.gemma ? await askGemmaSafely(det.gemma, file, width, height, signal) : null
   const { accepted } = combineDetections({
     primary: primary.detections,
-    extra,
+    extra: extra?.detections ?? [],
     gemma,
+    faces: [...primary.faces, ...(extra?.faces ?? [])],
     thresholds: th
   })
   const parts = new Set(options.parts)
-  const block = mosaicBlockSize(width, height, options.mosaicScale)
+  // 영역을 맞추는 격자 — 긴 변의 1/100 (작은 박스가 너무 잘게 남지 않게)
+  const block = mosaicBlockSize(width, height)
   const regions = censorRegions(accepted, {
     parts,
     expandScale: options.expandScale,
@@ -224,12 +242,17 @@ export async function analyzeFile(
   file: string,
   report: (patch: Partial<CensorProgress>) => void
 ): Promise<Awaited<ReturnType<typeof analyze>>> {
-  const det = await prepare(options, report)
   try {
-    return await analyze(file, det, options)
+    const det = await prepare(options, report)
+    try {
+      return await analyze(file, det, options)
+    } finally {
+      await det.primary.close()
+      await det.extra?.close()
+    }
   } finally {
-    await det.primary.close()
-    await det.extra?.close()
+    // 미리보기가 끝나면 Gemma도 바로 끈다
+    if (options.gemma) stopGemma()
   }
 }
 
@@ -251,8 +274,7 @@ export async function previewCensor(
   if (!target) throw new Error('폴더에 그림이 없습니다')
   try {
     const a = await analyzeFile(options, target, report)
-    const paint = options.method === 'nai' ? 'mosaic' : options.method
-    const rendered = await renderCensored(target, a.regions, paint, a.block)
+    const rendered = await renderCensored(target, a.regions, hexToRgb(options.fillColor))
     return {
       file: target,
       before: await previewDataUrl(target),
@@ -291,7 +313,7 @@ export async function runCensor(
 
   let det: Detectors | null = null
   try {
-    det = await prepare(options, (p) => report(p, true))
+    det = await prepare(options, (p) => report(p, true), controller.signal)
     const files = listImages(options.folder, options.recursive, out)
     report({ phase: 'work', total: files.length, message: '' }, true)
     if (options.method === 'nai') {
@@ -309,7 +331,7 @@ export async function runCensor(
           result.status = 'skipped'
         } else {
           mkdirSync(dirname(dest), { recursive: true })
-          const a = await analyze(file, det, options)
+          const a = await analyze(file, det, options, controller.signal)
           result.parts = [...new Set(a.accepted.map((d) => d.part))]
           if (!a.regions.length) {
             if (options.copyClean) copyFileSync(file, dest)
@@ -317,7 +339,7 @@ export async function runCensor(
             await censorWithNai(nai!, file, dest, a.regions, options, a.width, a.height)
             result.status = 'censored'
           } else {
-            await writeCensored(file, dest, a.regions, options.method, a.block)
+            await writeCensored(file, dest, a.regions, hexToRgb(options.fillColor))
             result.status = 'censored'
           }
         }
@@ -363,6 +385,8 @@ export async function runCensor(
       true
     )
   } finally {
+    // 끝나든 멈추든 Gemma·탐지기를 바로 끈다
+    if (options.gemma) stopGemma()
     await det?.primary.close()
     await det?.extra?.close()
     if (abort === controller) abort = null
@@ -383,7 +407,7 @@ function writeReport(out: string, options: CensorOptions): void {
   const lines = [
     `자동 검열 결과 — ${new Date().toLocaleString('ko-KR')}`,
     `원본 폴더: ${basename(resolve(options.folder))}`,
-    `방식: ${options.method} · 부위: ${options.parts.map((p) => PART_KO[p]).join(', ')}`,
+    `방식: ${options.method === 'nai' ? `NAI 인페인팅 (${options.naiTag})` : `색 가림 ${options.fillColor}`} · 부위: ${options.parts.map((p) => PART_KO[p]).join(', ')}`,
     `검열 ${lastResults.filter((r) => r.status === 'censored').length} · 탐지 없음 ${lastResults.filter((r) => r.status === 'clean').length} · 건너뜀 ${lastResults.filter((r) => r.status === 'skipped').length} · 실패 ${failed.length}`,
     '',
     '[실패]',
