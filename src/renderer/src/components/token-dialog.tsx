@@ -285,6 +285,7 @@ function StorageSection(): React.JSX.Element {
   const [autoSave, setAutoSave] = useState(true)
   const [format, setFormat] = useState('png')
   const [dateFolders, setDateFolders] = useState(true)
+  const [saveMeta, setSaveMeta] = useState(true)
   const [imgTrash, setImgTrash] = useState('60') // 이미지 삭제 유예 분 (커스텀, 기본 60)
 
   useEffect(() => {
@@ -297,6 +298,9 @@ function StorageSection(): React.JSX.Element {
     void window.nais
       .invoke('settings:get', { key: 'date_folders' })
       .then(({ value }) => setDateFolders(value !== '0'))
+    void window.nais
+      .invoke('settings:get', { key: 'save_metadata' })
+      .then(({ value }) => setSaveMeta(value !== '0'))
     void window.nais
       .invoke('settings:get', { key: 'image_trash_minutes' })
       .then(({ value }) => setImgTrash(value || '60'))
@@ -320,6 +324,21 @@ function StorageSection(): React.JSX.Element {
             onCheckedChange={(v) => {
               setDateFolders(v)
               void window.nais.invoke('settings:set', { key: 'date_folders', value: v ? '1' : '0' })
+            }}
+          />
+        </Row>
+        <Row
+          label="메타데이터 함께 저장"
+          hint="끄면 저장·내보내는 이미지에서 프롬프트·시드 같은 생성 정보를 뺌, 앱 안 기록은 그대로"
+        >
+          <Switch
+            checked={saveMeta}
+            onCheckedChange={(v) => {
+              setSaveMeta(v)
+              void window.nais.invoke('settings:set', {
+                key: 'save_metadata',
+                value: v ? '1' : '0'
+              })
             }}
           />
         </Row>

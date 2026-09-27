@@ -1,10 +1,11 @@
 import { app } from 'electron'
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { isAbsolute, join, relative } from 'path'
 import sharp from 'sharp'
 import type { DirectorMethod, ImageMetadata } from '../../shared/types'
 import { getDb } from '../db'
 import { getSetting } from '../db/settings'
+import { stripImageMetadata } from './strip-metadata'
 
 /**
  * 생성 이미지 저장 규칙 (P3의 핵심):
@@ -68,6 +69,31 @@ export function isUnderImagesRoot(filePath: string): boolean {
   )
 }
 
+/** 저장·내보내는 이미지 파일에 생성 메타데이터를 남길지 (설정 save_metadata, 기본 켬) */
+export function keepImageMetadata(): boolean {
+  return getSetting('save_metadata') !== '0'
+}
+
+/** 앱 밖으로 내보내는 이미지 바이트 — 설정이 꺼져 있으면 메타데이터 청크를 무손실로 뺀다.
+ *  DB(payload_json)의 생성 정보는 그대로라 앱 안 기록·메타데이터 보기는 영향 없음.
+ *  여러 장을 내보낼 땐 keep을 한 번만 읽어 넘긴다 */
+export async function imageBytesForOutput(
+  buf: Buffer,
+  keep = keepImageMetadata()
+): Promise<Buffer> {
+  return keep ? buf : stripImageMetadata(buf)
+}
+
+/** 이미지 파일을 앱 밖 경로로 복사 — 켜져 있으면 원본 그대로, 꺼져 있으면 메타데이터를 뺀 바이트로 쓴다 */
+export async function copyImageForOutput(
+  src: string,
+  dest: string,
+  keep = keepImageMetadata()
+): Promise<void> {
+  if (keep) copyFileSync(src, dest)
+  else writeFileSync(dest, await stripImageMetadata(readFileSync(src)))
+}
+
 export async function saveGeneratedImage(input: {
   png: Buffer
   sentPayload: string
@@ -107,6 +133,13 @@ export async function saveGeneratedImage(input: {
   mkdirSync(monthDir, { recursive: true })
 
   const ext = input.format ?? 'png'
+  // 메타데이터 저장을 끄면 NAI 청크를 빼고 NAIS3 청크도 넣지 않는다 (라이브러리 보관본 포함).
+  // WebP 알파 정리는 비동기라 파일 이름(연번)을 고르기 전에 끝내 둔다 — 고른 뒤 쓰기까지 await 없음
+  const fileBuffer = !keepImageMetadata()
+    ? await stripImageMetadata(input.png)
+    : ext === 'png' && input.localMetadata
+      ? injectNais3Params(input.png, input.localMetadata)
+      : input.png
   let filePath: string
   if (input.sceneName) {
     // 씬 이미지는 씬 이름_N (폴더 내 기존 연번에 이어서 — ZIP 내보내기와 동일 형식)
@@ -122,10 +155,6 @@ export async function saveGeneratedImage(input: {
     const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
     filePath = join(monthDir, `NAIS3_${stamp}_${input.seed}.${ext}`)
   }
-  const fileBuffer =
-    ext === 'png' && input.localMetadata
-      ? injectNais3Params(input.png, input.localMetadata)
-      : input.png
   writeFileSync(filePath, fileBuffer)
 
   // 썸네일: 카드가 커질 수 있어 640px로 (화질 열화 방지). webp q90

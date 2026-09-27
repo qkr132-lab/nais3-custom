@@ -1,14 +1,6 @@
 import { normalizeBackground, type SceneBackground } from '../../shared/background-tags'
 import { BrowserWindow, dialog, shell } from 'electron'
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  utimesSync,
-  writeFileSync
-} from 'fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'fs'
 import { basename, extname, isAbsolute, join, relative } from 'path'
 import sharp from 'sharp'
 import JSZip from 'jszip'
@@ -38,7 +30,12 @@ import {
   type SceneExtrasFile,
   type SceneSetup
 } from '../../shared/scene-bundle'
-import { libraryRoot } from '../images/storage'
+import {
+  copyImageForOutput,
+  imageBytesForOutput,
+  keepImageMetadata,
+  libraryRoot
+} from '../images/storage'
 import { trashFile } from '../trash'
 import { assignExportName, safeName } from './export-name'
 
@@ -1334,6 +1331,8 @@ async function zipFiles(rows: ExportRow[], defaultName: string): Promise<number>
   // 씬 순서 = 시간 순서 (커스텀): 첫 씬이 가장 오래된 날짜, 마지막 씬이 최신
   const baseTime = Date.now() - rows.length * TIME_STEP_MS
   const manifest: { file: string; scene: string }[] = []
+  // 메타데이터 저장을 껐으면 ZIP에 넣기 전에 생성 정보를 뺀다
+  const keepMeta = keepImageMetadata()
   let added = 0
   for (const r of rows) {
     let buf: Buffer
@@ -1347,7 +1346,9 @@ async function zipFiles(rows: ExportRow[], defaultName: string): Promise<number>
     const label = r.queue_label?.trim() ? safeName(r.queue_label) : ''
     const name = assignExportName(r.scene_name, r.file_path, used, label || '.', r.export_no)
     const entryPath = label ? `${label}/${name}` : name
-    zip.file(entryPath, buf, { date: new Date(baseTime + added * TIME_STEP_MS) })
+    zip.file(entryPath, await imageBytesForOutput(buf, keepMeta), {
+      date: new Date(baseTime + added * TIME_STEP_MS)
+    })
     if (r.export_no != null) manifest.push({ file: entryPath, scene: r.scene_name ?? '' })
     added++
   }
@@ -1514,6 +1515,8 @@ export async function exportToFolder(
   // 씬 순서 = 시간 순서 (커스텀): 첫 씬 파일이 가장 오래된 수정 날짜, 마지막 씬이 최신
   const baseTime = Date.now() - plan.length * TIME_STEP_MS
   const manifest: { file: string; scene: string }[] = []
+  // 메타데이터 저장을 껐으면 원본 복사 대신 생성 정보를 뺀 바이트를 쓴다
+  const keepMeta = keepImageMetadata()
   let copied = 0
   let skipped = 0
   for (let i = 0; i < plan.length; i++) {
@@ -1541,7 +1544,7 @@ export async function exportToFolder(
       // overwrite: target 그대로 (기존 파일 덮어씀)
     }
     try {
-      copyFileSync(p.src, target)
+      await copyImageForOutput(p.src, target, keepMeta)
       // 씬 순서대로 수정 시간 부여 — 탐색기 날짜 정렬 = 씬 순서
       const t = new Date(baseTime + i * TIME_STEP_MS)
       try {

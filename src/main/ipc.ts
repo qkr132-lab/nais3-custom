@@ -205,8 +205,15 @@ import {
   setSyncConfig,
   syncStatus
 } from './r2/sync'
-import { imagesRoot, isUnderImagesRoot, sceneDir, scenesRoot } from './images/storage'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  copyImageForOutput,
+  imagesRoot,
+  isUnderImagesRoot,
+  keepImageMetadata,
+  sceneDir,
+  scenesRoot
+} from './images/storage'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, extname, join } from 'path'
 import sharp from 'sharp'
 import { verifyToken } from './nai/client'
@@ -752,19 +759,21 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       // 아이콘 실패해도 드래그는 진행
     }
 
-    // 연번 접미사(_N) 제거한 이름의 임시 복사본 (씬 이미지 "이름_3.png" → "이름.png")
+    // 연번 접미사(_N) 제거한 이름의 임시 복사본 (씬 이미지 "이름_3.png" → "이름.png").
+    // 메타데이터 저장을 껐으면 연번이 없어도 메타데이터를 뺀 임시 복사본을 드래그한다.
     let dragPath = filePath
     const ext = extname(filePath)
     const base = basename(filePath, ext)
     const m = /^(.+)_(\d+)$/.exec(base)
-    if (m) {
+    const keepMeta = keepImageMetadata()
+    if (m || !keepMeta) {
       try {
         const dragDir = join(app.getPath('temp'), 'nais3-drag')
         // 이전 드래그 잔여물 정리 (startDrag가 블로킹이라 이 시점엔 사용 중 아님)
         rmSync(dragDir, { recursive: true, force: true })
         mkdirSync(dragDir, { recursive: true })
-        dragPath = join(dragDir, `${m[1]}${ext}`)
-        copyFileSync(filePath, dragPath)
+        dragPath = join(dragDir, `${m ? m[1] : base}${ext}`)
+        await copyImageForOutput(filePath, dragPath, keepMeta)
       } catch {
         dragPath = filePath // 복사 실패 시 원본 그대로
       }
@@ -798,7 +807,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       filters: [{ name: 'PNG', extensions: ['png'] }]
     })
     if (result.canceled || !result.filePath) return { saved: false }
-    copyFileSync(filePath, result.filePath)
+    await copyImageForOutput(filePath, result.filePath)
     return { saved: true }
   })
 

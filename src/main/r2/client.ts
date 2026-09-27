@@ -6,6 +6,7 @@ import type { R2Object, R2UploadStatus } from '../../shared/types'
 import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
 import { broadcast } from '../ipc'
+import { imageBytesForOutput } from '../images/storage'
 
 /**
  * Cloudflare R2 업로드 (커스텀).
@@ -207,12 +208,13 @@ const MIME: Record<string, string> = {
 /** Upload one local file to an exact R2 object key. */
 export async function r2PutFile(bucket: string, key: string, filePath: string): Promise<void> {
   const auth = await requireAuth()
-  const body = readFileSync(filePath)
+  // 프리셋 동기화 전용 — 생성 이미지라 메타데이터 저장을 껐으면 생성 정보를 빼고 올린다
+  const body = await imageBytesForOutput(readFileSync(filePath))
   const type = MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
   const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
     method: 'PUT',
     headers: { 'content-type': type },
-    body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    body: new Uint8Array(body)
   })
   if (!res.ok) throw new Error(`업로드 실패 (${res.status}): ${await errText(res)}`)
 }

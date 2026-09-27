@@ -71,6 +71,7 @@ const SETTINGS_KEYS = [
   'auto_save',
   'image_format',
   'date_folders',
+  'save_metadata',
   'scene_extras',
   // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기 (커스텀)
   'outfit_expose_acts',
