@@ -22,7 +22,6 @@ import { TooltipProvider } from './components/ui/tooltip'
 import { useCharactersStore } from './stores/characters-store'
 import { useOutfitsStore } from './stores/outfits-store'
 import { OutfitMode } from './components/outfit-mode'
-import { CensorMode } from './components/censor-mode'
 import { useFragmentsStore } from './stores/fragments-store'
 import { useCharRefsStore, useVibesStore } from './stores/refs-store'
 import { bindGenerationEvents, useGenerationStore } from './stores/generation-store'
@@ -199,8 +198,6 @@ export default function App(): React.JSX.Element {
             <SceneMode key={centerMode} kind={centerMode} />
           ) : centerMode === 'outfit' ? (
             <OutfitMode />
-          ) : centerMode === 'censor' ? (
-            <CensorMode />
           ) : centerMode === 'composition' ? (
             <CompositionMode />
           ) : centerMode === 'director' ? (
