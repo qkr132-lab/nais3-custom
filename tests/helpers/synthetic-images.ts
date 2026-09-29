@@ -241,6 +241,42 @@ export async function stealthWebp(
   return { webp: riff(chunks), pixels }
 }
 
+/**
+ * NAI V5 무손실 WebP 모양 — VP8X(알파·EXIF) + VP8L(색과 알파가 한 비트스트림) + EXIF.
+ * 알파 LSB에 stealth. magic을 빈 문자열로 주면 stealth 없이 만든다.
+ */
+export async function stealthWebpLossless(
+  opts: { magic?: string; transparent?: boolean } = {}
+): Promise<{ webp: Buffer; pixels: Buffer }> {
+  const { magic = 'stealth_pngcomp', transparent = false } = opts
+  const pixels = Buffer.alloc(SW * SH * 4)
+  for (let y = 0; y < SH; y++)
+    for (let x = 0; x < SW; x++) {
+      const p = (y * SW + x) * 4
+      pixels[p] = (x * 7 + y * 11) % 256
+      pixels[p + 1] = (x * y + 3) % 256
+      pixels[p + 2] = (180 - y * 3) % 256
+      pixels[p + 3] = transparent ? [0, 1, 96, 173, 255][(x + y * 2) % 5] : 255
+    }
+  if (magic) embedStealth(pixels, magic)
+  const lossless = await sharp(pixels, { raw: { width: SW, height: SH, channels: 4 } })
+    .webp({ lossless: true })
+    .toBuffer()
+  const vp8l = webpChunks(lossless).find((c) => c.type === 'VP8L')!
+  const vp8x = Buffer.alloc(10)
+  vp8x[0] = 0x10 | 0x08 // 알파 + EXIF
+  vp8x.writeUIntLE(SW - 1, 4, 3)
+  vp8x.writeUIntLE(SH - 1, 7, 3)
+  return {
+    webp: riff([
+      riffChunk('VP8X', vp8x),
+      riffChunk('VP8L', vp8l.bytes.subarray(8)),
+      riffChunk('EXIF', naiExif())
+    ]),
+    pixels
+  }
+}
+
 /** 알파 LSB(column-major) 앞 15바이트 — stealth 매직 자리 */
 export async function alphaMagic(buf: Buffer): Promise<string> {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true })

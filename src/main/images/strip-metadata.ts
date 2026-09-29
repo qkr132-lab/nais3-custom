@@ -7,8 +7,9 @@ import { crc32, deflateSync, inflateSync } from 'zlib'
  * - PNG: tEXt / iTXt / zTXt / eXIf 청크 제거 (IHDR·PLTE·tRNS·IDAT·IEND·색 청크는 그대로)
  *   알파 LSB에 숨은 stealth 정보가 있으면 그 비트만 지운 IDAT로 바꾼다 (RGB는 그대로)
  * - WebP: EXIF / XMP 청크 제거 + VP8X 플래그 비트 끄기 + RIFF 크기 보정
- *   NAI WebP(VP8X+ALPH+VP8)는 ALPH 알파 LSB에도 stealth 정보를 숨긴다 — 있으면 ALPH 청크만
- *   LSB를 지운 알파로 새로 만든다 (VP8 색 청크는 바이트 그대로)
+ *   NAI WebP는 알파 LSB에도 stealth 정보를 숨긴다 — 있으면 알파 LSB만 지운다
+ *   · 손실(VP8X+ALPH+VP8): ALPH 청크만 새로 만든다 (VP8 색 청크는 바이트 그대로)
+ *   · 무손실(VP8L, 알파가 색과 한 덩어리): VP8L을 무손실로 다시 압축한다 (보이는 색은 그대로)
  * - 그 밖의 포맷이나 구조가 깨진 파일은 손대지 않고 그대로 돌려준다.
  * WebP 알파를 읽고 다시 압축하는 데 sharp(libwebp)가 필요해 비동기다.
  */
@@ -242,6 +243,7 @@ function stripWebp(buf: Buffer): Buffer {
  */
 async function clearWebpStealthAlpha(buf: Buffer): Promise<Buffer> {
   const chunks = webpChunks(buf)
+  if (chunks?.some((c) => c.type === 'VP8L')) return clearVp8lStealthAlpha(buf, chunks)
   const vp8x = chunks?.[0]
   if (!chunks || vp8x?.type !== 'VP8X' || vp8x.bytes.length < 18) return buf
   const alphAt = chunks.findIndex((c) => c.type === 'ALPH')
@@ -270,6 +272,49 @@ async function clearWebpStealthAlpha(buf: Buffer): Promise<Buffer> {
     buf,
     chunks.map((c, i) => (i === alphAt ? alph : c.bytes))
   )
+}
+
+/**
+ * 무손실 WebP(VP8L) — 알파가 색과 한 비트스트림이라 ALPH만 바꿀 수 없다.
+ * RGBA로 풀어 알파 LSB에 매직이 있으면 알파를 위와 같은 규칙으로 바꾸고 무손실로 다시 압축해
+ * VP8L 청크만 갈아 끼운다(VP8X 등 나머지 청크는 그대로). 무손실이라 보이는 색은 그대로다
+ * (libwebp는 완전 투명(알파 0) 픽셀 밑의 색은 바꿀 수 있다 — 보이지 않는 값).
+ * NAI V5 무손실 WebP가 이 구성이다 (실제 결과물로 확인 — 손실 VP8+ALPH만 고쳤다가 놓쳤던 경우).
+ */
+async function clearVp8lStealthAlpha(buf: Buffer, chunks: WebpChunk[]): Promise<Buffer> {
+  const at = chunks.findIndex((c) => c.type === 'VP8L')
+  if (chunks.filter((c) => c.type === 'VP8L').length !== 1) return buf // 애니메이션 등은 손대지 않음
+  let rgba: Buffer
+  let width: number
+  let height: number
+  try {
+    const { data, info } = await sharp(buf)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+    if (info.channels !== 4) return buf
+    rgba = data
+    width = info.width
+    height = info.height
+  } catch {
+    return buf
+  }
+  if (width * height < STEALTH_MAGIC_BITS || !hasStealthMagic(rgba, width, height, 4)) return buf
+
+  for (let i = 3; i < rgba.length; i += 4) rgba[i] = rgba[i] >= 2 ? rgba[i] | 1 : 0
+  try {
+    const encoded = await sharp(rgba, { raw: { width, height, channels: 4 } })
+      .webp({ lossless: true })
+      .toBuffer()
+    const vp8l = webpChunks(encoded)?.find((c) => c.type === 'VP8L')
+    if (!vp8l) return buf
+    return joinWebp(
+      buf,
+      chunks.map((c, i) => (i === at ? vp8l.bytes : c.bytes))
+    )
+  } catch {
+    return buf
+  }
 }
 
 /**

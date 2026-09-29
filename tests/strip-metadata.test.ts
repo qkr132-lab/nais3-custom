@@ -19,6 +19,7 @@ import {
   rawPixels,
   stealthPng,
   stealthWebp,
+  stealthWebpLossless,
   webpChunks
 } from './helpers/synthetic-images'
 
@@ -281,6 +282,45 @@ describe('WebP — ALPH 알파 LSB에 숨은 stealth 정보', () => {
     const out = await stripImageMetadata(withExif)
     expect(webpChunks(out).map((c) => c.type)).not.toContain('EXIF')
     expect(chunkOf(out, 'ALPH')).toEqual(chunkOf(withExif, 'ALPH'))
+  })
+})
+
+describe('WebP — 무손실(VP8L) 알파에 숨은 stealth 정보 (NAI V5 무손실 결과물)', () => {
+  it('매직이 사라지고 EXIF가 빠지며, 보이는 색은 그대로·알파 차이는 1 이하', async () => {
+    const { webp, pixels } = await stealthWebpLossless()
+    expect(await alphaMagic(webp)).toBe('stealth_pngcomp')
+    const out = await stripImageMetadata(webp)
+    expect(await alphaMagic(out)).not.toMatch(/^stealth_png/)
+    expect(webpChunks(out).map((c) => c.type)).toEqual(['VP8X', 'VP8L'])
+    const px = await rawPixels(out)
+    for (let i = 0; i < px.length; i += 4) {
+      for (let c = 0; c < 3; c++) expect(px[i + c]).toBe(pixels[i + c])
+      expect(Math.abs(px[i + 3] - pixels[i + 3])).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('투명도가 섞여도 보이는 픽셀의 색은 그대로, 투명 0은 그대로 투명', async () => {
+    const { webp, pixels } = await stealthWebpLossless({ transparent: true })
+    const out = await stripImageMetadata(webp)
+    expect(await alphaMagic(out)).not.toMatch(/^stealth_png/)
+    const px = await rawPixels(out)
+    for (let i = 0; i < px.length; i += 4) {
+      const a = pixels[i + 3]
+      if (a <= 1) expect(px[i + 3]).toBe(0)
+      else {
+        expect(Math.abs(px[i + 3] - a)).toBeLessThanOrEqual(1)
+        for (let c = 0; c < 3; c++) expect(px[i + c]).toBe(pixels[i + c])
+      }
+    }
+  })
+
+  it('stealth가 없으면 VP8L은 그대로 두고 EXIF만 뺀다', async () => {
+    const { webp } = await stealthWebpLossless({ magic: '' })
+    const out = await stripImageMetadata(webp)
+    const vp8l = (b: Buffer): Buffer | undefined =>
+      webpChunks(b).find((c) => c.type === 'VP8L')?.bytes
+    expect(vp8l(out)!.equals(vp8l(webp)!)).toBe(true)
+    expect(webpChunks(out).map((c) => c.type)).toEqual(['VP8X', 'VP8L'])
   })
 })
 
