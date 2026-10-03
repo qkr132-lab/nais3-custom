@@ -1,10 +1,19 @@
 import { create } from 'zustand'
 import type { Outfit, OutfitPiece, TagKind } from '@shared/outfit'
-import { DEFAULT_EXPOSE_ACTS, type ExposeActs } from '@shared/auto-expose'
+import {
+  DEFAULT_EXPOSE_ACTS,
+  EXPOSE_ACTS_VERSION,
+  withDefaultActs,
+  type ExposeActs
+} from '@shared/auto-expose'
 import { promptTags } from '@shared/nude-strip'
 
 const ACTS_KEY = 'outfit_expose_acts'
 const STRIP_KEY = 'nude_strip_clothes'
+
+/** 저장 모양 — 어느 판의 기본 목록까지 더했는지(v)를 같이 적는다 */
+const actsJson = (acts: ExposeActs): string =>
+  JSON.stringify({ lower: acts.lower, chest: acts.chest, v: EXPOSE_ACTS_VERSION })
 
 /**
  * 복장 목록 (커스텀). 생성 요청을 만들 때 동기로 읽어야 해서 앱 시작 때 한 번 불러두고,
@@ -44,8 +53,15 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
     ])
     let acts = DEFAULT_EXPOSE_ACTS
     try {
-      const v = value ? (JSON.parse(value) as Partial<ExposeActs>) : null
-      if (v && Array.isArray(v.lower) && Array.isArray(v.chest)) acts = { lower: v.lower, chest: v.chest }
+      const v = value ? (JSON.parse(value) as Partial<ExposeActs> & { v?: number }) : null
+      if (v && Array.isArray(v.lower) && Array.isArray(v.chest)) {
+        acts = { lower: v.lower, chest: v.chest }
+        // 앱을 올려 기본 목록이 늘었으면 새 기본 태그를 더해 두고, 고친 것은 그대로 둔다
+        if (v.v !== EXPOSE_ACTS_VERSION) {
+          acts = withDefaultActs(acts)
+          void window.nais.invoke('settings:set', { key: ACTS_KEY, value: actsJson(acts) })
+        }
+      }
     } catch {
       // 깨진 설정은 기본 목록으로
     }
@@ -54,7 +70,7 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
 
   setActs: (acts) => {
     set({ acts })
-    void window.nais.invoke('settings:set', { key: ACTS_KEY, value: JSON.stringify(acts) })
+    void window.nais.invoke('settings:set', { key: ACTS_KEY, value: actsJson(acts) })
   },
 
   setStripOnNude: (stripOnNude) => {

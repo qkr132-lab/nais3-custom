@@ -6,7 +6,8 @@ import {
   exposeCandidates,
   exposePreview,
   neededAreas,
-  triggerAreas
+  triggerAreas,
+  withDefaultActs
 } from '../src/shared/auto-expose'
 import type { Outfit, OutfitPiece } from '../src/shared/outfit'
 
@@ -59,6 +60,45 @@ describe('nsfw 조각이 켜지는 장면', () => {
     expect(neededAreas(['<행위>, sex/kiss'], acts)).toEqual({})
     expect(neededAreas(['-1::sex::, kiss'], acts)).toEqual({})
     expect(neededAreas(['kiss, 1.2::sex::'], acts)).toEqual({ lower: 'sex' })
+  })
+
+  it('행위 태그를 단어 단위로 품은 장면 태그도 그 행위로 본다', () => {
+    expect(neededAreas(['spooning sex, penis inside pussy'], acts)).toEqual({
+      lower: 'spooning sex'
+    })
+    expect(neededAreas(['standing doggystyle'], acts)).toEqual({ lower: 'standing doggystyle' })
+    expect(neededAreas(['reverse suspended congress'], acts)).toEqual({
+      lower: 'reverse suspended congress'
+    })
+    expect(neededAreas(['2::pussy,penis,navel,nipples,breasts out::'], acts)).toEqual({
+      lower: 'pussy',
+      chest: 'nipples'
+    })
+    expect(neededAreas(['target#reverse paizuri, hand on breasts'], acts)).toEqual({
+      chest: 'reverse paizuri'
+    })
+    expect(neededAreas(['1.3::dildo riding, vaginal object insertion::'], acts)).toEqual({
+      lower: 'dildo riding'
+    })
+    expect(neededAreas(['3::nursing handjob, breast sucking::'], acts)).toEqual({
+      chest: 'nursing handjob'
+    })
+    // 단어 일부만 같은 것은 아니다
+    expect(neededAreas(['sexy pose, analysis'], acts)).toEqual({})
+    // 문장은 뜻이 반대일 수 있어 그대로 일치할 때만
+    expect(neededAreas(['she is seen from the side, her pussy is not shown at all'], acts)).toEqual(
+      {}
+    )
+  })
+
+  it('저장된 목록에 새 기본 태그를 더한다 — 고친 것은 그대로', () => {
+    const mine = { lower: ['spread legs', 'Doggystyle'], chest: [] }
+    const merged = withDefaultActs(mine)
+    expect(merged.lower.slice(0, 2)).toEqual(['spread legs', 'Doggystyle'])
+    expect(merged.lower.filter((t) => t.toLowerCase() === 'doggystyle')).toHaveLength(1)
+    expect(merged.lower).toContain('dildo riding')
+    expect(merged.chest).toEqual(acts.chest)
+    expect(withDefaultActs(acts)).toEqual(acts)
   })
 
   it('더는 젖히는 태그를 몰래 붙이지 않는다', () => {

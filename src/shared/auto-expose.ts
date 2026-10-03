@@ -30,20 +30,89 @@ export interface ExposeActs {
 
 export const DEFAULT_EXPOSE_ACTS: ExposeActs = {
   lower: [
-    'sex', 'vaginal', 'anal', 'cunnilingus', 'fingering', 'anal fingering', 'masturbation',
-    'female masturbation', 'clitoral stimulation', 'pussy', 'spread pussy', 'pussy juice', 'anus',
-    'spread anus', 'cum in pussy', 'cum in ass', 'creampie', 'anal creampie', 'doggystyle', 'missionary',
-    'cowgirl position', 'reverse cowgirl position', 'mating press', 'full nelson', 'piledriver (sex)',
-    'standing sex', 'spooning', 'amazon position', 'prone bone', 'suspended congress', 'sex from behind',
-    'sex from above', 'tribadism', 'facesitting', 'anilingus', 'object insertion', 'imminent penetration',
-    'imminent vaginal', 'imminent anal', 'tentacle sex', 'rape', 'after sex', 'after vaginal', 'after anal',
-    'cum on pussy', 'presenting'
+    'sex',
+    'vaginal',
+    'anal',
+    'cunnilingus',
+    'fingering',
+    'anal fingering',
+    'masturbation',
+    'female masturbation',
+    'clitoral stimulation',
+    'pussy',
+    'spread pussy',
+    'pussy juice',
+    'anus',
+    'spread anus',
+    'cum in pussy',
+    'cum in ass',
+    'creampie',
+    'anal creampie',
+    'doggystyle',
+    'missionary',
+    'cowgirl position',
+    'reverse cowgirl position',
+    'mating press',
+    'full nelson',
+    'piledriver (sex)',
+    'standing sex',
+    'spooning',
+    'amazon position',
+    'prone bone',
+    'suspended congress',
+    'sex from behind',
+    'sex from above',
+    'tribadism',
+    'facesitting',
+    'anilingus',
+    'object insertion',
+    'imminent penetration',
+    'imminent vaginal',
+    'imminent anal',
+    'tentacle sex',
+    'rape',
+    'after sex',
+    'after vaginal',
+    'after anal',
+    'cum on pussy',
+    'presenting',
+    'dildo riding',
+    'sitting on face'
   ],
   chest: [
-    'paizuri', 'breast sucking', 'nipple sucking', 'breast grab', "grabbing another's breasts",
-    'breast fondling', 'nipple tweak', 'nipple stimulation', 'licking nipple', 'nipples', 'breastfeeding',
-    'lactation', 'cum on breasts', 'breasts out'
+    'paizuri',
+    'breast sucking',
+    'nipple sucking',
+    'breast grab',
+    "grabbing another's breasts",
+    'breast fondling',
+    'nipple tweak',
+    'nipple stimulation',
+    'licking nipple',
+    'nipples',
+    'breastfeeding',
+    'lactation',
+    'cum on breasts',
+    'breasts out',
+    'naizuri',
+    'nursing handjob',
+    'nipple pull'
   ]
+}
+
+/** 기본 장면 목록의 판 — 기본 목록에 태그를 더하면 올린다. 저장된 목록이 이 판이 아니면 새 기본 태그를 더한다 */
+export const EXPOSE_ACTS_VERSION = 2
+
+/** 저장된 목록에 기본 목록에서 빠진 태그를 더한다 — 앱을 올려 기본이 늘어도 예전에 저장한 목록이 뒤처지지 않게 */
+export function withDefaultActs(acts: ExposeActs): ExposeActs {
+  const add = (mine: string[], def: string[]): string[] => {
+    const have = new Set(mine.map(norm))
+    return [...mine, ...def.filter((t) => !have.has(norm(t)))]
+  }
+  return {
+    lower: add(acts.lower, DEFAULT_EXPOSE_ACTS.lower),
+    chest: add(acts.chest, DEFAULT_EXPOSE_ACTS.chest)
+  }
 }
 
 interface GarmentRule {
@@ -58,7 +127,11 @@ const GARMENTS: GarmentRule[] = [
   { nouns: ['bikini top'], chest: 'bikini top lift' },
   // 비키니 아머·스트링 비키니·마이크로 비키니 등
   { nouns: ['bikini'], lower: 'bikini bottom aside', chest: 'bikini top lift' },
-  { nouns: ['one-piece swimsuit', 'school swimsuit', 'swimsuit'], lower: 'swimsuit aside', chest: 'one-piece swimsuit pull' },
+  {
+    nouns: ['one-piece swimsuit', 'school swimsuit', 'swimsuit'],
+    lower: 'swimsuit aside',
+    chest: 'one-piece swimsuit pull'
+  },
   { nouns: ['leotard'], lower: 'leotard aside', chest: 'leotard pull' },
   // 짝지은 태그가 없는 쪽은 일반 태그로 (바디수트 아래·유카타 가슴)
   { nouns: ['bodysuit'], lower: 'clothing aside', chest: 'open bodysuit' },
@@ -84,7 +157,12 @@ const GARMENTS: GarmentRule[] = [
 ]
 
 const norm = (t: string): string =>
-  t.trim().toLowerCase().replace(/_/g, ' ').replace(/^(source|target|mutual)#/, '').replace(/\s+/g, ' ')
+  t
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/^(source|target|mutual)#/, '')
+    .replace(/\s+/g, ' ')
 
 /** 태그 목록으로 — 가중치 묶음은 풀고, 빼달라는 음수 가중치는 버린다 */
 function tagsOf(text: string): string[] {
@@ -122,15 +200,31 @@ function liveTagsOf(text: string): string[] {
     .filter(Boolean)
 }
 
-/** 어느 부위를 드러내야 하는지 — 처음 걸린 행위 태그를 이유로 함께 */
-export function neededAreas(contexts: string[], acts: ExposeActs): Partial<Record<ExposeArea, string>> {
-  const lower = new Set(acts.lower.map(norm))
-  const chest = new Set(acts.chest.map(norm))
+/**
+ * 장면 태그가 행위 태그 그 자체이거나, 행위 태그를 단어 단위로 품고 있으면 그 행위로 본다
+ * (standing doggystyle ⊃ doggystyle, spooning sex ⊃ spooning, penis on pussy ⊃ pussy, reverse paizuri ⊃ paizuri).
+ * 문장(단어 5개 넘음)은 "her pussy is not shown"처럼 뜻이 반대일 수 있어 그대로 일치할 때만.
+ */
+function matchesAct(tag: string, acts: readonly string[], exact: ReadonlySet<string>): boolean {
+  if (exact.has(tag)) return true
+  if (tag.split(' ').length > 5) return false
+  return acts.some((a) => a.length < tag.length && hasWords(tag, a))
+}
+
+/** 어느 부위를 드러내야 하는지 — 처음 걸린 장면 태그를 이유로 함께 */
+export function neededAreas(
+  contexts: string[],
+  acts: ExposeActs
+): Partial<Record<ExposeArea, string>> {
+  const lower = acts.lower.map(norm)
+  const chest = acts.chest.map(norm)
+  const lowerSet = new Set(lower)
+  const chestSet = new Set(chest)
   const out: Partial<Record<ExposeArea, string>> = {}
   for (const text of contexts) {
     for (const tag of liveTagsOf(text)) {
-      if (!out.lower && lower.has(tag)) out.lower = tag
-      if (!out.chest && chest.has(tag)) out.chest = tag
+      if (!out.lower && matchesAct(tag, lower, lowerSet)) out.lower = tag
+      if (!out.chest && matchesAct(tag, chest, chestSet)) out.chest = tag
     }
   }
   return out
