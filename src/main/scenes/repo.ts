@@ -857,14 +857,13 @@ function readSceneExtras(): SceneExtrasFile {
  * 예전(v1)은 씬 글자만 담았고 휴지통 씬까지 섞여 들어가, 가져오면 지운 씬이 살아 돌아왔다.
  * v2는 살아 있는 씬만, 그리고 그 씬의 캐릭터 구성(씬별 캐릭터·위치·역할·자리·자리 역할·
  * 자리 태그·씬 태그)과 거기 쓰인 캐릭터 카드까지 함께 싣는다.
+ * 캐릭터 창에서 켜져 있기만 한 카드는 싣지 않는다 — 씬에 넣었거나 씬 설정이 걸린 카드만.
  * 바이브·캐릭레퍼는 이미지라 여기 싣지 않는다 (전체 백업이 담당).
  */
 export async function exportScenesJson(presetId: number): Promise<{
   saved: boolean
   scenes: number
   characters: number
-  /** 모든 씬 공용으로 실은 카드 수 (캐릭터 창에서 켜져 있던 것) */
-  shared: number
 }> {
   const db = getDb()
   const scenes = db
@@ -885,8 +884,7 @@ export async function exportScenesJson(presetId: number): Promise<{
     defaultPath: `${presetName.replace(/[\\/:*?"<>|]/g, '_')}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || !result.filePath)
-    return { saved: false, scenes: 0, characters: 0, shared: 0 }
+  if (result.canceled || !result.filePath) return { saved: false, scenes: 0, characters: 0 }
 
   // 이 모듈 씬들의 캐릭터 구성과, 거기 쓰인 (살아 있는) 카드
   const extrasFile = readSceneExtras()
@@ -903,15 +901,6 @@ export async function exportScenesJson(presetId: number): Promise<{
     // 안 실으면 그 카드에 걸린 하는쪽/당하는쪽 지정이 파일에서 빠진다
     if (setup) for (const id of setupReferencedIds(setup)) wanted.add(id)
   }
-  // 캐릭터 창에서 켜둔 카드 — 모든 씬 생성에 들어가므로 "모든 씬 공용"으로 싣는다
-  const sharedIds = (
-    db
-      .prepare(
-        "SELECT id FROM character_prompts WHERE enabled = 1 AND deleted_at IS NULL AND trim(prompt) != '' ORDER BY sort_order, id"
-      )
-      .all() as { id: number }[]
-  ).map((r) => r.id)
-  for (const id of sharedIds) wanted.add(id)
   const cards = wanted.size
     ? (db
         .prepare(
@@ -960,7 +949,6 @@ export async function exportScenesJson(presetId: number): Promise<{
     version: 2,
     characterFolder: presetName,
     characters,
-    ...(sharedIds.length ? { shared: sharedIds.map((id) => `c${id}`) } : {}),
     ...(fileOutfits.length ? { outfits: fileOutfits } : {}),
     scenes: scenes.map((s) => {
       const setup = setupOf(Number(s.id))
@@ -993,8 +981,7 @@ export async function exportScenesJson(presetId: number): Promise<{
   return {
     saved: true,
     scenes: scenes.length,
-    characters: characters.length,
-    shared: sharedIds.length
+    characters: characters.length
   }
 }
 
