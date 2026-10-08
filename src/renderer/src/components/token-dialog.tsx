@@ -329,7 +329,7 @@ function StorageSection(): React.JSX.Element {
         </Row>
         <Row
           label="메타데이터 함께 저장"
-          hint="끄면 저장·내보내는 이미지에서 프롬프트·시드 같은 생성 정보를 뺌, 앱 안 기록은 그대로"
+          hint="끄면 저장·내보내는 이미지에서 프롬프트·시드 같은 생성 정보를 뺌, 앱 안 기록은 그대로 (R2 업로드는 설정과 상관없이 늘 빼고 WebP로)"
         >
           <Switch
             checked={saveMeta}

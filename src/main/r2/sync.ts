@@ -5,6 +5,7 @@ import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
 import { assignExportName } from '../scenes/export-name'
 import { r2AuthStatus, r2DeleteObject, r2ObjectExists, r2PutFile } from './client'
+import { uploadName } from './upload-image'
 
 /** Per-preset reconciliation between favorite scene images and an R2 folder. */
 
@@ -132,7 +133,8 @@ function desiredState(presetId: number, prefix: string): DesiredItem[] {
     filePath: row.file_path,
     key:
       normalizePrefix(prefix) +
-      assignExportName(row.scene_name, row.file_path, used, '.', row.export_no)
+      // 그림은 WebP로 바꿔 올리므로 이름도 .webp로 정한다
+      assignExportName(row.scene_name, uploadName(row.file_path), used, '.', row.export_no)
   }))
 }
 

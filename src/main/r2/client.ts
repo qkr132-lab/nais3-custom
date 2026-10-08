@@ -6,7 +6,7 @@ import type { R2Object, R2UploadStatus } from '../../shared/types'
 import { getDb } from '../db'
 import { getSetting, setSetting } from '../db/settings'
 import { broadcast } from '../ipc'
-import { imageBytesForOutput } from '../images/storage'
+import { uploadBytes, uploadName } from './upload-image'
 
 /**
  * Cloudflare R2 업로드 (커스텀).
@@ -208,9 +208,9 @@ const MIME: Record<string, string> = {
 /** Upload one local file to an exact R2 object key. */
 export async function r2PutFile(bucket: string, key: string, filePath: string): Promise<void> {
   const auth = await requireAuth()
-  // 프리셋 동기화 전용 — 생성 이미지라 메타데이터 저장을 껐으면 생성 정보를 빼고 올린다
-  const body = await imageBytesForOutput(readFileSync(filePath))
-  const type = MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+  // 그림은 메타데이터를 빼고 WebP로 (key는 sync가 이미 .webp로 정해 둠)
+  const body = await uploadBytes(filePath, readFileSync(filePath))
+  const type = MIME[extname(key).toLowerCase()] ?? 'application/octet-stream'
   const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
     method: 'PUT',
     headers: { 'content-type': type },
@@ -297,7 +297,8 @@ function expandPaths(
       const dirKey = `${keyBase}${basename(p)}/`
       for (const entry of readdirSync(p)) walk(join(p, entry), dirKey)
     } else {
-      out.push({ path: p, key: `${keyBase}${basename(p)}`, size: st.size })
+      // 그림은 WebP로 바꿔 올리므로 키 확장자도 .webp
+      out.push({ path: p, key: uploadName(`${keyBase}${basename(p)}`), size: st.size })
     }
   }
   for (const p of paths) {
@@ -350,12 +351,13 @@ export function uploadStatus(): R2UploadStatus {
 }
 
 async function uploadOne(auth: R2Auth, c: AwsClient, item: UploadItem): Promise<void> {
-  const body = readFileSync(item.path)
-  const type = MIME[extname(item.path).toLowerCase()] ?? 'application/octet-stream'
+  // 그림은 메타데이터를 빼고 WebP로
+  const body = await uploadBytes(item.path, readFileSync(item.path))
+  const type = MIME[extname(item.key).toLowerCase()] ?? 'application/octet-stream'
   const res = await c.fetch(`${endpoint(auth)}/${queue.bucket}/${encodeKey(item.key)}`, {
     method: 'PUT',
     headers: { 'content-type': type },
-    body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    body: new Uint8Array(body)
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await errText(res)}`)
 }
