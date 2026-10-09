@@ -628,7 +628,7 @@ function SceneGrid(): React.JSX.Element {
   async function exportJson(): Promise<void> {
     const r = await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
     if (!r.saved) return
-    toast(`씬 ${r.scenes}개 · 캐릭터 ${r.characters}개 내보냄`, 'success')
+    toast(`씬 ${r.scenes}개 내보냄`, 'success')
   }
   async function importJson(): Promise<void> {
     const { count, additions, dropped, transparent, nudeStrip } = await window.nais.invoke(

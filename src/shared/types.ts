@@ -905,7 +905,7 @@ export interface IpcInvokeMap {
   /** 내보내기 (v2) — 살아 있는 씬과 그 캐릭터 구성 전부. shared = 모든 씬 공용으로 실은 카드 수 */
   'scenes:exportJson': {
     req: { presetId: number }
-    res: { saved: boolean; scenes: number; characters: number }
+    res: { saved: boolean; scenes: number }
   }
   /** 불러오기 — 씬에 캐릭터 구성이 실려 있으면 카드를 만들고, 씬마다의 구성(씬별 캐릭터·
    *  위치·역할·자리·자리 태그·씬 태그)을 additions로 돌려줘 렌더러가 "씬별 캐릭터 추가"에

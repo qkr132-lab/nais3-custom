@@ -8,8 +8,8 @@ import { createPreset, exportScenesJson, importScenesJson } from '../src/main/sc
 
 /**
  * 씬 JSON 내보내기에 실리는 것 (커스텀).
- * 지운 씬은 빼고, 캐릭터는 씬 캐릭터 목록·자리에 넣은 카드만 — 캐릭터 창에서 켜져 있기만 하거나
- * 목록 밖에 예전 위치·역할·태그 기록만 남은 카드는 싣지 않는다. 가져올 때는 캐릭터 탭에 똑같은 카드가 있으면 그걸 건다. 임시 메모리 DB와 합성 데이터로만 확인한다.
+ * 지운 씬은 빼고, 자리(위치·역할·자리 태그)와 하는쪽/당하는쪽 위치·행위 태그만 싣는다 — 캐릭터 카드는 싣지 않는다.
+ * 예전 파일을 가져올 때는 캐릭터 탭에 똑같은 카드가 있으면 그걸 건다. 임시 메모리 DB와 합성 데이터로만 확인한다.
  */
 
 let db: DatabaseSync
@@ -81,93 +81,68 @@ afterEach(() => {
 })
 
 describe('씬 JSON 내보내기', () => {
-  it('지운 씬은 빼고, 씬에 넣은 캐릭터와 그 위치·역할·자리·태그를 싣는다 — 목록 밖 기록은 뺀다', async () => {
+  it('지운 씬은 빼고, 자리(위치·역할·자리 태그)와 하는쪽/당하는쪽 위치·태그만 싣는다', async () => {
     const presetId = createPreset('p')
     const alive = scene(presetId, 'alive')
     scene(presetId, 'gone', true)
+    db.prepare(
+      `UPDATE gen_scenes SET source_tags = 'grabbing', target_tags = 'crying',
+       source_pos = '{"x":0.2,"y":0.5}', target_pos = '{"x":0.8,"y":0.5}' WHERE id = ?`
+    ).run(alive)
     const added = card('added', false)
-    const tagged = card('tagged', false)
+    const tagged = card('tagged', true)
     state.extras = JSON.stringify({
       additions: {
         [presetId]: {
           [alive]: {
             characterIds: [added],
             useCoords: true,
+            positions: { [added]: { x: 0.3, y: 0.4 } },
             roles: { [added]: 'source' },
-            // 씬 캐릭터 목록엔 없는데 예전 태그·위치 기록만 남은 카드
             charTags: { [added]: 'blush', [tagged]: 'smile' },
-            positions: { [added]: { x: 0.3, y: 0.4 }, [tagged]: { x: 0.9, y: 0.9 } },
-            slots: [{ x: 0.5, y: 0.5 }],
-            slotRoles: { 0: 'target' },
-            slotTags: { 0: 'upper body' }
+            partnerTags: { [added]: 'tears' },
+            slots: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }],
+            slotChars: { 0: added },
+            slotRoles: { 0: 'target', 1: 'source' },
+            slotTags: { 0: 'upper body', 1: 'standing' }
           }
         }
       }
     })
     const r = await exportScenesJson(presetId)
-    expect(r).toEqual({ saved: true, scenes: 1, characters: 1 })
+    expect(r).toEqual({ saved: true, scenes: 1 })
     const file = JSON.parse(readFileSync(state.save, 'utf-8'))
+    expect(file.characters).toEqual([])
+    expect(file).not.toHaveProperty('outfits')
     expect(file.scenes.map((s: { name: string }) => s.name)).toEqual(['alive'])
-    expect(file.characters.map((c: { name: string }) => c.name)).toEqual(['added'])
-    expect(file.scenes[0].setup).toMatchObject({
-      characters: [`c${added}`],
+    const [s] = file.scenes
+    expect(s).toMatchObject({
+      sourceTags: 'grabbing',
+      targetTags: 'crying',
+      sourcePos: { x: 0.2, y: 0.5 },
+      targetPos: { x: 0.8, y: 0.5 }
+    })
+    expect(s.setup).toEqual({
+      characters: [],
       useCoords: true,
-      positions: { [`c${added}`]: { x: 0.3, y: 0.4 } },
-      roles: { [`c${added}`]: 'source' },
-      charTags: { [`c${added}`]: 'blush' },
-      slots: [{ x: 0.5, y: 0.5 }],
-      slotRoles: { 0: 'target' },
-      slotTags: { 0: 'upper body' }
+      slots: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }],
+      slotRoles: { 0: 'target', 1: 'source' },
+      slotTags: { 0: 'upper body', 1: 'standing' }
     })
+    expect(JSON.stringify(file)).not.toMatch(/added|tagged|blush|smile|tears/)
   })
 
-  it('캐릭터 창에서 켜져 있기만 한 카드는 싣지 않는다', async () => {
+  it('자리도 위치 적용도 없는 씬은 구성을 싣지 않는다', async () => {
     const presetId = createPreset('p')
     const alive = scene(presetId, 'alive')
-    const added = card('added', false)
-    card('enabled only', true)
+    const added = card('added', true)
     state.extras = JSON.stringify({
-      additions: { [presetId]: { [alive]: { characterIds: [added] } } }
+      additions: { [presetId]: { [alive]: { characterIds: [added], charTags: { [added]: 'x' } } } }
     })
     await exportScenesJson(presetId)
     const file = JSON.parse(readFileSync(state.save, 'utf-8'))
-    expect(file.characters.map((c: { name: string }) => c.name)).toEqual(['added'])
-    expect(file).not.toHaveProperty('shared')
-    expect(JSON.stringify(file)).not.toContain('enabled only')
-  })
-
-  it('켜져 있는 카드라도 씬에 넣었으면 싣는다', async () => {
-    const presetId = createPreset('p')
-    const alive = scene(presetId, 'alive')
-    const both = card('enabled and added', true)
-    state.extras = JSON.stringify({
-      additions: { [presetId]: { [alive]: { characterIds: [both] } } }
-    })
-    await exportScenesJson(presetId)
-    const file = JSON.parse(readFileSync(state.save, 'utf-8'))
-    expect(file.characters.map((c: { name: string }) => c.name)).toEqual(['enabled and added'])
-    expect(file).not.toHaveProperty('shared')
-  })
-
-  it('다른 씬에 실린 카드라도 이 씬 목록 밖이면 그 기록은 이 씬에 싣지 않는다', async () => {
-    const presetId = createPreset('p')
-    const a = scene(presetId, 'a')
-    const b = scene(presetId, 'b')
-    const man = card('man', false)
-    state.extras = JSON.stringify({
-      additions: {
-        [presetId]: {
-          [a]: { characterIds: [man], roles: { [man]: 'source' } },
-          // b에는 man이 없는데 예전 역할·위치가 남아 있다
-          [b]: { characterIds: [], useCoords: true, roles: { [man]: 'source' }, positions: { [man]: { x: 0.1, y: 0.1 } } }
-        }
-      }
-    })
-    await exportScenesJson(presetId)
-    const file = JSON.parse(readFileSync(state.save, 'utf-8'))
-    const [sa, sb] = file.scenes
-    expect(sa.setup.roles).toEqual({ [`c${man}`]: 'source' })
-    expect(sb.setup).toEqual({ characters: [], useCoords: true })
+    expect(file.scenes[0]).not.toHaveProperty('setup')
+    expect(file.characters).toEqual([])
   })
 })
 

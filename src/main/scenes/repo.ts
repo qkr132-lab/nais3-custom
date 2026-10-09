@@ -14,18 +14,16 @@ import {
   type CensorKind
 } from '../../shared/censor-tags'
 import { getDb } from '../db'
-import { exportOutfits, importOutfits } from '../outfits/repo'
+import { importOutfits } from '../outfits/repo'
 import { getSetting } from '../db/settings'
 import {
   decodeSetup,
   encodeSetup,
   isPos,
   isSceneBundle,
-  setupCharacterIds,
   setupHasContent,
-  setupOutfitIds,
   withShared,
-  type FileCharacter,
+  type FileSetup,
   type SceneBundle,
   type SceneExtrasFile,
   type SceneSetup
@@ -855,15 +853,14 @@ function readSceneExtras(): SceneExtrasFile {
  * 씬 JSON 내보내기 (v2, 커스텀).
  *
  * 예전(v1)은 씬 글자만 담았고 휴지통 씬까지 섞여 들어가, 가져오면 지운 씬이 살아 돌아왔다.
- * v2는 살아 있는 씬만, 그리고 그 씬의 캐릭터 구성(씬별 캐릭터·위치·역할·자리·자리 역할·
- * 자리 태그·씬 태그)과 거기 쓰인 캐릭터 카드까지 함께 싣는다.
- * 캐릭터 창에서 켜져 있기만 한 카드는 싣지 않는다 — 씬에 넣었거나 씬 설정이 걸린 카드만.
+ * v2는 살아 있는 씬만, 그리고 그 씬의 자리(1·2·3·4번 위치·자리 역할·자리 태그)와
+ * 하는쪽/당하는쪽 위치·행위 태그를 싣는다.
+ * 캐릭터 카드·씬에 직접 넣은 캐릭터·캐릭터별 태그는 싣지 않는다 — 가져오는 쪽 캐릭터 탭 카드를 쓴다.
  * 바이브·캐릭레퍼는 이미지라 여기 싣지 않는다 (전체 백업이 담당).
  */
 export async function exportScenesJson(presetId: number): Promise<{
   saved: boolean
   scenes: number
-  characters: number
 }> {
   const db = getDb()
   const scenes = db
@@ -884,89 +881,31 @@ export async function exportScenesJson(presetId: number): Promise<{
     defaultPath: `${presetName.replace(/[\\/:*?"<>|]/g, '_')}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (result.canceled || !result.filePath) return { saved: false, scenes: 0, characters: 0 }
+  if (result.canceled || !result.filePath) return { saved: false, scenes: 0 }
 
-  // 이 모듈 씬들의 캐릭터 구성과, 거기 쓰인 (살아 있는) 카드
+  /**
+   * 씬 구성은 자리(1·2·3·4번 위치·역할·자리 태그)와 위치 적용 여부만 싣는다.
+   * 캐릭터 카드·씬에 직접 넣은 캐릭터·캐릭터별 태그·위치·복장은 싣지 않는다 —
+   * 가져오는 쪽 캐릭터 탭의 카드를 그대로 쓰게. 하는쪽/당하는쪽 위치·행위 태그는 씬 본문에 실린다.
+   */
   const extrasFile = readSceneExtras()
   const additions = extrasFile.additions?.[String(presetId)] ?? {}
   const transparent = extrasFile.transparentBackgrounds?.[String(presetId)] ?? {}
   const nudeStrips = extrasFile.nudeStrips?.[String(presetId)] ?? {}
-  const setupOf = (sceneId: number): SceneSetup | undefined => {
+  const noCard = (): undefined => undefined
+  const layoutOf = (sceneId: number): FileSetup | undefined => {
     const s = additions[String(sceneId)]
-    return setupHasContent(s) ? s : undefined
+    if (!setupHasContent(s)) return undefined
+    const file = encodeSetup(s!, noCard)
+    return file.slots?.length || file.useCoords !== undefined ? file : undefined
   }
-  /**
-   * 씬마다 실을 카드 — 씬 캐릭터 목록·자리에 넣은 카드만.
-   * 목록 밖 카드의 위치·역할·태그·복장은 예전에 캐릭터 창에서 켜고 배치하던 때 남은 기록이라
-   * 싣지 않는다 (실으면 지금 씬과 상관없는 카드가 파일에 딸려 간다)
-   */
-  const sceneCards = new Map<number, Set<number>>()
-  const wanted = new Set<number>()
-  for (const s of scenes) {
-    const setup = setupOf(Number(s.id))
-    const ids = new Set(setup ? setupCharacterIds(setup) : [])
-    sceneCards.set(Number(s.id), ids)
-    for (const id of ids) wanted.add(id)
-  }
-  const cards = wanted.size
-    ? (db
-        .prepare(
-          `SELECT id, name, prompt, negative_prompt, role, slot_no, partner_tags, outfit_id FROM character_prompts
-           WHERE deleted_at IS NULL AND id IN (${[...wanted].map(() => '?').join(',')})
-           ORDER BY sort_order, id`
-        )
-        .all(...wanted) as {
-        id: number
-        name: string
-        prompt: string
-        negative_prompt: string
-        role: string | null
-        slot_no: number | null
-        partner_tags: string | null
-        outfit_id: number | null
-      }[])
-    : []
-  const alive = new Set(cards.map((c) => c.id))
-  const uidOf = (id: number): string | undefined => (alive.has(id) ? `c${id}` : undefined)
-  // 복장 — 카드의 기본 복장과 씬에서 고른 옷
-  const outfitIds = [
-    ...cards.flatMap((c) => (c.outfit_id != null ? [c.outfit_id] : [])),
-    ...scenes.flatMap((s) => {
-      const setup = setupOf(Number(s.id))
-      const ids = sceneCards.get(Number(s.id))
-      return setup
-        ? setupOutfitIds({
-            ...setup,
-            outfits: Object.fromEntries(
-              Object.entries(setup.outfits ?? {}).filter(([id]) => ids?.has(Number(id)))
-            )
-          })
-        : []
-    })
-  ]
-  const fileOutfits = exportOutfits(outfitIds)
-  const outfitAlive = new Set(fileOutfits.map((o) => o.uid))
-  const outfitUid = (id: number): string | undefined =>
-    outfitAlive.has(`o${id}`) ? `o${id}` : undefined
-
-  const characters: FileCharacter[] = cards.map((c) => ({
-    uid: `c${c.id}`,
-    name: c.name,
-    prompt: c.prompt,
-    negativePrompt: c.negative_prompt,
-    ...(c.role === 'source' || c.role === 'target' ? { role: c.role } : {}),
-    ...(c.slot_no != null ? { slotNo: c.slot_no } : {}),
-    ...(c.partner_tags?.trim() ? { partnerTags: c.partner_tags } : {}),
-    ...(c.outfit_id != null && outfitUid(c.outfit_id) ? { outfit: outfitUid(c.outfit_id) } : {})
-  }))
 
   const bundle: SceneBundle = {
     version: 2,
     characterFolder: presetName,
-    characters,
-    ...(fileOutfits.length ? { outfits: fileOutfits } : {}),
+    characters: [],
     scenes: scenes.map((s) => {
-      const setup = setupOf(Number(s.id))
+      const layout = layoutOf(Number(s.id))
       const sourcePos = parsePos(s.source_pos as string | null)
       const targetPos = parsePos(s.target_pos as string | null)
       return {
@@ -992,25 +931,12 @@ export async function exportScenesJson(presetId: number): Promise<{
         censorKinds: normalizeCensors(s.censor_kinds),
         background: normalizeBackground(s.background),
         suppressAnal: normalizeAnalSuppression(s.suppress_anal),
-        // 이 씬 목록에 넣은 카드만 — 다른 씬에 실린 카드라도 이 씬 목록 밖이면 그 기록은 뺀다
-        ...(setup
-          ? {
-              setup: encodeSetup(
-                setup,
-                (id) => (sceneCards.get(Number(s.id))?.has(id) ? uidOf(id) : undefined),
-                outfitUid
-              )
-            }
-          : {})
+        ...(layout ? { setup: layout } : {})
       }
     })
   }
   writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
-  return {
-    saved: true,
-    scenes: scenes.length,
-    characters: characters.length
-  }
+  return { saved: true, scenes: scenes.length }
 }
 
 /** 씬 JSON에 실린 캐릭터탭 (커스텀). role = 행위 역할 (씬의 하는쪽/당하는쪽 태그가 얹힘) */
