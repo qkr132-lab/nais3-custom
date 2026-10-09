@@ -139,7 +139,7 @@ function parseObject(raw: string | null): Record<string, unknown> | null {
 /**
  * 고른 프리셋과 그 안의 씬을 한 트랜잭션으로 가져온다. 휴지통에 있던 프리셋도 살아 있는 것으로.
  * 프리셋은 같은 종류의 맨 끝에 붙는다. 씬 순서는 백업 그대로.
- * 씬별 설정(scene_extras의 additions·transparentBackgrounds)과 프리셋별 R2 동기화 설정도
+ * 씬별 설정(scene_extras의 additions·transparentBackgrounds·nudeStrips)과 프리셋별 R2 동기화 설정도
  * 최종 id로 옮긴다 — 지금 이미 있는 항목은 덮어쓰지 않는다.
  */
 export function importBackupPresets(
@@ -276,7 +276,7 @@ export function importBackupPresets(
       const nowExtras = nowRaw == null ? {} : parseObject(nowRaw)
       if (fromExtras && nowExtras) {
         let changed = false
-        for (const field of ['additions', 'transparentBackgrounds']) {
+        for (const field of ['additions', 'transparentBackgrounds', 'nudeStrips']) {
           const src = fromExtras[field]
           if (!isObject(src)) continue
           if (nowExtras[field] !== undefined && !isObject(nowExtras[field])) continue

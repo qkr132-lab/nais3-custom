@@ -81,7 +81,8 @@ beforeEach(() => {
     sequenceEnabled: false,
     entries: [],
     additionsEnabled: false,
-    additions: {}
+    additions: {},
+    nudeStrips: {}
   })
 })
 
@@ -306,6 +307,25 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(charPrompt('bed, vaginal')).toBe('blue eyes, pleated skirt, white panties, shirt lift')
     withChoice({ outfitId: 9, auto: false })
     expect(charPrompt('bed, vaginal, paizuri')).toBe('blue eyes, pleated skirt, white panties')
+  })
+
+  it('누드면 옷 벗기기: 씬에서 정한 값이 전체 설정보다 먼저다', () => {
+    // 전체 끔 — 이 씬만 켜면 기본 복장이 빠진다
+    expect(charPrompt('bath, nude')).toBe('blue eyes, pleated skirt, white panties')
+    useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
+    expect(charPrompt('bath, nude')).toBe('blue eyes')
+    // 다른 씬은 그대로 전체 설정
+    expect(
+      buildSceneRequest({ ...scene, id: 5, prompt: 'bath, nude', censorKinds: [] })
+        .characterPrompts[0].prompt
+    ).toBe('blue eyes, pleated skirt, white panties')
+    // 전체 켬 — 이 씬만 끄면 옷을 입힌 채
+    useOutfitsStore.setState({ stripOnNude: true })
+    useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: false } } })
+    expect(charPrompt('bath, nude')).toBe('blue eyes, pleated skirt, white panties')
+    // 전체 설정 따름으로 되돌리면 켜짐
+    useSceneExtrasStore.setState({ nudeStrips: { 1: {} } })
+    expect(charPrompt('bath, nude')).toBe('blue eyes')
   })
 
   it('reads the tags given to this character only (scene-wide tags go to the target)', () => {

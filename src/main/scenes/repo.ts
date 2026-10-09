@@ -21,7 +21,7 @@ import {
   encodeSetup,
   isPos,
   isSceneBundle,
-  setupReferencedIds,
+  setupCharacterIds,
   setupHasContent,
   setupOutfitIds,
   withShared,
@@ -890,16 +890,23 @@ export async function exportScenesJson(presetId: number): Promise<{
   const extrasFile = readSceneExtras()
   const additions = extrasFile.additions?.[String(presetId)] ?? {}
   const transparent = extrasFile.transparentBackgrounds?.[String(presetId)] ?? {}
+  const nudeStrips = extrasFile.nudeStrips?.[String(presetId)] ?? {}
   const setupOf = (sceneId: number): SceneSetup | undefined => {
     const s = additions[String(sceneId)]
     return setupHasContent(s) ? s : undefined
   }
+  /**
+   * 씬마다 실을 카드 — 씬 캐릭터 목록·자리에 넣은 카드만.
+   * 목록 밖 카드의 위치·역할·태그·복장은 예전에 캐릭터 창에서 켜고 배치하던 때 남은 기록이라
+   * 싣지 않는다 (실으면 지금 씬과 상관없는 카드가 파일에 딸려 간다)
+   */
+  const sceneCards = new Map<number, Set<number>>()
   const wanted = new Set<number>()
   for (const s of scenes) {
     const setup = setupOf(Number(s.id))
-    // 씬 캐릭터 목록에 없어도 역할·태그·복장이 걸린 카드(캐릭터 창·큐 항목 카드)까지 싣는다 —
-    // 안 실으면 그 카드에 걸린 하는쪽/당하는쪽 지정이 파일에서 빠진다
-    if (setup) for (const id of setupReferencedIds(setup)) wanted.add(id)
+    const ids = new Set(setup ? setupCharacterIds(setup) : [])
+    sceneCards.set(Number(s.id), ids)
+    for (const id of ids) wanted.add(id)
   }
   const cards = wanted.size
     ? (db
@@ -926,7 +933,15 @@ export async function exportScenesJson(presetId: number): Promise<{
     ...cards.flatMap((c) => (c.outfit_id != null ? [c.outfit_id] : [])),
     ...scenes.flatMap((s) => {
       const setup = setupOf(Number(s.id))
-      return setup ? setupOutfitIds(setup) : []
+      const ids = sceneCards.get(Number(s.id))
+      return setup
+        ? setupOutfitIds({
+            ...setup,
+            outfits: Object.fromEntries(
+              Object.entries(setup.outfits ?? {}).filter(([id]) => ids?.has(Number(id)))
+            )
+          })
+        : []
     })
   ]
   const fileOutfits = exportOutfits(outfitIds)
@@ -964,6 +979,10 @@ export async function exportScenesJson(presetId: number): Promise<{
         ...(typeof transparent[String(s.id)] === 'boolean'
           ? { transparentBackground: transparent[String(s.id)] }
           : {}),
+        // 씬별 누드면 옷 벗기기 — 따로 정한 씬만 (없으면 가져온 쪽의 전체 설정을 따른다)
+        ...(typeof nudeStrips[String(s.id)] === 'boolean'
+          ? { nudeStrip: nudeStrips[String(s.id)] }
+          : {}),
         // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
         ...((s.source_tags as string)?.trim() ? { sourceTags: s.source_tags } : {}),
         ...((s.target_tags as string)?.trim() ? { targetTags: s.target_tags } : {}),
@@ -973,7 +992,16 @@ export async function exportScenesJson(presetId: number): Promise<{
         censorKinds: normalizeCensors(s.censor_kinds),
         background: normalizeBackground(s.background),
         suppressAnal: normalizeAnalSuppression(s.suppress_anal),
-        ...(setup ? { setup: encodeSetup(setup, uidOf, outfitUid) } : {})
+        // 이 씬 목록에 넣은 카드만 — 다른 씬에 실린 카드라도 이 씬 목록 밖이면 그 기록은 뺀다
+        ...(setup
+          ? {
+              setup: encodeSetup(
+                setup,
+                (id) => (sceneCards.get(Number(s.id))?.has(id) ? uidOf(id) : undefined),
+                outfitUid
+              )
+            }
+          : {})
       }
     })
   }
@@ -1001,6 +1029,7 @@ export interface SceneImportResult {
   dropped: number
   /** 씬마다 따로 켜고 끈 투명 배경 — 렌더러가 씬 설정에 넣는다 */
   transparent?: { sceneId: number; enabled: boolean }[]
+  nudeStrip?: { sceneId: number; enabled: boolean }[]
 }
 
 export async function importScenesJson(presetId: number): Promise<SceneImportResult> {
@@ -1180,6 +1209,7 @@ function importSceneBundle(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
   const transparent: SceneImportResult['transparent'] = []
+  const nudeStrip: SceneImportResult['nudeStrip'] = []
   const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback
@@ -1188,24 +1218,25 @@ function importSceneBundle(
     (db.prepare(sql).get(...args) as { m: number }).m
 
   db.transaction(() => {
-    // 카드 폴더 — 살아 있는 같은 이름 폴더가 있으면 거기, 없으면 새로
-    let folderId: number | null = null
-    if (cards.length) {
-      const folderName = bundle.characterFolder?.trim() || basename(filePath, '.json')
-      const existing = db
-        .prepare('SELECT id FROM character_folders WHERE name = ? AND deleted_at IS NULL')
-        .get(folderName) as { id: number } | undefined
-      folderId =
-        existing?.id ??
-        Number(
+    // 카드 폴더 — 살아 있는 같은 이름 폴더가 있으면 거기, 없으면 새 카드를 만들 때 새로
+    // (카드를 전부 캐릭터 탭에 있던 것으로 걸면 빈 폴더를 만들지 않는다)
+    const folderName = bundle.characterFolder?.trim() || basename(filePath, '.json')
+    let folderId: number | null = cards.length
+      ? ((
           db
-            .prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)')
-            .run(
-              folderName,
-              maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders') + 1
-            ).lastInsertRowid
-        )
-    }
+            .prepare('SELECT id FROM character_folders WHERE name = ? AND deleted_at IS NULL')
+            .get(folderName) as { id: number } | undefined
+        )?.id ?? null)
+      : null
+    const ensureFolder = (): number =>
+      (folderId ??= Number(
+        db
+          .prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)')
+          .run(
+            folderName,
+            maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_folders') + 1
+          ).lastInsertRowid
+      ))
 
     let charOrder = maxOf('SELECT COALESCE(MAX(sort_order), 0) AS m FROM character_prompts')
     // 복장 먼저 — 카드와 씬 구성이 가리킨다
@@ -1218,18 +1249,18 @@ function importSceneBundle(
       const slotNo = Number.isInteger(c.slotNo) && (c.slotNo as number) > 0 ? c.slotNo : null
       const partner = typeof c.partnerTags === 'string' ? c.partnerTags : ''
       const outfitId = typeof c.outfit === 'string' ? (outfitOfUid.get(c.outfit) ?? null) : null
-      // 같은 폴더에 이름·태그·역할·자리 번호까지 똑같은 카드가 있으면 재사용 —
-      // 같은 파일을 두 번 가져와도 카드가 불어나지 않게. 하나라도 다르면 새로 만든다.
+      // 캐릭터 탭에 이름·태그·네거티브가 똑같은 카드가 있으면 (어느 폴더든) 그 카드를 씬에 건다 —
+      // 이미 있는 캐릭터를 또 만들지 않게. 그 카드의 역할·상대 태그·복장은 손대지 않는다.
+      // 같은 게 여럿이면 가져오는 폴더 것 → 캐릭터 탭 순서가 앞선 것
       const same = db
         .prepare(
           `SELECT id FROM character_prompts
-           WHERE deleted_at IS NULL AND folder_id IS ? AND name = ? AND prompt = ?
-             AND negative_prompt = ? AND role IS ? AND slot_no IS ? AND partner_tags = ?
-             AND outfit_id IS ?`
+           WHERE deleted_at IS NULL AND name = ? AND trim(prompt) = trim(?)
+             AND trim(negative_prompt) = trim(?)
+           ORDER BY (folder_id IS ?) DESC, sort_order, id
+           LIMIT 1`
         )
-        .get(folderId, name, c.prompt, negative, role, slotNo, partner, outfitId) as
-        | { id: number }
-        | undefined
+        .get(name, c.prompt, negative, folderId) as { id: number } | undefined
       const id =
         same?.id ??
         Number(
@@ -1238,7 +1269,7 @@ function importSceneBundle(
               `INSERT INTO character_prompts (name, prompt, negative_prompt, folder_id, sort_order, enabled, role, slot_no, partner_tags, outfit_id)
                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
             )
-            .run(name, c.prompt, negative, folderId, ++charOrder, role, slotNo, partner, outfitId)
+            .run(name, c.prompt, negative, ensureFolder(), ++charOrder, role, slotNo, partner, outfitId)
             .lastInsertRowid
         )
       idOfUid.set(c.uid, id)
@@ -1284,10 +1315,11 @@ function importSceneBundle(
       if (typeof s.transparentBackground === 'boolean') {
         transparent.push({ sceneId, enabled: s.transparentBackground })
       }
+      if (typeof s.nudeStrip === 'boolean') nudeStrip.push({ sceneId, enabled: s.nudeStrip })
     }
   })()
 
-  return { count: bundle.scenes.length, additions, dropped, transparent }
+  return { count: bundle.scenes.length, additions, dropped, transparent, nudeStrip }
 }
 
 /** 즐겨찾기 이미지 또는 각 씬 최상단(최신) 이미지를 ZIP으로 */

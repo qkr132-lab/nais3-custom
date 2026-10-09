@@ -34,6 +34,7 @@ import {
   Scissors,
   SlidersHorizontal,
   ShieldCheck,
+  Shirt,
   Sparkles,
   Star,
   Trash2,
@@ -630,7 +631,7 @@ function SceneGrid(): React.JSX.Element {
     toast(`씬 ${r.scenes}개 · 캐릭터 ${r.characters}개 내보냄`, 'success')
   }
   async function importJson(): Promise<void> {
-    const { count, additions, dropped, transparent } = await window.nais.invoke(
+    const { count, additions, dropped, transparent, nudeStrip } = await window.nais.invoke(
       'scenes:importJson',
       { presetId: activePresetId }
     )
@@ -643,6 +644,12 @@ function SceneGrid(): React.JSX.Element {
           useSceneExtrasStore
             .getState()
             .setSceneTransparentBackground(activePresetId, t.sceneId, t.enabled)
+        }
+      }
+      if (nudeStrip?.length) {
+        await useSceneExtrasStore.getState().load()
+        for (const t of nudeStrip) {
+          useSceneExtrasStore.getState().setSceneNudeStrip(activePresetId, [t.sceneId], t.enabled)
         }
       }
       // 캐릭터탭 포함 파일 (커스텀): 만들어진 카드를 "씬별 캐릭터 추가"로 연결
@@ -1242,8 +1249,19 @@ function BulkBar({
   const bulkClearImages = useScenesStore((s) => s.bulkClearImages)
   const bulkExportZip = useScenesStore((s) => s.bulkExportZip)
   const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
+  const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
 
   const n = selection.size
+
+  // 누드면 옷 벗기기 (커스텀) — 선택한 씬만 켜고 끈다. 전체 설정 따름 = 씬에서 정한 값을 지움
+  const bulkNudeStrip = (enabled: boolean | undefined): void => {
+    if (activePresetId == null) return
+    setSceneNudeStrip(activePresetId, [...selection], enabled)
+    toast(
+      `선택한 ${n}개 씬: 누드면 옷 벗기기 ${enabled === undefined ? '전체 설정 따름' : enabled ? '켬' : '끔'}`,
+      'success'
+    )
+  }
   const disabled = n === 0
 
   // 내보내기 번호 매기기 (커스텀) — 시작 번호 입력 후 목록 순서대로 순번
@@ -1310,6 +1328,21 @@ function BulkBar({
         onClick={() => void bulkSetVariety(false)}
       >
         V+ 해제
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => bulkNudeStrip(true)}>
+        <Shirt size={13} /> 옷 벗기기 켬
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => bulkNudeStrip(false)}>
+        옷 벗기기 끔
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => bulkNudeStrip(undefined)}
+        title="선택한 씬에서 따로 정한 값을 지우고 설정 창의 전체 설정을 따름"
+      >
+        전체 설정 따름
       </Button>
       {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
       <Button

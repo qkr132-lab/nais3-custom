@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { CharPositions, CharRoles, SequenceEntry } from '@shared/types'
 import type { OutfitChoice } from '@shared/outfit'
 import { copyCharacterKeys, setupHasContent } from '@shared/scene-bundle'
+import { useOutfitsStore } from './outfits-store'
 
 export type { CharPositions, CharRoles, SequenceEntry }
 
@@ -78,6 +79,8 @@ interface SceneExtrasState {
   additionsEnabled: boolean
   additions: AdditionsMap
   transparentBackgrounds: SceneTransparentBackgroundMap
+  /** 씬별 「누드면 옷 벗기기」 (커스텀) — 없으면 설정 창의 전체 설정을 따른다 */
+  nudeStrips: SceneTransparentBackgroundMap
 
   load: () => Promise<void>
   /**
@@ -101,6 +104,8 @@ interface SceneExtrasState {
     sceneId: number,
     enabled: boolean | undefined
   ) => void
+  /** 씬별 누드면 옷 벗기기 — 여러 씬을 한 번에. undefined = 전체 설정 따름 */
+  setSceneNudeStrip: (presetId: number, sceneIds: number[], enabled: boolean | undefined) => void
   /** 씬 복사/이동 때 본문과 함께 씬별 캐릭터 구성도 옮긴다. */
   copyAdditions: (transfers: SceneAdditionTransfer[]) => void
   moveAdditions: (transfers: SceneAdditionTransfer[]) => void
@@ -135,7 +140,8 @@ function persist(): void {
       entries: s.entries,
       additionsEnabled: s.additionsEnabled,
       additions: s.additions,
-      transparentBackgrounds: s.transparentBackgrounds
+      transparentBackgrounds: s.transparentBackgrounds,
+      nudeStrips: s.nudeStrips
     })
   })
 }
@@ -178,13 +184,14 @@ function transferAdditions(
   return next
 }
 
-function transferTransparentBackgrounds(
-  state: SceneExtrasState,
+/** 씬별 켜고 끔(투명 배경·옷 벗기기)을 씬 복사·이동에 따라 옮긴다 */
+function transferSceneFlags(
+  map: SceneTransparentBackgroundMap,
   transfers: SceneAdditionTransfer[],
   mode: 'copy' | 'move'
 ): SceneTransparentBackgroundMap {
   const next: SceneTransparentBackgroundMap = {}
-  for (const [presetId, scenes] of Object.entries(state.transparentBackgrounds)) {
+  for (const [presetId, scenes] of Object.entries(map)) {
     next[Number(presetId)] = { ...scenes }
   }
   for (const transfer of transfers) {
@@ -208,6 +215,22 @@ function transferTransparentBackgrounds(
   return next
 }
 
+/** 이 씬에서 누드면 옷 벗기기를 쓰는지 — 씬에서 정한 값, 없으면 설정 창의 전체 설정 */
+export function sceneNudeStrip(presetId: number, sceneId: number): boolean {
+  return (
+    useSceneExtrasStore.getState().nudeStrips[presetId]?.[sceneId] ??
+    useOutfitsStore.getState().stripOnNude
+  )
+}
+
+/** 어느 씬에서든 옷 벗기기를 쓰는지 — 카드 옷 분류를 미리 받아둘지 판단용 */
+export function anyNudeStrip(): boolean {
+  if (useOutfitsStore.getState().stripOnNude) return true
+  return Object.values(useSceneExtrasStore.getState().nudeStrips).some((scenes) =>
+    Object.values(scenes).some(Boolean)
+  )
+}
+
 /** 활성 항목들 (큐 반복 실행 대상) */
 export function enabledEntries(): SequenceEntry[] {
   const s = useSceneExtrasStore.getState()
@@ -221,6 +244,7 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
   additionsEnabled: false,
   additions: {},
   transparentBackgrounds: {},
+  nudeStrips: {},
 
   load: async () => {
     if (get().loaded) return
@@ -233,7 +257,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
           entries: Array.isArray(parsed.entries) ? parsed.entries : [],
           additionsEnabled: !!parsed.additionsEnabled,
           additions: parsed.additions ?? {},
-          transparentBackgrounds: parsed.transparentBackgrounds ?? {}
+          transparentBackgrounds: parsed.transparentBackgrounds ?? {},
+          nudeStrips: parsed.nudeStrips ?? {}
         })
       } catch {
         // 손상된 설정은 무시하고 기본값으로 시작
@@ -310,11 +335,21 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({ transparentBackgrounds: { ...get().transparentBackgrounds, [presetId]: preset } })
     persist()
   },
+  setSceneNudeStrip: (presetId, sceneIds, enabled) => {
+    const preset = { ...(get().nudeStrips[presetId] ?? {}) }
+    for (const sceneId of sceneIds) {
+      if (enabled === undefined) delete preset[sceneId]
+      else preset[sceneId] = enabled
+    }
+    set({ nudeStrips: { ...get().nudeStrips, [presetId]: preset } })
+    persist()
+  },
   copyAdditions: (transfers) => {
     if (transfers.length === 0) return
     set({
       additions: transferAdditions(get(), transfers, 'copy'),
-      transparentBackgrounds: transferTransparentBackgrounds(get(), transfers, 'copy')
+      transparentBackgrounds: transferSceneFlags(get().transparentBackgrounds, transfers, 'copy'),
+      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'copy')
     })
     persist()
   },
@@ -322,7 +357,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     if (transfers.length === 0) return
     set({
       additions: transferAdditions(get(), transfers, 'move'),
-      transparentBackgrounds: transferTransparentBackgrounds(get(), transfers, 'move')
+      transparentBackgrounds: transferSceneFlags(get().transparentBackgrounds, transfers, 'move'),
+      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'move')
     })
     persist()
   },

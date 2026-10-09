@@ -23,8 +23,10 @@ import { useCharRefsStore, useVibesStore } from './refs-store'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
 import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import {
+  anyNudeStrip,
   enabledEntries,
   hasAddition,
+  sceneNudeStrip,
   useSceneExtrasStore,
   type SequenceEntry,
   type SceneAdditionTransfer
@@ -238,7 +240,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   // 복장 (커스텀) — 씬(또는 큐 항목)에서 고른 옷 > 카드 기본 복장 > 없음
   const outfits = outfitMap()
   const exposeActs = useOutfitsStore.getState().acts
-  const stripOnNude = useOutfitsStore.getState().stripOnNude
+  // 씬에서 따로 켜고 껐으면 그 값, 아니면 설정 창의 전체 설정
+  const stripOnNude = sceneNudeStrip(scene.presetId, scene.id)
   const kindOf = clothKindOf()
   // 역할이 걸린 캐릭터가 있으면 씬 전체 태그(삽입 등)는 당하는쪽에게만 적용한다
   const anyRole = drawn.some(({ char: c, slotIndex }) => !!placementRole(c, slotIndex))
@@ -456,7 +459,7 @@ async function ensureExtrasData(): Promise<void> {
   if (!useCharRefsStore.getState().loaded) jobs.push(useCharRefsStore.getState().load())
   await Promise.all(jobs)
   // 누드면 옷 벗기기 — 카드 태그의 옷 분류를 미리 받아둔다 (요청은 동기로 만들어진다)
-  if (useOutfitsStore.getState().stripOnNude) {
+  if (anyNudeStrip()) {
     await useOutfitsStore
       .getState()
       .ensureKinds(useCharactersStore.getState().items.map((c) => c.prompt))

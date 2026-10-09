@@ -918,6 +918,7 @@ export interface IpcInvokeMap {
       dropped: number
       /** 씬마다 따로 켜고 끈 투명 배경 */
       transparent?: { sceneId: number; enabled: boolean }[]
+      nudeStrip?: { sceneId: number; enabled: boolean }[]
     }
   }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */

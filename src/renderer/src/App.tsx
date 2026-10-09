@@ -21,6 +21,7 @@ import { TextPromptHost } from './components/text-prompt-host'
 import { TooltipProvider } from './components/ui/tooltip'
 import { useCharactersStore } from './stores/characters-store'
 import { useOutfitsStore } from './stores/outfits-store'
+import { anyNudeStrip } from './stores/scene-extras-store'
 import { OutfitMode } from './components/outfit-mode'
 import { useFragmentsStore } from './stores/fragments-store'
 import { useCharRefsStore, useVibesStore } from './stores/refs-store'
@@ -116,8 +117,8 @@ export default function App(): React.JSX.Element {
         useCharRefsStore.getState().load(),
         useShortcutsStore.getState().hydrate()
       ])
-      // 누드면 옷 벗기기 — 켜져 있으면 카드 태그의 옷 분류를 미리 받아둔다 (씬 미리보기용)
-      if (useOutfitsStore.getState().stripOnNude) {
+      // 누드면 옷 벗기기 — 전체나 어느 씬에서든 켜져 있으면 카드 태그의 옷 분류를 미리 받아둔다 (씬 미리보기용)
+      if (anyNudeStrip()) {
         void useOutfitsStore
           .getState()
           .ensureKinds(useCharactersStore.getState().items.map((c) => c.prompt))

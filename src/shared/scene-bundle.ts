@@ -428,6 +428,8 @@ export interface SceneExtrasFile {
   additions?: Record<string, Record<string, SceneSetup>>
   /** 프리셋 id → 씬 id → 이 씬만 투명 배경 켬/끔 */
   transparentBackgrounds?: Record<string, Record<string, boolean>>
+  /** 씬별 누드면 옷 벗기기 (커스텀) */
+  nudeStrips?: Record<string, Record<string, boolean>>
 }
 
 /** 지워진 캐릭터를 가리키는 항목을 구성에서 걷어낸다 */
@@ -519,6 +521,8 @@ export interface SceneBundle {
     varietyPlus?: boolean
     /** 이 씬만 투명 배경으로 (없으면 전역 설정을 따른다) */
     transparentBackground?: boolean
+    /** 씬별 누드면 옷 벗기기 (커스텀) — 없으면 전체 설정 따름 */
+    nudeStrip?: boolean
     /** 씬별 캐릭터 추가 — 없으면 캐릭터 없이 씬만 */
     setup?: FileSetup
   })[]

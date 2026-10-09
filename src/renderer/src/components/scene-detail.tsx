@@ -3,7 +3,7 @@ import { BackgroundUseDialog } from './background-use-dialog'
 import { normalizeBackground } from '@shared/background-tags'
 import { promptTokenRequest } from '@shared/nai-tokens'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
-import { ArrowLeft, ImageOff, Loader2, Minus, Play, Plus, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, ImageOff, Loader2, Minus, Play, Plus, Shirt, Star, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
@@ -50,7 +50,11 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const promptSplitEnabled = useGenerationStore((s) => s.promptSplitEnabled)
   const charItems = useCharactersStore((s) => s.items)
   // 누드면 옷 벗기기 (커스텀) — 켜고 끄거나 옷 분류가 도착하면 미리보기도 다시 계산
-  const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  const globalStripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  // 씬에서 따로 정했으면 그 값 — 더블클릭으로 지우면 전체 설정을 따른다
+  const nudeStripOverride = useSceneExtrasStore((s) => s.nudeStrips[scene.presetId]?.[scene.id])
+  const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
+  const stripOnNude = nudeStripOverride ?? globalStripOnNude
   const clothKinds = useOutfitsStore((s) => s.kinds)
   useEffect(() => {
     if (stripOnNude) void useOutfitsStore.getState().ensureKinds(charItems.map((c) => c.prompt))
@@ -224,6 +228,23 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             <ImageOff size={13} /> BG
           </Button>
         )}
+        {/* 누드면 옷 벗기기 (커스텀) — 이 씬에서만 켜거나 끈다 */}
+        <Button
+          size="sm"
+          variant={stripOnNude ? 'accent' : 'ghost'}
+          className="gap-1"
+          aria-pressed={stripOnNude}
+          onClick={() => setSceneNudeStrip(scene.presetId, [scene.id], !stripOnNude)}
+          onDoubleClick={() => setSceneNudeStrip(scene.presetId, [scene.id], undefined)}
+          title={
+            nudeStripOverride === undefined
+              ? `누드면 옷 벗기기: ${stripOnNude ? '켬' : '끔'} (전체 설정 따름 · 누르면 이 씬만 바꿈)`
+              : `누드면 옷 벗기기: ${stripOnNude ? '켬' : '끔'} (이 씬만 · 더블클릭하면 전체 설정 따름)`
+          }
+        >
+          <Shirt size={13} /> 옷 벗기기
+          {nudeStripOverride !== undefined && <span className="text-[10px] opacity-70">씬</span>}
+        </Button>
         {/* 생성 — 메인 "씬 생성"과 동일한 예약 생성 흐름 (예약 0이면 이 씬 1개 예약 후) */}
         <Button
           size="sm"

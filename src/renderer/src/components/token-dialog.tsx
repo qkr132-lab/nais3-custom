@@ -202,7 +202,7 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row
         label="누드면 옷 벗기기"
-        hint="장면에 nude·completely nude·naked towel 등이 있으면 그 캐릭터의 복장을 빼고 카드의 옷 태그를 걷어냄"
+        hint="장면에 nude·completely nude·naked towel 등이 있으면 그 캐릭터의 복장을 빼고 카드의 옷 태그를 걷어냄 · 씬 상세의 「옷 벗기기」 버튼이나 편집 모드 일괄로 씬마다 따로 켜고 끌 수 있음"
       >
         <Switch checked={stripOnNude} onCheckedChange={setStripOnNude} />
       </Row>
