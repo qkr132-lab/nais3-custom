@@ -84,19 +84,19 @@ export function parseWeights(text: string): WeightSegment[] {
  */
 export function weightBackground(weight: number): string | null {
   if (weight === 1) return null
-  if (weight <= 0) return 'rgba(96, 145, 235, 0.2)'
+  if (weight <= 0) return 'rgba(96, 145, 235, 0.45)'
   const steps = Math.abs(Math.log(weight) / Math.log(STEP))
-  const alpha = Math.min(0.06 + steps * 0.035, 0.2)
+  const alpha = Math.min(0.1 + steps * 0.09, 0.48)
   return weight > 1
     ? `rgba(233, 94, 80, ${alpha.toFixed(3)})`
     : `rgba(96, 145, 235, ${alpha.toFixed(3)})`
 }
 
 /** 조각 구문 <...> 하이라이트 (NAIS2의 녹색 계승) */
-const FRAGMENT_BG = 'rgba(92, 190, 125, 0.16)'
+const FRAGMENT_BG = 'rgba(92, 190, 125, 0.3)'
 
 /** 주석 줄(#로 시작) — 전송에서 제외됨을 회색 배경으로 표시 */
-const COMMENT_BG = 'rgba(128, 128, 136, 0.16)'
+const COMMENT_BG = 'rgba(128, 128, 136, 0.28)'
 
 /** #부터 그 줄 끝까지의 [시작, 끝) 구간 (removeComments와 동일 규칙 — 토큰 중간 #은 제외) */
 function commentSpans(text: string): { start: number; end: number }[] {
