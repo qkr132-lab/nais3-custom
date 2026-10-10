@@ -1,7 +1,8 @@
-import { Loader2, X } from 'lucide-react'
+import { Images, Loader2, X } from 'lucide-react'
 import { TAG_MATCH_LABEL } from '@shared/tag-search'
 import type { useTagCompletion } from '../lib/use-tag-completion'
 import { cn } from '../lib/utils'
+import { openTagExamples } from '../stores/web-nav-store'
 import { PopoverContent } from './ui/popover'
 
 const TYPE_COLORS: Record<string, string> = {
@@ -104,6 +105,25 @@ export function TagSuggestions({
                 >
                   {s.kind === 'tag' ? s.tag : `<${s.path}>`}
                 </span>
+                {s.kind === 'tag' && (
+                  // 예시 그림 — 웹 탭에서 이 태그로 검색한 Danbooru 그림 목록 (삽입하지 않는다)
+                  <span
+                    role="button"
+                    title="예시 그림 보기 (Alt+Enter) — 웹 탭에서 이 태그 그림 목록을 연다"
+                    className="shrink-0 rounded p-0.5 text-faint hover:bg-surface-3 hover:text-accent"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      openTagExamples(s.tag)
+                    }}
+                  >
+                    <Images size={13} />
+                  </span>
+                )}
                 <span className="shrink-0 text-[11px] text-muted">
                   {s.kind === 'tag' &&
                     (s.usageCount
@@ -150,10 +170,10 @@ export function TagSuggestions({
             ? '입력이 바뀌면 이전 후보는 선택되지 않아요.'
             : selected?.kind === 'tag' && selected.desc
               ? selected.desc
-              : '↑↓ 선택 · Enter/Tab 삽입 · Shift+Enter 줄바꿈'}
+              : '↑↓ 선택 · Enter/Tab 삽입 · Alt+Enter 예시 그림 · Shift+Enter 줄바꿈'}
         </p>
         <div className="mt-1 flex items-center justify-between gap-2">
-          <span>Enter 삽입 · Shift+Enter 줄바꿈</span>
+          <span>Enter 삽입 · Alt+Enter 예시 그림</span>
           <button
             type="button"
             tabIndex={-1}

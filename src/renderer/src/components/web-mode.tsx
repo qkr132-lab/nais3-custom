@@ -16,6 +16,7 @@ import type { WebviewTag } from 'electron'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
+import { useWebNavStore } from '../stores/web-nav-store'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
@@ -66,6 +67,14 @@ export function WebMode(): React.JSX.Element {
   const [editLinks, setEditLinks] = useState(false)
   const [proxyOpen, setProxyOpen] = useState(false)
   const [proxy, setProxy] = useState('')
+  // 다른 화면에서 넘긴 주소 (태그 예시 그림) — 처음 열 때면 그 주소로 시작한다
+  const [startUrl] = useState(() => useWebNavStore.getState().take() ?? DEFAULT_LINKS[0].url)
+  const pendingUrl = useWebNavStore((s) => s.pending)
+  useEffect(() => {
+    if (!pendingUrl || !webviewRef.current) return
+    const url = useWebNavStore.getState().take()
+    if (url) void webviewRef.current.loadURL(url).catch(() => undefined)
+  }, [pendingUrl])
 
   // 퀵링크 + 프록시 설정 로드
   useEffect(() => {
@@ -86,7 +95,13 @@ export function WebMode(): React.JSX.Element {
               if (next.some((l) => l.url.includes('danbooru.donmai.us'))) {
                 next = next.map((l) =>
                   l.url.includes('danbooru.donmai.us')
-                    ? { ...l, url: l.url.replace(/https?:\/\/danbooru\.donmai\.us\/?/, 'https://shima.donmai.us/') }
+                    ? {
+                        ...l,
+                        url: l.url.replace(
+                          /https?:\/\/danbooru\.donmai\.us\/?/,
+                          'https://shima.donmai.us/'
+                        )
+                      }
                     : l
                 )
                 changed = true
@@ -107,7 +122,10 @@ export function WebMode(): React.JSX.Element {
             }
 
             if (changed)
-              void window.nais.invoke('settings:set', { key: LINKS_KEY, value: JSON.stringify(next) })
+              void window.nais.invoke('settings:set', {
+                key: LINKS_KEY,
+                value: JSON.stringify(next)
+              })
             setLinks(next)
           }
         } catch {
@@ -126,8 +144,7 @@ export function WebMode(): React.JSX.Element {
     setProxy(rules)
     void window.nais.invoke('settings:set', { key: PROXY_KEY, value: rules })
     void window.nais.invoke('web:setProxy', { rules }).then((r) => {
-      if (r.ok)
-        toast(rules.trim() ? '프록시 적용됨 — 새로고침하세요' : '프록시 해제됨', 'success')
+      if (r.ok) toast(rules.trim() ? '프록시 적용됨 — 새로고침하세요' : '프록시 해제됨', 'success')
     })
   }
 
@@ -258,18 +275,15 @@ export function WebMode(): React.JSX.Element {
           <PopoverContent align="end" className="w-80 p-3">
             <p className="text-[13px] font-semibold text-ink">프록시 (접속 우회)</p>
             <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
-              단보루 등이 한국에서 막혀 있으면, 사용 중인 프록시/VPN 주소를 넣어 우회할 수
-              있습니다. 예: <code className="text-accent">socks5://127.0.0.1:1080</code> 또는{' '}
+              단보루 등이 한국에서 막혀 있으면, 사용 중인 프록시/VPN 주소를 넣어 우회할 수 있습니다.
+              예: <code className="text-accent">socks5://127.0.0.1:1080</code> 또는{' '}
               <code className="text-accent">http://호스트:포트</code>. 프록시가 없으면 접속 자체를
               뚫을 수는 없어요(VPN 앱을 켜두면 비워둬도 됩니다).
             </p>
             <ProxyInput initial={proxy} onApply={applyProxy} onClose={() => setProxyOpen(false)} />
           </PopoverContent>
         </Popover>
-        <NavBtn
-          tip="기본 브라우저로 열기"
-          onClick={() => currentUrl && window.open(currentUrl)}
-        >
+        <NavBtn tip="기본 브라우저로 열기" onClick={() => currentUrl && window.open(currentUrl)}>
           <ExternalLink size={15} />
         </NavBtn>
       </div>
@@ -315,7 +329,7 @@ export function WebMode(): React.JSX.Element {
       <webview
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ref={webviewRef as any}
-        src={DEFAULT_LINKS[0].url}
+        src={startUrl}
         partition="persist:webmode"
         className="min-h-0 w-full flex-1"
       />

@@ -13,6 +13,7 @@ import {
 import type { TagSuggestion } from '@shared/tag-search'
 import { fragmentPaths } from '../stores/fragments-store'
 import { askText } from '../stores/dialog-store'
+import { openTagExamples } from '../stores/web-nav-store'
 import { toast, toastUndo, useToastStore } from '../stores/toast-store'
 import {
   completionEdit,
@@ -510,6 +511,14 @@ export function useTagCompletion(
       return
     }
     if (!open) return
+    // Alt+Enter — 고른 태그의 예시 그림을 웹 탭에서 연다 (입력창에는 넣지 않는다)
+    if (isEnter && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const item = suggestions[selected]
+      e.preventDefault()
+      e.stopPropagation()
+      if (item?.kind === 'tag') openTagExamples(item.tag)
+      return
+    }
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
