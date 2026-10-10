@@ -74,10 +74,12 @@ describe('카드에서 옷 태그 걷어내기', () => {
     )
   })
 
-  it('음수 가중치·문장은 건드리지 않고, 뺀 게 없으면 원문 그대로', () => {
+  it('음수 가중치는 건드리지 않고, 옷 문장은 문장째 빼고, 옷 얘기가 아닌 문장·뺄 게 없는 글은 그대로', () => {
     expect(stripClothing('-1::blazer::, 1girl', kindOf)).toBe('-1::blazer::, 1girl')
-    const sentence = 'She wears a black blazer over a white shirt and pleated skirt'
-    expect(stripClothing(`1girl, ${sentence}`, kindOf)).toBe(`1girl, ${sentence}`)
+    const clothes = 'She wears a black blazer over a white shirt and pleated skirt'
+    expect(stripClothing(`1girl, ${clothes}`, kindOf)).toBe('1girl')
+    const other = 'She holds a sword in both hands and looks down on everyone'
+    expect(stripClothing(`1girl, ${other}`, kindOf)).toBe(`1girl, ${other}`)
     expect(stripClothing('1girl,\nlong hair', kindOf)).toBe('1girl,\nlong hair')
   })
 
@@ -158,6 +160,50 @@ describe('누드면 옷 벗기기', () => {
         enabled: true
       }).card
     ).toBe('1girl, nude, completely nude')
+  })
+
+  it('색·재질이 붙은 긴 옷 이름(5~7단어)도 옷으로 보고 걷어낸다 — 문장은 그대로', () => {
+    const kinds: Record<string, 'cloth' | 'body'> = {
+      'white and black maid dress': 'cloth',
+      'red and white striped bikini top': 'cloth',
+      'maid headdress': 'cloth',
+      'gold glasses': 'cloth'
+    }
+    const r = undressForNude({
+      card: 'black hair, gold glasses, maid headdress, white and black maid dress, red and white striped bikini top, She looks down on everyone with a proud face.',
+      outfit: '',
+      outfitNegative: '',
+      contexts: ['nude, completely nude'],
+      enabled: true,
+      kindOf: (tag) => kinds[tag] ?? 'unknown'
+    })
+    // 머리 장식·안경은 얼굴 장비라 남고, 긴 옷 이름은 빠지고, 문장은 그대로
+    expect(r.card).toBe(
+      'black hair, gold glasses, maid headdress, She looks down on everyone with a proud face., nude, completely nude'
+    )
+  })
+
+  it('옷 낱말이 든 긴 문장은 문장째로 빼고, 옷 얘기가 아닌 문장은 그대로 둔다', () => {
+    const kinds: Record<string, 'cloth' | 'body'> = {
+      dress: 'cloth',
+      gown: 'cloth',
+      gloves: 'cloth',
+      hat: 'cloth',
+      sword: 'body',
+      hair: 'body'
+    }
+    const r = undressForNude({
+      card: 'red hair, She wears a long black evening gown with white gloves., She holds a sword in both hands and looks down on everyone., She wears a wide straw hat that shades her face.',
+      outfit: '',
+      outfitNegative: '',
+      contexts: ['nude'],
+      enabled: true,
+      kindOf: (tag) => kinds[tag] ?? 'unknown'
+    })
+    // 모자 문장은 얼굴 장비라 남는다
+    expect(r.card).toBe(
+      'red hair, She holds a sword in both hands and looks down on everyone., She wears a wide straw hat that shades her face., nude, completely nude'
+    )
   })
 
   it('설정을 끄거나 누드가 없으면 그대로', () => {
@@ -277,6 +323,10 @@ describe('옷 분류를 물어볼 태그', () => {
         '1girl, 1.2::White_Shirt, 1girl::\n# blazer',
         'She wears a black blazer over a white shirt'
       ])
-    ).toEqual(['1girl', 'white shirt'])
+    ).toEqual(expect.arrayContaining(['1girl', 'white shirt', 'blazer', 'wears']))
+    // 문장은 통째로가 아니라 낱말로만 (옷 문장인지 보려고)
+    expect(promptTags(['She wears a black blazer over a white shirt'])).not.toContain(
+      'she wears a black blazer over a white shirt'
+    )
   })
 })

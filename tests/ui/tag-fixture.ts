@@ -30,6 +30,11 @@ export async function tagFixtureInvoke(channel: string, req: unknown): Promise<u
   ).realTagInvoke
   if (bridge) return bridge(channel, req)
   const args = req as { query?: string; tag?: string; mode?: string; ko?: string }
+  // 사전에 없는 태그 빨갛게 — 고정 데이터에 있는 이름만 "아는" 태그
+  if (channel === 'tags:lookup') {
+    const names = (req as { tags: string[] }).tags
+    return { items: base.filter((r) => names.includes(r.tag)) }
+  }
   if (channel === 'tags:recordUse') {
     const tag = args.tag!
     history.set(tag, { count: (history.get(tag)?.count ?? 0) + 1, lastUsed: Date.now() })

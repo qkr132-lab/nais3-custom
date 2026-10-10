@@ -8,6 +8,8 @@ import { highlightRanges } from '../lib/prompt-weights'
 import { promptTokenLimit } from '@shared/nai-tokens'
 import { useGenerationStore } from '../stores/generation-store'
 import { usePromptTokens } from '../lib/use-prompt-tokens'
+import { useUnknownTagRanges } from '../lib/use-unknown-tags'
+import { useUiPrefsStore } from '../stores/ui-prefs-store'
 
 /**
  * 프롬프트 에디터.
@@ -58,6 +60,22 @@ export function PromptEditor({
   const listId = useId()
 
   const ranges = useMemo(() => highlightRanges(value), [value])
+  // 사전에 없는 태그는 빨갛게 (커스텀) — 자연어로 들어가는 건지, 태그를 잘못 친 건지 바로 알게.
+  // 글자는 textarea 가 그리므로, 위에 같은 타이포의 투명 층을 깔고 그 범위만 빨간 글자로 덮는다
+  const markUnknown = useUiPrefsStore((s) => s.markUnknownTags)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const unknown = useUnknownTagRanges(value, markUnknown)
+  const unknownPieces = useMemo(() => {
+    const pieces: { text: string; red: boolean; key: number }[] = []
+    let at = 0
+    for (const r of unknown) {
+      if (r.start > at) pieces.push({ text: value.slice(at, r.start), red: false, key: at })
+      pieces.push({ text: value.slice(r.start, r.end), red: true, key: r.start })
+      at = r.end
+    }
+    if (at < value.length) pieces.push({ text: value.slice(at), red: false, key: at })
+    return pieces
+  }, [value, unknown])
 
   // 내용 높이 측정 — textarea를 잠깐 0으로 눌러 scrollHeight를 읽는다.
   // 최소·최대는 className의 min-h/max-h가 잡으므로 여기서는 순수 내용 높이만 준다.
@@ -100,6 +118,11 @@ export function PromptEditor({
     if (ta && mirror) {
       mirror.scrollTop = ta.scrollTop
       mirror.scrollLeft = ta.scrollLeft
+    }
+    const overlay = overlayRef.current
+    if (ta && overlay) {
+      overlay.scrollTop = ta.scrollTop
+      overlay.scrollLeft = ta.scrollLeft
     }
   }
   useEffect(syncScroll, [value])
@@ -181,6 +204,34 @@ export function PromptEditor({
             }
             onBlur={completion.onBlur}
           />
+
+          {unknown.length > 0 && (
+            <div
+              ref={overlayRef}
+              aria-hidden
+              data-testid="unknown-tag-overlay"
+              className={cn(
+                TYPO,
+                'pointer-events-none absolute inset-0 overflow-hidden text-transparent'
+              )}
+            >
+              {unknownPieces.map((p) =>
+                p.red ? (
+                  <span
+                    key={p.key}
+                    data-unknown-tag
+                    title="단보루 사전에 없는 태그 — 자연어라면 그대로, 태그라면 철자를 확인"
+                    style={{ color: 'var(--danger)' }}
+                  >
+                    {p.text}
+                  </span>
+                ) : (
+                  <span key={p.key}>{p.text}</span>
+                )
+              )}
+              {value.endsWith('\n') && '​'}
+            </div>
+          )}
 
           <button
             type="button"

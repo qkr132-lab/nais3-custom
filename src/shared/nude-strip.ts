@@ -120,16 +120,40 @@ function filterTags(prompt: string, remove: (tag: string) => boolean): string {
 }
 
 const words = (tag: string): number => tag.split(/\s+/).length
+/** 옷으로 볼 태그의 최대 단어 수 — 'white and black maid dress'처럼 색·재질이 붙은 옷 이름(5~7단어)까지. 그보다 길면 문장이라 보고 손대지 않는다 */
+const MAX_CLOTH_WORDS = 7
 
 /**
  * 카드 프롬프트에서 옷 태그를 걷어낸다. 문장(단어 5개 넘음)은 건드리지 않는다 —
  * 문장을 통째로 지우면 옷 말고 다른 뜻까지 날아간다.
  */
 export function stripClothing(prompt: string, kindOf: (tag: string) => TagKind): string {
-  return filterTags(
-    prompt,
-    (tag) => words(tag) <= 4 && !KEEP_WHEN_NUDE.test(tag) && kindOf(tag) === 'cloth'
+  return filterTags(prompt, (tag) =>
+    words(tag) <= MAX_CLOTH_WORDS
+      ? !KEEP_WHEN_NUDE.test(tag) && kindOf(tag) === 'cloth'
+      : sentenceAboutClothes(tag, kindOf)
   )
+}
+
+/**
+ * 긴 자연어 문장이 옷 이야기인지 — 문장 안 낱말 하나라도 옷(모자·가면 같은 얼굴 장비 제외)이면 그 문장째로 뺀다.
+ * 낱말만 빼면 "She is not wearing a dress"처럼 뜻이 뒤집히거나 문장이 깨져서, 통째로 빼는 쪽이 안전하다.
+ */
+function sentenceAboutClothes(sentence: string, kindOf: (tag: string) => TagKind): boolean {
+  for (const w of sentenceWords(sentence)) {
+    if (KEEP_WHEN_NUDE.test(w)) continue
+    if (kindOf(w) === 'cloth') return true
+  }
+  return false
+}
+
+/** 문장의 낱말들 — 영문자만, 소문자, 3글자 이상 (a·an·the·is 같은 짧은 말은 옷이 아니다) */
+function sentenceWords(sentence: string): string[] {
+  const out = new Set<string>()
+  for (const raw of sentence.toLowerCase().split(/[^a-z-]+/)) {
+    if (raw.length >= 3) out.add(raw)
+  }
+  return [...out]
 }
 
 /** 복장을 벗길 때 남길 것만 — 머리 장식·가면·안대 (나머지 옷·문장은 전부 뺀다) */
@@ -243,7 +267,10 @@ export function promptTags(prompts: string[]): string[] {
     for (const token of splitPromptTokens(removeComments(p ?? ''))) {
       for (const tag of tokenTags(token)) {
         const t = norm(tag)
-        if (t && words(t) <= 4) out.add(t)
+        if (!t) continue
+        if (words(t) <= MAX_CLOTH_WORDS) out.add(t)
+        // 긴 문장은 낱말을 따로 분류해 둔다 — 옷 문장인지 보려고
+        else for (const w of sentenceWords(t)) out.add(w)
       }
     }
   }
