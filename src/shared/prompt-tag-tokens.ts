@@ -15,9 +15,13 @@ export interface PromptTagToken {
   text: string
 }
 
-/** NAI만 아는 태그 — 단보루 사전엔 없지만 틀린 게 아니다 (품질·미학·연도·등급·복잡도) */
+/**
+ * NAI만 아는 태그 — 단보루 사전엔 없지만 틀린 게 아니다.
+ * 품질·미학·연도·등급·복잡도(V5)·데이터셋·투명 배경, 그리고 NAI가 개명한 태그
+ * (v→peace sign, :|→neutral face, |_|→bar eyes, eyepatch bikini→square bikini, tachi-e→character image …)
+ */
 export const NAI_KNOWN_TAG =
-  /^(?:(?:best|amazing|great|normal|bad|worst) quality|very aesthetic|aesthetic|displeasing|very displeasing|masterpiece|absurdres|highres|lowres|year \d{4}|rating:(?:general|sensitive|questionable|explicit)|(?:low|medium|high|ultra) complexity|no text|location|top aesthetic)$/i
+  /^(?:(?:best|amazing|great|normal|bad|worst) quality|very aesthetic|aesthetic|displeasing|very displeasing|masterpiece|absurdres|highres|lowres|year \d{4}|rating:(?:general|sensitive|questionable|explicit)|(?:low|medium|high|ultra) complexity|no text|location|top aesthetic|fur dataset|background dataset|transparent background|has alpha|alpha transparency|depthness|attractive male|meta:(?:novel|golden) era|visual novel (?:art|bg|cg|chibi|sprite)|peace sign|double peace|bar eyes|neutral face|neco-arc eyes|square bikini|character image|open \\m\/|text|english text|japanese text|chinese text)$/i
 
 /** 콤마가 묶음 기호 안(`1.3::a, b::`)에 있어도 각 태그를 따로 보도록, 줄 하나를 덩어리들로 자른다 */
 function splitLine(line: string, offset: number, out: PromptTagToken[]): void {

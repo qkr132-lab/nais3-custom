@@ -36,7 +36,14 @@ describe('프롬프트 태그 덩어리', () => {
       'year 2024',
       'rating:general',
       'high complexity',
-      'no text'
+      'no text',
+      'peace sign',
+      'neutral face',
+      'bar eyes',
+      'square bikini',
+      'fur dataset',
+      'meta:golden era',
+      'visual novel cg'
     ])
       expect(NAI_KNOWN_TAG.test(k)).toBe(true)
     expect(NAI_KNOWN_TAG.test('blue eyes')).toBe(false)
