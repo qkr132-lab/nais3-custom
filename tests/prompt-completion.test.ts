@@ -222,3 +222,36 @@ describe('new tag insertion preserves existing neighbors', () => {
     expect(insertAt('sky\r\n  clouds', 7, '복근').edit.next).toBe('sky\r\n  abs, clouds')
   })
 })
+
+describe('여러 단어 영어 검색어는 마지막 단어로도 찾는다', () => {
+  it('black mai → mai로도 찾고, 고르면 마지막 단어만 바꾼다', async () => {
+    const { lastWordQuery, lastWordRange, mergeLastWord } =
+      await import('../src/renderer/src/lib/prompt-completion')
+    expect(lastWordQuery('black mai')).toBe('mai')
+    expect(lastWordQuery('maid')).toBeNull()
+    expect(lastWordQuery('black m')).toBeNull()
+    expect(lastWordQuery('검은 mai')).toBeNull()
+    const range = completionRange('1girl, black mai', 16)!
+    expect(range.query).toBe('black mai')
+    expect(completionEdit(lastWordRange(range), 'maid').next).toBe('1girl, black maid, ')
+    // 중간에 쳐도 뒤 태그는 그대로
+    const mid = completionRange('1girl, black mai, sky', 16)!
+    expect(completionEdit(lastWordRange(mid), 'maid').next).toBe('1girl, black maid, sky')
+    const merged = mergeLastWord(
+      [
+        { tag: 'blackmail', match: 'prefix' },
+        { tag: 'maiden in black', match: 'contains' }
+      ],
+      [
+        { tag: 'maid', match: 'exact' },
+        { tag: 'blackmail', match: 'prefix' }
+      ],
+      50
+    )
+    expect(merged.map((t) => [t.tag, !!t.lastWord])).toEqual([
+      ['blackmail', false],
+      ['maid', true],
+      ['maiden in black', false]
+    ])
+  })
+})

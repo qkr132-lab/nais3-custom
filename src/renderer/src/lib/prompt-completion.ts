@@ -177,3 +177,54 @@ export function completionEdit(
     cursor: range.start + insert.length
   }
 }
+
+/**
+ * 여러 단어로 친 영어 검색어의 마지막 단어 ("black mai" → "mai").
+ * 두 단어를 다 품은 태그만 찾으면 엉뚱한 것만 나와서, 마지막 단어로도 따로 찾는다.
+ */
+export function lastWordQuery(query: string): string | null {
+  if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(query)) return null
+  const words = query.trim().split(/\s+/)
+  const last = words.at(-1) ?? ''
+  if (words.length < 2 || last.length < 2 || !/^[a-z0-9]/i.test(last)) return null
+  return last
+}
+
+/** 마지막 단어만 바꾸는 범위 — 앞 단어(black)는 그대로 두고 mai만 maid로 */
+export function lastWordRange(range: CompletionRange): CompletionRange {
+  const typed = range.text.slice(range.start, range.cursor)
+  const m = /\S+$/.exec(typed)
+  if (!m) return range
+  return {
+    text: range.text,
+    cursor: range.cursor,
+    start: range.start + m.index,
+    end: range.end,
+    query: m[0],
+    kind: range.kind
+  }
+}
+
+/** 전체 검색어로 찾은 것과 마지막 단어로 찾은 것을 합친다 — 정확·앞부분 일치 → 마지막 단어 → 나머지 */
+export function mergeLastWord<T extends { tag: string; match?: string }>(
+  full: T[],
+  part: T[],
+  limit: number
+): (T & { lastWord?: true })[] {
+  const strong = full.filter((t) => t.match === 'exact' || t.match === 'prefix')
+  const rest = full.filter((t) => !strong.includes(t))
+  const seen = new Set<string>()
+  const out: (T & { lastWord?: true })[] = []
+  for (const [list, last] of [
+    [strong, false],
+    [part, true],
+    [rest, false]
+  ] as const) {
+    for (const t of list) {
+      if (seen.has(t.tag)) continue
+      seen.add(t.tag)
+      out.push(last ? { ...t, lastWord: true } : t)
+    }
+  }
+  return out.slice(0, limit)
+}

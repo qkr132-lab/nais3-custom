@@ -19,11 +19,15 @@ import {
   completionRange,
   completionAnchor,
   anchoredCompletionRange,
+  lastWordQuery,
+  lastWordRange,
+  mergeLastWord,
   type CompletionAnchor,
   type CompletionRange
 } from './prompt-completion'
 
-export type Suggestion = { kind: 'frag'; path: string } | ({ kind: 'tag' } & TagSuggestion)
+export type Suggestion =
+  { kind: 'frag'; path: string } | ({ kind: 'tag'; lastWord?: true } & TagSuggestion)
 let dismissActive: { owner: string; close: () => void } | null = null
 let lastCompletionToast: number | null = null
 export interface TagCompletion {
@@ -236,12 +240,20 @@ export function useTagCompletion(
           if (range.kind === 'frag') {
             items = fragmentPaths(range.query).map((path) => ({ kind: 'frag', path }))
           } else {
-            const response = await window.nais.invoke('tags:search', {
-              query: range.query.trim(),
-              // 넉넉히 받아 목록을 스크롤로 훑어보며 고른다
-              limit: 50
-            })
-            items = response.items.map((t) => ({ kind: 'tag' as const, ...t }))
+            // 넉넉히 받아 목록을 스크롤로 훑어보며 고른다
+            const last = lastWordQuery(range.query)
+            const [full, part] = await Promise.all([
+              window.nais.invoke('tags:search', { query: range.query.trim(), limit: 50 }),
+              last
+                ? window.nais.invoke('tags:search', { query: last, limit: 50 })
+                : Promise.resolve({ items: [] })
+            ])
+            // 마지막 단어로 찾은 것(black mai → maid)은 고르면 그 단어만 바꾼다
+            const partTags = part.items.filter((t) => t.match !== 'history')
+            items = mergeLastWord(full.items, partTags, 50).map((t) => ({
+              kind: 'tag' as const,
+              ...t
+            }))
           }
           if (!current()) return
           setSuggestions(items)
@@ -343,6 +355,8 @@ export function useTagCompletion(
       close()
       return
     }
+    // 마지막 단어로 찾은 태그면 그 단어만 바꾼다 (black mai → black maid)
+    if (s.kind === 'tag' && s.lastWord) range = lastWordRange(range)
     const edit = completionEdit(range, s.kind === 'frag' ? s.path : s.tag)
     close()
     ta.focus()
