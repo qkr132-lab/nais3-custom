@@ -243,6 +243,13 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   // 씬에서 따로 켜고 껐으면 그 값, 아니면 설정 창의 전체 설정
   const stripOnNude = sceneNudeStrip(scene.presetId, scene.id)
   const kindOf = clothKindOf()
+  // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
+  const sourceContexts = [
+    scene.sourceTags ?? '',
+    ...(layout?.slots ?? []).flatMap((_, i) =>
+      layout?.slotRoles?.[i] === 'source' ? [layout?.slotTags?.[i] ?? ''] : []
+    )
+  ].filter((t) => t.trim())
   // 역할이 걸린 캐릭터가 있으면 씬 전체 태그(삽입 등)는 당하는쪽에게만 적용한다
   const anyRole = drawn.some(({ char: c, slotIndex }) => !!placementRole(c, slotIndex))
   /**
@@ -265,80 +272,86 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       })
     ).values()
   ]
-  const built = drawn
-    .map(({ char: c, slotIndex }) => {
-      const seated = slotIndex != null
-      const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
-      // 자리 태그 (커스텀) — 그 자리에 앉은 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
-      // 얹는 건 역할 태그와 같은 취급 — 자리는 좌표만이 아니라 "그 자리의 연기"이기도 하다
-      const slotTag = seated ? (layout?.slotTags?.[slotIndex] ?? '') : ''
-      // 이 씬(또는 이 큐 항목)에서만 이 캐릭터에 얹는 태그 — 카드는 건드리지 않는다
-      const charTag = add?.charTags?.[c.id] ?? entry?.charTags?.[c.id] ?? ''
-      // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
-      // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
-      const addPos = seated ? undefined : add?.positions?.[c.id]
-      const role = placementRole(c, slotIndex)
-      // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
-      const partnerTag = partnerTagsFor(role, givers, c.id)
-      const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
-      // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
-      const sceneContexts = sceneContextsFor({
-        role,
-        anyRole,
-        prompts: [base.prompt, scene.prompt],
-        scene,
-        tags: [charTag, slotTag, partnerTag]
-      })
-      // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
-      // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
-      // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 켜지 않고 자리 태그로만
-      const exposeContexts = seated && isFaceSeat(slotTag) ? [slotTag] : sceneContexts
-      const auto = triggerAreas(exposeContexts, exposeActs, outfitChoice)
-      // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
-      // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
-      // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
-      const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf, auto)
-      const dressed = undressForNude({
-        card: c.prompt,
-        outfit: worn,
-        outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
-        explicitOutfit: !!outfitChoice,
-        contexts: [...sceneContexts, worn],
-        enabled: stripOnNude,
-        kindOf
-      })
-      const outfitTag = dressed.outfit
-      /**
-       * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
-       * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
-       * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
-       * 표정·포즈 같은 일반 태그는 MUTUAL_TAGS에 없어 그대로 남는다.
-       */
-      const withRole = (tags: string): string =>
-        role && tags.trim() ? autoRolePrefix(tags, role) : tags
-      if (slotPos) slotApplied = true
-      const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
-      if (rp) rolePosApplied = true
-      const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
-      return {
-        // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
-        prompt: [
-          outfitTag,
-          withRole(charTag),
-          withRole(slotTag),
-          withRole(partnerTag),
-          roleTagsFor(role, scene)
-        ].reduce(appendPrompt, dressed.card),
-        // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
-        negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
-        // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
-        // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
-        center: explicit ?? { x: 0.5, y: 0.5 },
-        // 명시 위치(씬별/역할/큐)가 있었는지 — 아래 겹침 분산에서 이 캐릭터는 건드리지 않는다
-        positioned: explicit != null,
-        enabled: true as const
-      }
+  const built = drawn.map(({ char: c, slotIndex }) => {
+    const seated = slotIndex != null
+    const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
+    // 자리 태그 (커스텀) — 그 자리에 앉은 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
+    // 얹는 건 역할 태그와 같은 취급 — 자리는 좌표만이 아니라 "그 자리의 연기"이기도 하다
+    const slotTag = seated ? (layout?.slotTags?.[slotIndex] ?? '') : ''
+    // 이 씬(또는 이 큐 항목)에서만 이 캐릭터에 얹는 태그 — 카드는 건드리지 않는다
+    const charTag = add?.charTags?.[c.id] ?? entry?.charTags?.[c.id] ?? ''
+    // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
+    // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
+    const addPos = seated ? undefined : add?.positions?.[c.id]
+    const role = placementRole(c, slotIndex)
+    // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
+    const partnerTag = partnerTagsFor(role, givers, c.id)
+    const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
+    // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
+    const sceneContexts = sceneContextsFor({
+      role,
+      anyRole,
+      prompts: [base.prompt, scene.prompt],
+      scene,
+      tags: [charTag, slotTag, partnerTag]
     })
+    // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
+    // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
+    // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 켜지 않고 자리 태그로만
+    const faceSeat = seated && isFaceSeat(slotTag)
+    const exposeContexts = faceSeat ? [slotTag] : sceneContexts
+    // 당하는쪽은 하는쪽이 당하는쪽 몸에 하는 행위(하는쪽 태그·하는쪽 자리 태그)로도 드러난다
+    const auto = triggerAreas(
+      exposeContexts,
+      exposeActs,
+      outfitChoice,
+      role === 'target' && !faceSeat ? sourceContexts : []
+    )
+    // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
+    // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
+    // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+    const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf, auto)
+    const dressed = undressForNude({
+      card: c.prompt,
+      outfit: worn,
+      outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
+      explicitOutfit: !!outfitChoice,
+      contexts: [...sceneContexts, worn],
+      enabled: stripOnNude,
+      kindOf
+    })
+    const outfitTag = dressed.outfit
+    /**
+     * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
+     * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
+     * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
+     * 표정·포즈 같은 일반 태그는 MUTUAL_TAGS에 없어 그대로 남는다.
+     */
+    const withRole = (tags: string): string =>
+      role && tags.trim() ? autoRolePrefix(tags, role) : tags
+    if (slotPos) slotApplied = true
+    const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
+    if (rp) rolePosApplied = true
+    const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
+    return {
+      // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+      prompt: [
+        outfitTag,
+        withRole(charTag),
+        withRole(slotTag),
+        withRole(partnerTag),
+        roleTagsFor(role, scene)
+      ].reduce(appendPrompt, dressed.card),
+      // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
+      negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
+      // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
+      // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
+      center: explicit ?? { x: 0.5, y: 0.5 },
+      // 명시 위치(씬별/역할/큐)가 있었는지 — 아래 겹침 분산에서 이 캐릭터는 건드리지 않는다
+      positioned: explicit != null,
+      enabled: true as const
+    }
+  })
   // 위치 적용 on/off: 씬별 추가 > 큐 항목 > 역할 위치 (커스텀).
   // ⚠️ 전역(배치 탭) 위치 지정은 메인 탭 전용 — 씬에는 새지 않는다. 전역을 켰더니
   // 씬의 "지정 안 한 캐릭터"까지 배치판 좌표로 그려지던 혼란(1.11.2 리포트)의 수정.

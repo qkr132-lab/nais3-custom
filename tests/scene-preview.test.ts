@@ -328,6 +328,24 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(charPrompt('bath, nude')).toBe('blue eyes')
   })
 
+  it('하는쪽 태그의 행위(breast punch)로 당하는쪽 가슴 조각이 켜진다', () => {
+    useCharactersStore.setState({
+      items: [
+        { ...card(1, 'blue eyes', true), outfitId: 9, role: 'target' },
+        { ...card(2, 'green eyes', true), role: 'source' }
+      ]
+    })
+    const [target] = buildSceneRequest({
+      ...scene,
+      prompt: 'standing',
+      sourceTags: 'breast punch',
+      targetTags: 'orgasm',
+      censorKinds: []
+    }).characterPrompts
+    expect(target.prompt).toContain('shirt lift')
+    expect(target.prompt).not.toContain('skirt lift')
+  })
+
   it('얼굴 인셋 자리는 씬 전체 태그로 조각을 켜지 않고, 몸 자리는 켠다', () => {
     useCharactersStore.setState({
       items: [{ ...card(1, 'blue eyes', true), outfitId: 9, role: 'target' }]
@@ -340,7 +358,10 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
             characterIds: [],
             charRefIds: [],
             vibeIds: [],
-            slots: [{ x: 0.5, y: 0.5 }, { x: 0.8, y: 0.2 }],
+            slots: [
+              { x: 0.5, y: 0.5 },
+              { x: 0.8, y: 0.2 }
+            ],
             slotChars: { 0: 1, 1: 1 },
             slotRoles: { 0: 'target', 1: 'target' },
             slotTags: { 0: 'ass focus', 1: 'pink inset, close-up, ahegao' }

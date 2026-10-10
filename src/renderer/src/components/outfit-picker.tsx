@@ -17,12 +17,15 @@ export function OutfitPicker({
   card,
   choice,
   sceneContexts,
+  partnerContexts = [],
   onChange
 }: {
   card: CharacterCard
   choice: OutfitChoice | undefined
   /** 이 씬에서 이 캐릭터에게 걸린 장면 태그 — nsfw 조각이 켜질지 본다. 없으면 씬을 모름 (큐 항목) */
   sceneContexts?: string[]
+  /** 당하는쪽이면 하는쪽 태그 — 하는쪽이 상대 몸에 하는 행위도 조각을 켠다 */
+  partnerContexts?: string[]
   onChange: (choice: OutfitChoice | undefined) => void
 }): React.JSX.Element {
   const items = useOutfitsStore((s) => s.items)
@@ -38,7 +41,9 @@ export function OutfitPicker({
   // 카드 기본 복장을 그대로 입는 중이면 조각 켜고 끈 기록도 없다
   const current: OutfitChoice | undefined = choice ?? (outfit ? { outfitId: outfit.id } : undefined)
   // nsfw 조각이 켜지는 부위 — 생성과 같은 규칙 (triggerAreas). 씬을 모르면 따지지 않는다
-  const auto = sceneContexts ? triggerAreas(sceneContexts, acts, current) : undefined
+  const auto = sceneContexts
+    ? triggerAreas(sceneContexts, acts, current, partnerContexts)
+    : undefined
   const need: Partial<Record<ExposeArea, string>> = sceneContexts
     ? neededAreas(sceneContexts, acts)
     : {}

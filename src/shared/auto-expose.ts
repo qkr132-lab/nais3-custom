@@ -97,12 +97,14 @@ export const DEFAULT_EXPOSE_ACTS: ExposeActs = {
     'breasts out',
     'naizuri',
     'nursing handjob',
-    'nipple pull'
+    'nipple pull',
+    'breast punch',
+    'breast slap'
   ]
 }
 
 /** 기본 장면 목록의 판 — 기본 목록에 태그를 더하면 올린다. 저장된 목록이 이 판이 아니면 새 기본 태그를 더한다 */
-export const EXPOSE_ACTS_VERSION = 3
+export const EXPOSE_ACTS_VERSION = 4
 
 /** 저장된 목록에 기본 목록에서 빠진 태그를 더한다 — 앱을 올려 기본이 늘어도 예전에 저장한 목록이 뒤처지지 않게 */
 export function withDefaultActs(acts: ExposeActs): ExposeActs {
@@ -216,7 +218,8 @@ function matchesAct(tag: string, acts: readonly string[], exact: ReadonlySet<str
  * 옷 위를 뜻하는 태그 — 젖은 자국(pussy juice stain)·가린 것(covered nipples)·옷 너머로 비침·패스티.
  * 이 태그 자체는 신호가 아니고, 있으면 그 부위는 옷을 입은 채라고 본다.
  */
-const CLOTHED_MARK = /(^|\s)(stain|stains)$|^covered\s|\bthrough (clothes|clothing|panties)\b|\bpasties\b/
+const CLOTHED_MARK =
+  /(^|\s)(stain|stains)$|^covered\s|\bthrough (clothes|clothing|panties)\b|\bpasties\b/
 const CHEST_WORDS = /\b(breast|breasts|nipple|nipples|chest|areola|areolae)\b/
 
 /** 옷 위 태그가 가리키는 부위 */
@@ -230,7 +233,9 @@ const clothedArea = (tag: string): ExposeArea | null =>
 const WEAK_ACTS = new Set(['pussy', 'pussy juice', 'anus', 'nipples'])
 const isWeakHit = (tag: string, acts: readonly string[]): boolean =>
   !acts.some(
-    (a) => !WEAK_ACTS.has(a) && (a === tag || (tag.split(' ').length <= 5 && a.length < tag.length && hasWords(tag, a)))
+    (a) =>
+      !WEAK_ACTS.has(a) &&
+      (a === tag || (tag.split(' ').length <= 5 && a.length < tag.length && hasWords(tag, a)))
   )
 
 /**
@@ -278,10 +283,44 @@ export function neededAreas(
 export function triggerAreas(
   contexts: string[],
   acts: ExposeActs,
-  choice?: { auto?: boolean }
+  choice?: { auto?: boolean },
+  /** 당하는쪽이면 하는쪽 태그 — 하는쪽이 상대 몸에 하는 행위(breast punch·vaginal 등)도 신호로 본다 */
+  partner: string[] = []
 ): SceneAreas {
   if (choice?.auto === false) return {}
   const need = neededAreas(contexts, acts)
+  const by = partner.length ? partnerAreas(partner, acts) : {}
+  return { lower: !!need.lower || !!by.lower, chest: !!need.chest || !!by.chest }
+}
+
+/**
+ * 하는쪽 자기 몸 이야기 — 상대를 드러낼 신호가 아니다
+ * (하는쪽이 자위하거나·제 몸을 내보이거나·상대 얼굴에 앉는 것).
+ */
+const SELF_ACTS = new Set([
+  'masturbation',
+  'female masturbation',
+  'clitoral stimulation',
+  'pussy',
+  'spread pussy',
+  'pussy juice',
+  'anus',
+  'spread anus',
+  'presenting',
+  'dildo riding',
+  'sitting on face',
+  'facesitting',
+  'nipples',
+  'breasts out',
+  'lactation',
+  'breastfeeding',
+  'nursing handjob'
+])
+
+/** 하는쪽 태그 가운데 상대 몸에 하는 행위로 드러날 부위 */
+export function partnerAreas(partner: string[], acts: ExposeActs): SceneAreas {
+  const others = (list: string[]): string[] => list.filter((a) => !SELF_ACTS.has(norm(a)))
+  const need = neededAreas(partner, { lower: others(acts.lower), chest: others(acts.chest) })
   return { lower: !!need.lower, chest: !!need.chest }
 }
 

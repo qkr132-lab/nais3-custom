@@ -111,6 +111,26 @@ describe('nsfw 조각이 켜지는 장면', () => {
     expect(autoExpose.isFaceSeat('-2::portrait::, upper body')).toBe(false)
   })
 
+  it('하는쪽이 상대 몸에 하는 행위는 당하는쪽 조각을 켜고, 하는쪽 자기 몸 이야기는 켜지 않는다', () => {
+    expect(
+      autoExpose.triggerAreas(['standing, orgasm'], acts, undefined, ['1boy, breast punch'])
+    ).toEqual({
+      lower: false,
+      chest: true
+    })
+    expect(
+      autoExpose.triggerAreas(['lying'], acts, undefined, ["grabbing another's breasts, vaginal"])
+    ).toEqual({ lower: true, chest: true })
+    // 하는쪽이 자위하거나 제 몸을 보이거나 얼굴에 앉는 것은 상대를 드러내지 않는다
+    expect(
+      autoExpose.triggerAreas(['lying'], acts, undefined, [
+        'futanari, pussy, masturbation, sitting on face'
+      ])
+    ).toEqual({ lower: false, chest: false })
+    // 씬에서 자동 켜기를 껐으면 하는쪽 태그로도 켜지 않는다
+    expect(autoExpose.triggerAreas([''], acts, { auto: false }, ['vaginal'])).toEqual({})
+  })
+
   it('fisting도 아래를 드러내는 행위로 본다', () => {
     expect(neededAreas(['1.5::fisting::'], acts)).toEqual({ lower: 'fisting' })
     expect(neededAreas(['anal fisting'], acts).lower).toBe('anal fisting')

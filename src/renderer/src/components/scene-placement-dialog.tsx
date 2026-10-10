@@ -3,6 +3,7 @@ import { Check, Maximize2, Minimize2, Plus, RotateCcw, User } from 'lucide-react
 import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { partnerTagsFor, sceneContextsFor, seatSlots } from '@shared/scene-request'
+import { isFaceSeat } from '@shared/auto-expose'
 import { requestForPromptMode } from '@shared/prompt-state'
 import { cn } from '../lib/utils'
 import { useCharactersStore } from '../stores/characters-store'
@@ -319,18 +320,44 @@ export function ScenePlacementDialog({
     return placements
       .filter(({ c }) => c.id === id)
       .flatMap(({ c, slot }) =>
-        sceneContextsFor({
-          role: roleAt(c, slot),
-          anyRole,
-          prompts: [basePrompt, scene.prompt],
-          scene,
-          tags: [
-            charTags?.[id] ?? '',
-            slot != null ? (slotTags?.[slot] ?? '') : '',
-            partnerTagsFor(roleAt(c, slot), givers, id)
-          ]
-        })
+        // 얼굴만 나오는 자리(inset·portrait·close-up)는 자리 태그로만 — 생성과 같은 규칙
+        slot != null && isFaceSeat(slotTags?.[slot] ?? '')
+          ? [slotTags?.[slot] ?? '']
+          : sceneContextsFor({
+              role: roleAt(c, slot),
+              anyRole,
+              prompts: [basePrompt, scene.prompt],
+              scene,
+              tags: [
+                charTags?.[id] ?? '',
+                slot != null ? (slotTags?.[slot] ?? '') : '',
+                partnerTagsFor(roleAt(c, slot), givers, id)
+              ]
+            })
       )
+  }
+
+  /**
+   * 당하는쪽이면 하는쪽 태그(씬의 하는쪽 태그 + 하는쪽 자리 태그) — 하는쪽이 상대 몸에 하는 행위도
+   * 조각을 켠다 (생성과 같은 규칙). 얼굴만 나오는 자리에만 앉았으면 없음.
+   */
+  const partnerContextsOf = (id: number): string[] => {
+    if (!scene) return []
+    const c = picked.find((p) => p.id === id)
+    if (!c) return []
+    const seats = seatsOf(id)
+    const targetBody = seats.length
+      ? seats.some(
+          (slot) =>
+            (slotRoles?.[slot] ?? roles?.[id] ?? c.role) === 'target' &&
+            !isFaceSeat(slotTags?.[slot] ?? '')
+        )
+      : (roles?.[id] ?? c.role) === 'target'
+    if (!targetBody) return []
+    return [
+      scene.sourceTags ?? '',
+      ...slotList.flatMap((_, i) => (slotRoles?.[i] === 'source' ? [slotTags?.[i] ?? ''] : []))
+    ].filter((t) => t.trim())
   }
 
   /** 이 씬에서 이 캐릭터가 상대에게 줄 태그 — 비우면 카드에 적힌 상대 태그로 돌아간다 */
@@ -652,7 +679,8 @@ export function ScenePlacementDialog({
                       />
                       {cardValue && !partnerTags?.[selectedChar.id]?.trim() && (
                         <p className="text-[11px] text-faint">
-                          지금은 카드에 적힌 상대 태그를 씁니다: <span className="text-muted">{cardValue}</span>
+                          지금은 카드에 적힌 상대 태그를 씁니다:{' '}
+                          <span className="text-muted">{cardValue}</span>
                         </p>
                       )}
                     </>
@@ -664,6 +692,7 @@ export function ScenePlacementDialog({
                     card={selectedChar}
                     choice={outfits?.[selectedChar.id]}
                     sceneContexts={sceneContextsOf(selectedChar.id)}
+                    partnerContexts={partnerContextsOf(selectedChar.id)}
                     onChange={(c) => setOutfit(selectedChar.id, c)}
                   />
                 </div>
