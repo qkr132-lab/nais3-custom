@@ -113,8 +113,9 @@ describe('누드면 옷 벗기기', () => {
   }
 
   it('장면에 누드가 있으면 기본 복장을 빼고 카드 옷 태그를 걷어낸다', () => {
+    // 캐릭터 태그 끝에 누드 태그도 붙인다 — 여러 명 그림에서 누가 벗었는지 알게
     expect(undressForNude({ ...base, contexts: ['bathing, nude'], enabled: true })).toEqual({
-      card: '1girl, long hair',
+      card: '1girl, long hair, nude, completely nude',
       outfit: '',
       outfitNegative: '',
       nude: 'nude'
@@ -142,7 +143,21 @@ describe('누드면 옷 벗기기', () => {
     })
     expect(r.outfit).toBe('black thighhighs, choker')
     expect(r.outfitNegative).toBe('halterneck')
-    expect(r.card).toBe('1girl, long hair')
+    expect(r.card).toBe('1girl, long hair, nude, completely nude')
+  })
+
+  it('naked towel처럼 한 가지만 걸친 알몸은 그 태그를, 이미 있는 누드 태그는 다시 붙이지 않는다', () => {
+    expect(undressForNude({ ...base, contexts: ['bath, naked towel'], enabled: true }).card).toBe(
+      '1girl, long hair, naked towel'
+    )
+    expect(
+      undressForNude({
+        ...base,
+        card: '1girl, nude, school uniform',
+        contexts: ['completely nude'],
+        enabled: true
+      }).card
+    ).toBe('1girl, nude, completely nude')
   })
 
   it('설정을 끄거나 누드가 없으면 그대로', () => {

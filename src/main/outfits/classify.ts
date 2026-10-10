@@ -55,25 +55,90 @@ function resolve(tag: string): string | null {
   for (let i = 0; i < words.length; i++) {
     const cand = words.slice(i).join(' ')
     if (d.has(cand)) return cand
+    // 단수로 적은 옷 — 사전엔 복수형만 있는 것 (latex glove → latex gloves)
+    if (d.has(`${cand}s`)) return `${cand}s`
   }
   return null
 }
 
 // 자료가 없을 때만 쓰는 흔한 옷 이름 (마지막 단어 기준)
 const CLOTH_NOUNS = new Set([
-  'shirt', 'blouse', 'skirt', 'miniskirt', 'pants', 'shorts', 'jeans', 'dress', 'jacket', 'coat',
-  'hoodie', 'sweater', 'cardigan', 'vest', 'uniform', 'bikini', 'swimsuit', 'leotard', 'bodysuit',
-  'gloves', 'thighhighs', 'pantyhose', 'socks', 'kneehighs', 'stockings', 'leggings', 'boots',
-  'shoes', 'heels', 'sandals', 'sneakers', 'loafers', 'apron', 'kimono', 'yukata', 'armor', 'cape',
-  'cloak', 'robe', 'bra', 'panties', 'underwear', 'lingerie', 'garter', 'belt', 'sleeves', 'overalls',
-  'top', 'camisole', 'corset', 'serafuku', 'blazer', 'necktie', 'scarf', 'tabard', 'tunic'
+  'shirt',
+  'blouse',
+  'skirt',
+  'miniskirt',
+  'pants',
+  'shorts',
+  'jeans',
+  'dress',
+  'jacket',
+  'coat',
+  'hoodie',
+  'sweater',
+  'cardigan',
+  'vest',
+  'uniform',
+  'bikini',
+  'swimsuit',
+  'leotard',
+  'bodysuit',
+  'gloves',
+  'thighhighs',
+  'pantyhose',
+  'socks',
+  'kneehighs',
+  'stockings',
+  'leggings',
+  'boots',
+  'shoes',
+  'heels',
+  'sandals',
+  'sneakers',
+  'loafers',
+  'apron',
+  'kimono',
+  'yukata',
+  'armor',
+  'cape',
+  'cloak',
+  'robe',
+  'bra',
+  'panties',
+  'underwear',
+  'lingerie',
+  'garter',
+  'belt',
+  'sleeves',
+  'overalls',
+  'top',
+  'camisole',
+  'corset',
+  'serafuku',
+  'blazer',
+  'necktie',
+  'scarf',
+  'tabard',
+  'tunic'
 ])
 const BARE = new Set(['nude', 'completely nude', 'naked', 'topless', 'bottomless', 'bare'])
 // 장신구·안경은 캐릭터 얼굴의 일부에 가까워 기본은 카드에 남긴다 (떼어낼지는 미리보기에서 고른다).
 // 사이트 분류의 "액세서리"엔 장갑·넥타이·벨트처럼 옷인 것도 섞여 있어 소분류 통째로 남기지 않는다
 const KEEP_ON_CARD_NOUNS = new Set([
-  'earrings', 'earring', 'necklace', 'jewelry', 'glasses', 'eyewear', 'sunglasses', 'monocle',
-  'bracelet', 'bracelets', 'ring', 'piercing', 'choker', 'pendant', 'tattoo'
+  'earrings',
+  'earring',
+  'necklace',
+  'jewelry',
+  'glasses',
+  'eyewear',
+  'sunglasses',
+  'monocle',
+  'bracelet',
+  'bracelets',
+  'ring',
+  'piercing',
+  'choker',
+  'pendant',
+  'tattoo'
 ])
 
 /** 태그 하나가 옷 / 알몸·노출 / 몸 / 모름 중 무엇인지 */
@@ -94,7 +159,12 @@ export function classifyTag(tag: string): TagKind {
     if (major) return 'body'
   }
   const last = t.split(/\s+/).pop() ?? ''
-  if (CLOTH_NOUNS.has(last) || CLOTH_NOUNS.has(last.replace(/s$/, ''))) return 'cloth'
+  if (
+    CLOTH_NOUNS.has(last) ||
+    CLOTH_NOUNS.has(`${last}s`) ||
+    CLOTH_NOUNS.has(last.replace(/s$/, ''))
+  )
+    return 'cloth'
   return base ? 'body' : 'unknown'
 }
 
@@ -106,8 +176,25 @@ export function tagKo(tag: string): string {
 
 // 옷 이름과 짝지을 상태 단어 — "그 옷이 어떤 상태인가"를 말하는 태그만 후보로
 const STATE_WORDS = new Set([
-  'lift', 'lifted', 'pull', 'aside', 'down', 'open', 'unzipped', 'unbuttoned', 'removed', 'off',
-  'undone', 'untied', 'torn', 'wet', 'partially', 'around', 'tug', 'peek', 'slip'
+  'lift',
+  'lifted',
+  'pull',
+  'aside',
+  'down',
+  'open',
+  'unzipped',
+  'unbuttoned',
+  'removed',
+  'off',
+  'undone',
+  'untied',
+  'torn',
+  'wet',
+  'partially',
+  'around',
+  'tug',
+  'peek',
+  'slip'
 ])
 
 /**

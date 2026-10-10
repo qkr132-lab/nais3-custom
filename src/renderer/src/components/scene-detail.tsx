@@ -238,8 +238,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           onDoubleClick={() => setSceneNudeStrip(scene.presetId, [scene.id], undefined)}
           title={
             nudeStripOverride === undefined
-              ? `누드면 옷 벗기기: ${stripOnNude ? '켬' : '끔'} (전체 설정 따름 · 누르면 이 씬만 바꿈)`
-              : `누드면 옷 벗기기: ${stripOnNude ? '켬' : '끔'} (이 씬만 · 더블클릭하면 전체 설정 따름)`
+              ? `옷 벗기기: ${stripOnNude ? '누드 태그가 있으면 벗김' : '끔'} (전체 설정 따름 · 누르면 이 씬만 바꿈)`
+              : `옷 벗기기: ${stripOnNude ? '이 씬은 알몸 — 누드 태그가 없어도 옷 태그를 빼고 nude, completely nude를 붙임' : '이 씬은 안 벗김'} (더블클릭하면 전체 설정 따름)`
           }
         >
           <Shirt size={13} /> 옷 벗기기

@@ -242,6 +242,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   const exposeActs = useOutfitsStore.getState().acts
   // 씬에서 따로 켜고 껐으면 그 값, 아니면 설정 창의 전체 설정
   const stripOnNude = sceneNudeStrip(scene.presetId, scene.id)
+  // 씬에서 옷 벗기기를 켰으면 누드 태그가 없어도 이 씬은 알몸 (온천처럼 nude를 안 적은 씬)
+  const forceNude = useSceneExtrasStore.getState().nudeStrips[scene.presetId]?.[scene.id] === true
   const kindOf = clothKindOf()
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
   const sourceContexts = [
@@ -316,7 +318,12 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       outfit: worn,
       outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
       explicitOutfit: !!outfitChoice,
-      contexts: [...sceneContexts, worn],
+      // 씬 전체 태그처럼 당하는쪽(역할 없는 씬이면 전원)에게만
+      contexts: [
+        ...sceneContexts,
+        worn,
+        ...(forceNude && (role === 'target' || !anyRole) ? ['completely nude'] : [])
+      ],
       enabled: stripOnNude,
       kindOf
     })

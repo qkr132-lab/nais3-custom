@@ -168,11 +168,27 @@ export function undressForNude(input: {
   if (!nude) return { card, outfit, outfitNegative, nude: null }
   const keepOutfit = !outfit || input.explicitOutfit === true || nudeTrigger([outfit]) !== null
   return {
-    card: stripClothing(card, input.kindOf),
+    card: withNudeTags(stripClothing(card, input.kindOf), nude, keepOutfit ? outfit : ''),
     outfit: keepOutfit ? outfit : keepAccessories(outfit),
     outfitNegative: keepOutfit ? outfitNegative : '',
     nude
   }
+}
+
+/**
+ * 벗긴 캐릭터 태그 끝에 누드 태그를 붙인다 — 장면에만 있으면 여러 명 그림에서 누가 벗었는지
+ * 모를 수 있어 캐릭터 태그에도 적는다. nude·completely nude면 둘 다, naked towel 같은 것은 그대로.
+ * 카드·입히는 복장에 이미 있으면 다시 붙이지 않는다.
+ */
+function withNudeTags(card: string, nude: string, outfit: string): string {
+  // 입히는 복장(누드 조각)이 이미 누드를 말하면 그걸로 충분하다
+  if (nudeTrigger([outfit]) !== null) return card
+  const want = NUDE_TAGS.has(nude) ? ['nude', 'completely nude'] : [nude]
+  const have = new Set(promptTags([card, outfit]))
+  const add = want.filter((t) => !have.has(t))
+  if (!add.length) return card
+  const base = card.replace(/[\s,]+$/, '')
+  return base ? `${base}, ${add.join(', ')}` : add.join(', ')
 }
 
 const pieceTags = (tags: string): string =>
