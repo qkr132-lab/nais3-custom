@@ -21,7 +21,6 @@ import { TextPromptHost } from './components/text-prompt-host'
 import { TooltipProvider } from './components/ui/tooltip'
 import { useCharactersStore } from './stores/characters-store'
 import { useOutfitsStore } from './stores/outfits-store'
-import { useUiPrefsStore } from './stores/ui-prefs-store'
 import { anyNudeStrip } from './stores/scene-extras-store'
 import { OutfitMode } from './components/outfit-mode'
 import { useFragmentsStore } from './stores/fragments-store'
@@ -113,7 +112,6 @@ export default function App(): React.JSX.Element {
         useGenerationStore.getState().hydrate(),
         useCharactersStore.getState().load(),
         useOutfitsStore.getState().load(),
-        useUiPrefsStore.getState().load(),
         useFragmentsStore.getState().load(),
         useVibesStore.getState().load(),
         useCharRefsStore.getState().load(),

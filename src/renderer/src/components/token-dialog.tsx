@@ -27,7 +27,6 @@ import { AccountsSection } from './accounts-section'
 import { useThemeStore } from '../stores/theme-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useOutfitsStore } from '../stores/outfits-store'
-import { useUiPrefsStore } from '../stores/ui-prefs-store'
 import { useFragmentsStore } from '../stores/fragments-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { usePromptPresetsStore } from '../stores/prompt-presets-store'
@@ -152,8 +151,6 @@ function GenerationSection(): React.JSX.Element {
   const setPromptSplitEnabled = useGenerationStore((s) => s.setPromptSplitEnabled)
   // 누드면 옷 벗기기 (커스텀, 기본 켜짐)
   const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
-  const markUnknownTags = useUiPrefsStore((s) => s.markUnknownTags)
-  const setMarkUnknownTags = useUiPrefsStore((s) => s.setMarkUnknownTags)
   const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
   // 확인 창 전역 끄기 (커스텀)
   const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
@@ -202,12 +199,6 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row label="확인 창 끄기" hint="삭제 등 '정말 하시겠어요?' 확인을 건너뜀 (주의)">
         <Switch checked={confirmsOff} onCheckedChange={setConfirmsOff} />
-      </Row>
-      <Row
-        label="사전에 없는 태그 빨갛게"
-        hint="프롬프트 입력창에서 단보루 사전에 없는 덩어리를 빨간 글자로 — 자연어인지 오타인지 바로 확인. NAI 전용 품질·연도 태그는 제외"
-      >
-        <Switch checked={markUnknownTags} onCheckedChange={setMarkUnknownTags} />
       </Row>
       <Row
         label="누드면 옷 벗기기"
