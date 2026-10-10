@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { compact, koreanInitials, koreanTypingKey, oneTypo, relatedKey } from './tags-related'
 import { mergeTagRecommendations } from '../shared/tag-search'
 import type { TagMatch, TagSuggestion, TagUsage } from '../shared/tag-search'
+import { tagGroupsFor } from '../shared/tag-groups'
 
 interface Row {
   id: number
@@ -47,7 +48,7 @@ interface Ranked {
 }
 export const normalizeTagQuery = (s: string): string =>
   s.normalize('NFC').trim().toLowerCase().replace(/_/g, ' ').slice(0, 120)
-const clampLimit = (n: number): number => Math.max(1, Math.min(60, Math.floor(n) || 10))
+const clampLimit = (n: number): number => Math.max(1, Math.min(150, Math.floor(n) || 10))
 const splitAliases = (s: string): string[] =>
   s
     .split(/[(),/;|]/)
@@ -367,7 +368,25 @@ export class TagSearchEngine {
         b.row.count - a.row.count ||
         a.row.tag.localeCompare(b.row.tag)
     )
-    const result = ranked.slice(0, n).map((r) => this.enrich(r.row, r.match, r.alias))
+    let result = ranked.slice(0, n).map((r) => this.enrich(r.row, r.match, r.alias))
+    // 한글 묶음 이름(뒷머리·앞머리·땋은머리…)이면 그 묶음 태그를 사용 수 순으로 먼저
+    const groups = tagGroupsFor(q)
+    if (groups.length) {
+      const seen = new Set<string>()
+      const grouped: TagSuggestion[] = []
+      for (const { group, exact } of groups) {
+        const rows = group.tags
+          .map((t) => this.named(t))
+          .filter((r): r is Row => !!r && !seen.has(r.tag))
+          .sort((a, b) => b.count - a.count)
+        for (const r of rows) {
+          if (seen.has(r.tag)) continue
+          seen.add(r.tag)
+          grouped.push(this.enrich(r, exact ? 'exact' : 'prefix'))
+        }
+      }
+      result = [...grouped, ...result.filter((r) => !seen.has(r.tag))].slice(0, n)
+    }
     // 한글 복합어로 제대로 찾은 게 없으면 앞 글자를 떼어 다시 찾는다 (윗가슴 → 가슴, 엉덩이골 → 덩이골 → 이골)
     if (
       korean &&

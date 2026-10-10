@@ -243,14 +243,14 @@ export function useTagCompletion(
             // 넉넉히 받아 목록을 스크롤로 훑어보며 고른다
             const last = lastWordQuery(range.query)
             const [full, part] = await Promise.all([
-              window.nais.invoke('tags:search', { query: range.query.trim(), limit: 50 }),
+              window.nais.invoke('tags:search', { query: range.query.trim(), limit: 100 }),
               last
                 ? window.nais.invoke('tags:search', { query: last, limit: 50 })
                 : Promise.resolve({ items: [] })
             ])
             // 마지막 단어로 찾은 것(black mai → maid)은 고르면 그 단어만 바꾼다
             const partTags = part.items.filter((t) => t.match !== 'history')
-            items = mergeLastWord(full.items, partTags, 50).map((t) => ({
+            items = mergeLastWord(full.items, partTags, 100).map((t) => ({
               kind: 'tag' as const,
               ...t
             }))

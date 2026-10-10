@@ -26,7 +26,7 @@ export function mergeTagRecommendations(
   frequent: TagSuggestion[],
   limit = 10
 ): TagSuggestion[] {
-  const n = Math.max(1, Math.min(60, limit))
+  const n = Math.max(1, Math.min(150, limit))
   const history: TagSuggestion[] = []
   const seen = new Set(matches.map((t) => t.tag))
   for (let i = 0; i < Math.max(recent.length, frequent.length); i++) {
