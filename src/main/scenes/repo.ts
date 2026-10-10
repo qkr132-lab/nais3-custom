@@ -8,12 +8,13 @@ import type { Scene, SceneImage, ScenePreset } from '../../shared/types'
 import {
   changeCensors,
   normalizeCensors,
-  normalizeCensorWeight,
-  changeCensorWeight,
+  normalizeCensorWeights,
+  changeCensorWeights,
   changeAnalSuppression,
   normalizeAnalSuppression,
   type CensorChanges,
-  type CensorKind
+  type CensorKind,
+  type CensorWeights
 } from '../../shared/censor-tags'
 import { getDb } from '../db'
 import { importOutfits } from '../outfits/repo'
@@ -57,8 +58,8 @@ interface Row {
   export_no: number | null
   // censor_weights 열(예전 검열 가중치)은 DB에 남아 있지만 더는 읽거나 쓰지 않는다
   censor_kinds: string
-  /** 검열 태그 가중치 (커스텀) — 기본 1 */
-  censor_weight: number
+  /** 부위별 검열 태그 가중치 JSON (커스텀) */
+  censor_tag_weights: string
   background: string
   suppress_anal: number
 }
@@ -96,7 +97,7 @@ function toScene(
     targetPos: parsePos(r.target_pos),
     exportNo: r.export_no,
     censorKinds: normalizeCensors(r.censor_kinds),
-    censorWeight: normalizeCensorWeight(r.censor_weight),
+    censorTagWeights: normalizeCensorWeights(r.censor_tag_weights),
     suppressAnal: normalizeAnalSuppression(r.suppress_anal),
     thumbnail: r.thumb ? r.thumb.toString('base64') : '',
     thumbnailPath: r.thumb_path ?? '',
@@ -228,7 +229,7 @@ export async function purgePreset(id: number): Promise<void> {
 export function listScenes(presetId: number): Scene[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weight, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_tag_weights, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
               (SELECT thumbnail FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb,
               (SELECT file_path FROM images WHERE scene_id = s.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) AS thumb_path
@@ -249,7 +250,7 @@ export function listTrashedScenes(
 ): (Scene & { deletedAt: string; presetName: string })[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_weight, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_tag_weights, s.suppress_anal, s.background, (SELECT kind FROM scene_presets WHERE id = s.preset_id) AS kind,
               s.deleted_at,
               (SELECT name FROM scene_presets WHERE id = s.preset_id) AS preset_name,
               (SELECT COUNT(*) FROM images WHERE scene_id = s.id AND deleted_at IS NULL) AS image_count,
@@ -358,7 +359,7 @@ export function getPresetName(id: number): string | null {
 export function getScene(id: number): Scene | null {
   const r = getDb()
     .prepare(
-      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weight, suppress_anal, background, (SELECT kind FROM scene_presets WHERE id = preset_id) AS kind,
+      `SELECT id, preset_id, name, prompt, negative_prompt, width, height, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_tag_weights, suppress_anal, background, (SELECT kind FROM scene_presets WHERE id = preset_id) AS kind,
               (SELECT COUNT(*) FROM images WHERE scene_id = ? AND deleted_at IS NULL) AS image_count
        FROM gen_scenes WHERE id = ?`
     )
@@ -405,7 +406,7 @@ export function duplicateScene(id: number): number {
     return Number(
       db
         .prepare(
-          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_weight, suppress_anal, background)
+          `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_tag_weights, suppress_anal, background)
            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
@@ -422,7 +423,7 @@ export function duplicateScene(id: number): number {
           s.source_pos ?? null,
           s.target_pos ?? null,
           s.censor_kinds ?? '[]',
-          s.censor_weight ?? 1,
+          s.censor_tag_weights ?? '{}',
           s.suppress_anal ?? 0,
           s.background ?? '{}'
         ).lastInsertRowid
@@ -461,12 +462,12 @@ export function duplicatePreset(id: number): { id: number; pairs: ScenePair[] } 
     )
     const scenes = db
       .prepare(
-        `SELECT id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weight, suppress_anal, background
+        `SELECT id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_tag_weights, suppress_anal, background
          FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
       )
       .all(id) as Record<string, unknown>[]
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weight, suppress_anal, background)
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_tag_weights, suppress_anal, background)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const s of scenes) {
@@ -485,7 +486,7 @@ export function duplicatePreset(id: number): { id: number; pairs: ScenePair[] } 
         s.target_pos ?? null,
         s.export_no ?? null,
         s.censor_kinds ?? '[]',
-        s.censor_weight ?? 1,
+        s.censor_tag_weights ?? '{}',
         s.suppress_anal ?? 0,
         s.background ?? '{}'
       )
@@ -509,7 +510,7 @@ export function bulkCopyScenes(ids: number[], presetId: number): ScenePair[] {
         .get(presetId) as { m: number }
     ).m
     const ins = db.prepare(
-      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_weight, suppress_anal, background)
+      `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, reserve_count, variety_plus, source_tags, target_tags, source_pos, target_pos, export_no, censor_kinds, censor_tag_weights, suppress_anal, background)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const id of ids) {
@@ -530,7 +531,7 @@ export function bulkCopyScenes(ids: number[], presetId: number): ScenePair[] {
         s.target_pos ?? null,
         s.export_no ?? null,
         s.censor_kinds ?? '[]',
-        s.censor_weight ?? 1,
+        s.censor_tag_weights ?? '{}',
         s.suppress_anal ?? 0,
         s.background ?? '{}'
       )
@@ -554,7 +555,7 @@ const FIELDS: Record<string, string> = {
   targetPos: 'target_pos',
   exportNo: 'export_no',
   censorKinds: 'censor_kinds',
-  censorWeight: 'censor_weight',
+  censorTagWeights: 'censor_tag_weights',
   background: 'background',
   suppressAnal: 'suppress_anal'
 }
@@ -570,8 +571,8 @@ export function updateScene(id: number, patch: Record<string, unknown>): void {
         ? normalizeBackground(patch[key])
         : key === 'censorKinds'
           ? normalizeCensors(patch[key])
-          : key === 'censorWeight'
-            ? normalizeCensorWeight(patch[key])
+          : key === 'censorTagWeights'
+            ? normalizeCensorWeights(patch[key])
             : key === 'suppressAnal'
               ? normalizeAnalSuppression(patch[key])
               : patch[key]
@@ -601,26 +602,31 @@ export function setSceneCensors(
 ): {
   id: number
   censorKinds: CensorKind[]
-  censorWeight: number
+  censorTagWeights: CensorWeights
   suppressAnal: boolean
 }[] {
   const db = getDb()
   return db.transaction(() => {
     const read = db.prepare(
-      'SELECT censor_kinds, censor_weight, suppress_anal FROM gen_scenes WHERE id = ? AND deleted_at IS NULL'
+      'SELECT censor_kinds, censor_tag_weights, suppress_anal FROM gen_scenes WHERE id = ? AND deleted_at IS NULL'
     )
     const write = db.prepare(
-      "UPDATE gen_scenes SET censor_kinds = ?, censor_weight = ?, suppress_anal = ?, updated_at = datetime('now') WHERE id = ?"
+      "UPDATE gen_scenes SET censor_kinds = ?, censor_tag_weights = ?, suppress_anal = ?, updated_at = datetime('now') WHERE id = ?"
     )
     return [...new Set(ids)].map((id) => {
       const row = read.get(id) as
-        Pick<Row, 'censor_kinds' | 'censor_weight' | 'suppress_anal'> | undefined
+        Pick<Row, 'censor_kinds' | 'censor_tag_weights' | 'suppress_anal'> | undefined
       if (!row) throw new Error('씬이 변경되었거나 삭제되었습니다. 목록을 새로 열어 주세요.')
       const censorKinds = changeCensors(row.censor_kinds, changes)
-      const censorWeight = changeCensorWeight(row.censor_weight, changes)
+      const censorTagWeights = changeCensorWeights(row.censor_tag_weights, changes)
       const suppressAnal = changeAnalSuppression(row.suppress_anal, changes)
-      write.run(JSON.stringify(censorKinds), censorWeight, Number(suppressAnal), id)
-      return { id, censorKinds, censorWeight, suppressAnal }
+      write.run(
+        JSON.stringify(censorKinds),
+        JSON.stringify(censorTagWeights),
+        Number(suppressAnal),
+        id
+      )
+      return { id, censorKinds, censorTagWeights, suppressAnal }
     })
   })()
 }
@@ -880,7 +886,7 @@ export async function exportScenesJson(presetId: number): Promise<{
   const scenes = db
     .prepare(
       `SELECT id, name, prompt, negative_prompt, width, height, variety_plus, source_tags, target_tags, source_pos, target_pos,
-              censor_kinds, censor_weight, suppress_anal, background
+              censor_kinds, censor_tag_weights, suppress_anal, background
        FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id`
     )
     .all(presetId) as Row[]
@@ -943,9 +949,9 @@ export async function exportScenesJson(presetId: number): Promise<{
         ...(sourcePos ? { sourcePos } : {}),
         ...(targetPos ? { targetPos } : {}),
         censorKinds: normalizeCensors(s.censor_kinds),
-        // 가중치는 기본(1)이 아닐 때만 — 예전 파일 모양 유지
-        ...(normalizeCensorWeight(s.censor_weight) !== 1
-          ? { censorWeight: normalizeCensorWeight(s.censor_weight) }
+        // 가중치는 1이 아닌 부위가 있을 때만 — 예전 파일 모양 유지
+        ...(Object.keys(normalizeCensorWeights(s.censor_tag_weights)).length
+          ? { censorTagWeights: normalizeCensorWeights(s.censor_tag_weights) }
           : {}),
         background: normalizeBackground(s.background),
         suppressAnal: normalizeAnalSuppression(s.suppress_anal),
@@ -1004,9 +1010,9 @@ export async function importScenesJson(presetId: number): Promise<SceneImportRes
       /** 행위 태그 (커스텀) — 역할 있는 캐릭터 프롬프트 뒤에 생성 시 합쳐짐 */
       sourceTags?: string
       targetTags?: string
-      // 예전 파일에 든 censorWeights(검열 가중치)는 무시한다
+      // 예전 파일에 든 censorTagWeights(검열 가중치)는 무시한다
       censorKinds?: unknown
-      censorWeight?: unknown
+      censorTagWeights?: unknown
       background?: unknown
       suppressAnal?: unknown
       /** 이 씬에 붙일 공용 캐릭터 이름들 (커스텀) — 생략 시 전원 */
@@ -1023,7 +1029,7 @@ export async function importScenesJson(presetId: number): Promise<SceneImportRes
     .get(presetId) as { m: number }
   let order = max.m
   const stmt = db.prepare(
-    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, source_tags, target_tags, censor_kinds, censor_weight, suppress_anal, background)
+    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, source_tags, target_tags, censor_kinds, censor_tag_weights, suppress_anal, background)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
@@ -1101,7 +1107,7 @@ export async function importScenesJson(presetId: number): Promise<SceneImportRes
           s.sourceTags ?? '',
           s.targetTags ?? '',
           JSON.stringify(normalizeCensors(s.censorKinds)),
-          normalizeCensorWeight(s.censorWeight),
+          JSON.stringify(normalizeCensorWeights(s.censorTagWeights)),
           Number(normalizeAnalSuppression(s.suppressAnal)),
           JSON.stringify(normalizeBackground(s.background))
         ).lastInsertRowid
@@ -1152,7 +1158,7 @@ function importSceneBundle(
     (c) => c && typeof c.uid === 'string' && typeof c.prompt === 'string' && c.prompt.trim()
   )
   const sceneStmt = db.prepare(
-    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_weight, suppress_anal, background)
+    `INSERT INTO gen_scenes (preset_id, name, prompt, negative_prompt, width, height, sort_order, variety_plus, source_tags, target_tags, source_pos, target_pos, censor_kinds, censor_tag_weights, suppress_anal, background)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
   const transparent: SceneImportResult['transparent'] = []
@@ -1254,7 +1260,7 @@ function importSceneBundle(
           pos(s.sourcePos),
           pos(s.targetPos),
           JSON.stringify(normalizeCensors(s.censorKinds)),
-          normalizeCensorWeight(s.censorWeight),
+          JSON.stringify(normalizeCensorWeights(s.censorTagWeights)),
           Number(normalizeAnalSuppression(s.suppressAnal)),
           JSON.stringify(normalizeBackground(s.background))
         ).lastInsertRowid

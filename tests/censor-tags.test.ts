@@ -9,8 +9,9 @@ import {
   normalizeAnalSuppression,
   changeAnalSuppression,
   withAnalSuppression,
-  changeCensorWeight,
-  normalizeCensorWeight
+  changeCensorWeights,
+  normalizeCensorWeight,
+  normalizeCensorWeights
 } from '../src/shared/censor-tags'
 import {
   scenePositivePrompt,
@@ -43,24 +44,35 @@ describe('씬 검열 태그', () => {
     expect(changeCensors(['vulva'], { anal: true })).toEqual(['vulva', 'anal'])
     expect(changeCensors(['penis', 'vulva'], { penis: false })).toEqual(['vulva'])
   })
-  it('가중치 — 1이면 그대로, 아니면 검열 태그를 묶어 붙이고 범위 밖·깨진 값은 바로잡는다', () => {
-    expect(censorPrompt(['penis'], 1)).toBe('completely white censored penis')
-    expect(censorPrompt(['penis'], 1.3)).toBe('1.3::completely white censored penis::')
-    expect(censorPrompt(['penis', 'vulva'], 0.8)).toBe(
-      '0.8::completely white censored penis, completely white censored pussy::'
+  it('부위별 가중치 — 1인 부위는 그대로, 아닌 부위만 따로 묶고, 깨진 값은 바로잡는다', () => {
+    expect(censorPrompt(['penis'], {})).toBe('completely white censored penis')
+    expect(censorPrompt(['penis'], { penis: 1.3 })).toBe('1.3::completely white censored penis::')
+    expect(censorPrompt(['penis', 'vulva'], { vulva: 0.8 })).toBe(
+      'completely white censored penis, 0.8::completely white censored pussy::'
     )
-    expect(censorPrompt([], 1.3)).toBe('')
+    expect(censorPrompt(['penis', 'vulva'], { penis: 1.2, vulva: 1.5 })).toBe(
+      '1.2::completely white censored penis::, 1.5::completely white censored pussy::'
+    )
+    // 안 고른 부위의 가중치는 아무것도 안 붙인다
+    expect(censorPrompt(['penis'], { anal: 2 })).toBe('completely white censored penis')
+    expect(censorPrompt([], { penis: 1.3 })).toBe('')
     expect(normalizeCensorWeight(undefined)).toBe(1)
     expect(normalizeCensorWeight('1.25')).toBe(1.25)
     expect(normalizeCensorWeight(99)).toBe(5)
     expect(normalizeCensorWeight(0)).toBe(0.1)
-    expect(normalizeCensorWeight(Number.NaN)).toBe(1)
-    expect(changeCensorWeight(1.2, {})).toBe(1.2)
-    expect(changeCensorWeight(1.2, { weight: 1 })).toBe(1)
+    // JSON 글자열·모르는 부위·1인 값 정리
+    expect(normalizeCensorWeights('{"penis":1.3,"vulva":1,"suppress":0.4,"x":2}')).toEqual({
+      penis: 1.3
+    })
+    expect(normalizeCensorWeights('깨짐')).toEqual({})
+    expect(changeCensorWeights({ penis: 1.2 }, {})).toEqual({ penis: 1.2 })
+    expect(changeCensorWeights({ penis: 1.2 }, { weights: { penis: 1, anal: 0.9 } })).toEqual({
+      anal: 0.9
+    })
     // 프롬프트 끝에 붙일 때도 묶음으로, 이미 적힌 것은 걷어낸다
-    expect(withCensorTags('1girl, completely white censored penis', ['penis'], 1.5)).toBe(
-      '1girl, 1.5::completely white censored penis::'
-    )
+    expect(
+      withCensorTags('1girl, completely white censored penis', ['penis'], { penis: 1.5 })
+    ).toBe('1girl, 1.5::completely white censored penis::')
   })
 
   it('uses the plain tags without weights or suppress tags, in option order', () => {

@@ -22,23 +22,52 @@ export const CENSOR_OPTIONS = [
 export type CensorKind = (typeof CENSOR_OPTIONS)[number]['id']
 export type CensorChanges = Partial<Record<CensorKind, boolean>> & {
   suppressAnal?: boolean
-  /** 검열 태그 가중치 (기본 1 — 1이면 가중치 없이 붙인다) */
-  weight?: number
+  /** 부위별 검열 태그 가중치 (기본 1 — 1이면 가중치 없이 붙인다). 적은 부위만 바뀐다 */
+  weights?: Partial<Record<CensorKind, number>>
 }
+
+/** 부위 → 가중치. 1인 부위는 적지 않는다 */
+export type CensorWeights = Partial<Record<CensorKind, number>>
 
 export const CENSOR_WEIGHT_DEFAULT = 1
 export const CENSOR_WEIGHT_MIN = 0.1
 export const CENSOR_WEIGHT_MAX = 5
 
-/** 저장된 가중치 — 없거나 깨졌으면 기본 1, 범위 밖이면 잘라서 소수 둘째 자리까지 */
+/** 가중치 하나 — 없거나 깨졌으면 기본 1, 범위 밖이면 잘라서 소수 둘째 자리까지 */
 export function normalizeCensorWeight(value: unknown): number {
   const n = typeof value === 'string' ? Number(value) : value
   if (typeof n !== 'number' || !Number.isFinite(n)) return CENSOR_WEIGHT_DEFAULT
   return Math.round(Math.min(CENSOR_WEIGHT_MAX, Math.max(CENSOR_WEIGHT_MIN, n)) * 100) / 100
 }
 
-export function changeCensorWeight(value: unknown, changes: CensorChanges): number {
-  return normalizeCensorWeight(changes.weight ?? value)
+/** 저장된 부위별 가중치(JSON 글자열이나 객체) — 아는 부위만, 1인 것은 뺀다 */
+export function normalizeCensorWeights(value: unknown): CensorWeights {
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return {}
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: CensorWeights = {}
+  for (const o of CENSOR_OPTIONS) {
+    const raw = (value as Record<string, unknown>)[o.id]
+    if (raw === undefined || raw === null) continue
+    const w = normalizeCensorWeight(raw)
+    if (w !== CENSOR_WEIGHT_DEFAULT) out[o.id] = w
+  }
+  return out
+}
+
+/** 저장값에 바꿀 부위만 덮는다 */
+export function changeCensorWeights(value: unknown, changes: CensorChanges): CensorWeights {
+  return normalizeCensorWeights({ ...normalizeCensorWeights(value), ...(changes.weights ?? {}) })
+}
+
+/** 이 부위의 가중치 (없으면 1) */
+export function censorWeightOf(value: unknown, kind: CensorKind): number {
+  return normalizeCensorWeights(value)[kind] ?? CENSOR_WEIGHT_DEFAULT
 }
 
 /** The independent negative-prompt control is opt-in, including for older imports. */
@@ -88,14 +117,13 @@ export function censorLabel(value: unknown): string {
     .join(' · ')
 }
 
-/** 고른 부위의 태그 — CENSOR_OPTIONS 순서로 콤마로 잇고, 가중치가 1이 아니면 `1.3::…::`로 묶는다 */
-export function censorPrompt(value: unknown, weight: unknown = CENSOR_WEIGHT_DEFAULT): string {
+/** 고른 부위의 태그 — CENSOR_OPTIONS 순서로 콤마로 잇고, 가중치가 1이 아닌 부위는 각각 `1.3::…::`로 묶는다 */
+export function censorPrompt(value: unknown, weights: unknown = {}): string {
   const active = normalizeCensors(value)
-  const tags = CENSOR_OPTIONS.filter((o) => active.includes(o.id))
-    .map((o) => o.tag)
+  const ws = normalizeCensorWeights(weights)
+  return CENSOR_OPTIONS.filter((o) => active.includes(o.id))
+    .map((o) => (ws[o.id] !== undefined ? `${ws[o.id]}::${o.tag}::` : o.tag))
     .join(', ')
-  const w = normalizeCensorWeight(weight)
-  return tags && w !== CENSOR_WEIGHT_DEFAULT ? `${w}::${tags}::` : tags
 }
 
 /** 고른 부위의 지금 표기와 예전 표기 (completely를 뺀 표기 포함) — 소문자 */
@@ -148,12 +176,8 @@ export function withoutCensorDuplicates(prompt: string, value: unknown): string 
 }
 
 /** 프롬프트 맨 끝에 검열 태그를 붙인다. 마지막 줄이 주석이면 줄을 바꿔 붙인다 */
-export function withCensorTags(
-  prompt: string,
-  value: unknown,
-  weight: unknown = CENSOR_WEIGHT_DEFAULT
-): string {
-  const extra = censorPrompt(value, weight)
+export function withCensorTags(prompt: string, value: unknown, weights: unknown = {}): string {
+  const extra = censorPrompt(value, weights)
   if (!extra) return prompt
   const clean = withoutCensorDuplicates(prompt, value)
   return clean

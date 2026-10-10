@@ -106,7 +106,7 @@ describe('예전 검열 가중치 데이터', () => {
     const presetId = createPreset('legacy')
     const id = legacyScene(presetId, 'old')
     expect(setSceneCensors([id], { anal: true, suppressAnal: false })).toEqual([
-      { id, censorKinds: ['penis', 'vulva', 'anal'], censorWeight: 1, suppressAnal: false }
+      { id, censorKinds: ['penis', 'vulva', 'anal'], censorTagWeights: {}, suppressAnal: false }
     ])
     expect(weightsOf(id)).toBe(LEGACY_WEIGHTS)
     // 옛 화면이 보내던 필드는 무시

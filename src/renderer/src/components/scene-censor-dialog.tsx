@@ -6,14 +6,16 @@ import {
   CENSOR_WEIGHT_DEFAULT,
   CENSOR_WEIGHT_MAX,
   CENSOR_WEIGHT_MIN,
-  censorLabel,
   censorPrompt,
   changeCensors,
-  changeCensorWeight,
+  changeCensorWeights,
   changeAnalSuppression,
   normalizeAnalSuppression,
+  normalizeCensors,
   normalizeCensorWeight,
-  type CensorChanges
+  normalizeCensorWeights,
+  type CensorChanges,
+  type CensorKind
 } from '@shared/censor-tags'
 import { useScenesStore } from '../stores/scenes-store'
 import { toast } from '../stores/toast-store'
@@ -28,13 +30,15 @@ export function CensorStatus({
   scene: Scene
   onEdit: () => void
 }): React.JSX.Element {
-  const summary = censorLabel(scene.censorKinds)
-  const weight = normalizeCensorWeight(scene.censorWeight)
+  const active = new Set(normalizeCensors(scene.censorKinds))
+  const weights = normalizeCensorWeights(scene.censorTagWeights)
+  // 부위 이름 뒤에 1이 아닌 가중치만 ×1.3 식으로
+  const summary = CENSOR_OPTIONS.filter((o) => active.has(o.id))
+    .map((o) => `${o.label}${weights[o.id] !== undefined ? ` ×${weights[o.id]}` : ''}`)
+    .join(' · ')
   const suppressAnal = normalizeAnalSuppression(scene.suppressAnal)
   const text = [
-    summary
-      ? `검열 태그: ${summary}${weight !== CENSOR_WEIGHT_DEFAULT ? ` ×${weight}` : ''}`
-      : '검열 태그 없음',
+    summary ? `검열 태그: ${summary}` : '검열 태그 없음',
     suppressAnal ? '항문 성행위 억제' : ''
   ]
     .filter(Boolean)
@@ -84,21 +88,32 @@ export function SceneCensorDialog({
       scenes.map((s) =>
         censorPrompt(
           changeCensors(s.censorKinds, changes),
-          changeCensorWeight(s.censorWeight, changes)
+          changeCensorWeights(s.censorTagWeights, changes)
         )
       )
     )
   ]
-  // 가중치 — 씬마다 다르면 "여러 값", 바꾸면 그 값으로 통일
-  const weights = [...new Set(scenes.map((s) => changeCensorWeight(s.censorWeight, changes)))]
-  const weightMixed = weights.length > 1
-  const weightValue = weightMixed ? '' : String(weights[0] ?? CENSOR_WEIGHT_DEFAULT)
-  const [weightText, setWeightText] = useState<string | null>(null)
-  const setWeight = (raw: string): void => {
-    setWeightText(raw)
+  // 부위별 가중치 (커스텀) — 씬마다 다르면 "여러 값", 바꾸면 그 값으로 통일. 입력 중 글자는 따로
+  const [weightText, setWeightText] = useState<Partial<Record<CensorKind, string>>>({})
+  const weightsOf = (kind: CensorKind): number[] => [
+    ...new Set(
+      scenes.map(
+        (s) => changeCensorWeights(s.censorTagWeights, changes)[kind] ?? CENSOR_WEIGHT_DEFAULT
+      )
+    )
+  ]
+  const setWeight = (kind: CensorKind, raw: string): void => {
+    setWeightText((prev) => ({ ...prev, [kind]: raw }))
     const n = Number(raw)
     if (raw.trim() && Number.isFinite(n))
-      setChanges((prev) => ({ ...prev, weight: normalizeCensorWeight(n) }))
+      setChanges((prev) => ({
+        ...prev,
+        weights: { ...(prev.weights ?? {}), [kind]: normalizeCensorWeight(n) }
+      }))
+  }
+  const stepWeight = (kind: CensorKind, delta: number): void => {
+    const ws = weightsOf(kind)
+    setWeight(kind, String(normalizeCensorWeight((ws.length === 1 ? ws[0] : 1) + delta)))
   }
   const setAll = (value: boolean): void =>
     setChanges((prev) => ({
@@ -203,91 +218,64 @@ export function SceneCensorDialog({
                       {mixed ? `일부 적용 ${count}/${n}` : checked ? '적용' : '미적용'}
                     </span>
                   </label>
+                  {/* 부위별 가중치 — 1.0이면 그대로, 아니면 이 부위 태그만 1.3::…::로 묶는다 */}
+                  {count > 0 &&
+                    (() => {
+                      const ws = weightsOf(o.id)
+                      const wMixed = ws.length > 1
+                      const value = weightText[o.id] ?? (wMixed ? '' : String(ws[0]))
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-1 pl-7 text-[12px]">
+                          <span className="mr-1 text-muted">가중치</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`${o.label} 가중치 0.1 줄이기`}
+                            onClick={() => stepWeight(o.id, -0.1)}
+                          >
+                            −
+                          </Button>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step={0.1}
+                            min={CENSOR_WEIGHT_MIN}
+                            max={CENSOR_WEIGHT_MAX}
+                            aria-label={`${o.label} 가중치`}
+                            placeholder={wMixed ? '여러 값' : String(CENSOR_WEIGHT_DEFAULT)}
+                            value={value}
+                            className="h-7 w-16 rounded-md border border-line bg-surface px-1.5 text-center tabular-nums outline-none focus:ring-2 focus:ring-accent"
+                            onChange={(e) => setWeight(o.id, e.target.value)}
+                            onBlur={() => setWeightText((prev) => ({ ...prev, [o.id]: undefined }))}
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`${o.label} 가중치 0.1 늘리기`}
+                            onClick={() => stepWeight(o.id, 0.1)}
+                          >
+                            +
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={!wMixed && ws[0] === CENSOR_WEIGHT_DEFAULT}
+                            onClick={() => setWeight(o.id, String(CENSOR_WEIGHT_DEFAULT))}
+                          >
+                            기본 1.0
+                          </Button>
+                          {wMixed && (
+                            <span className="text-[11px] text-muted">
+                              씬마다 다름 ({ws.join(' · ')})
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
                 </div>
               )
             })}
           </fieldset>
-          {/* 가중치 (커스텀) — 기본 1, 1이 아니면 검열 태그를 1.3::…:: 로 묶어 붙인다 */}
-          <div className="space-y-2 rounded-lg border border-line bg-paper p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <label htmlFor="censor-weight" className="text-[13px] font-medium">
-                  가중치
-                </label>
-                <p className="mt-1 text-[11px] text-muted">
-                  {weightMixed ? `씬마다 다름 (${weights.join(' · ')})` : `지금 ${weightValue}`}
-                </p>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={saving || !n}
-                  onClick={() =>
-                    setWeight(
-                      String(
-                        Math.max(
-                          CENSOR_WEIGHT_MIN,
-                          normalizeCensorWeight(
-                            (Number(weightText ?? weightValue) || CENSOR_WEIGHT_DEFAULT) - 0.1
-                          )
-                        )
-                      )
-                    )
-                  }
-                  aria-label="가중치 0.1 줄이기"
-                >
-                  −
-                </Button>
-                <input
-                  id="censor-weight"
-                  type="number"
-                  inputMode="decimal"
-                  step={0.1}
-                  min={CENSOR_WEIGHT_MIN}
-                  max={CENSOR_WEIGHT_MAX}
-                  placeholder={weightMixed ? '여러 값' : String(CENSOR_WEIGHT_DEFAULT)}
-                  value={weightText ?? weightValue}
-                  disabled={saving || !n}
-                  className="h-8 w-20 rounded-md border border-line bg-surface px-2 text-center text-[13px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
-                  onChange={(e) => setWeight(e.target.value)}
-                  onBlur={() => setWeightText(null)}
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={saving || !n}
-                  onClick={() =>
-                    setWeight(
-                      String(
-                        Math.min(
-                          CENSOR_WEIGHT_MAX,
-                          normalizeCensorWeight(
-                            (Number(weightText ?? weightValue) || CENSOR_WEIGHT_DEFAULT) + 0.1
-                          )
-                        )
-                      )
-                    )
-                  }
-                  aria-label="가중치 0.1 늘리기"
-                >
-                  +
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={saving || !n || (!weightMixed && weights[0] === CENSOR_WEIGHT_DEFAULT)}
-                  onClick={() => setWeight(String(CENSOR_WEIGHT_DEFAULT))}
-                >
-                  기본 1.0
-                </Button>
-              </div>
-            </div>
-            <p className="text-[11px] leading-relaxed text-muted">
-              1.0이면 가중치 없이 붙이고, 아니면 검열 태그를 묶어 `1.3::…::`처럼 붙여요. 범위{' '}
-              {CENSOR_WEIGHT_MIN}~{CENSOR_WEIGHT_MAX}.
-            </p>
-          </div>
           <div className="space-y-2 rounded-lg border border-line bg-paper p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -328,7 +316,8 @@ export function SceneCensorDialog({
           <p className="text-[12px] leading-relaxed text-muted">
             {n > 1 && '바꾸지 않은 항목은 씬별 설정을 유지해요. '}
             생성할 때 첫 캐릭터 프롬프트 끝에 태그를 붙여요. 캐릭터가 없으면 기본 프롬프트 끝에
-            붙여요. 기존 이미지는 바뀌지 않아요.
+            붙여요. 가중치가 1.0이 아닌 부위는 그 태그만 1.3::…::처럼 묶어요. 기존 이미지는 바뀌지
+            않아요.
           </p>
           <details className="rounded-md border border-line p-3 text-[12px]">
             <summary className="cursor-pointer text-muted">

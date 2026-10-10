@@ -9,7 +9,8 @@ import {
   withCensorTags,
   withoutCensorDuplicates,
   withAnalSuppression,
-  type CensorKind
+  type CensorKind,
+  type CensorWeights
 } from './censor-tags'
 
 /**
@@ -27,7 +28,7 @@ export function scenePositivePrompt(
     kind?: 'scene' | 'background'
     background?: SceneBackground
     censorKinds?: CensorKind[]
-    censorWeight?: number
+    censorTagWeights?: CensorWeights
   },
   parts?: PromptParts,
   /** 검열 태그 전 캐릭터 프롬프트. 주면 첫 캐릭터 끝에 검열 태그를 붙여 돌려준다 */
@@ -46,10 +47,10 @@ export function scenePositivePrompt(
   // 검열 태그는 첫 캐릭터 맨 끝에 붙이고, 캐릭터가 없을 때만 기본 프롬프트 끝(예전 자리)에 붙인다.
   // 어느 쪽이든 기본 프롬프트에 적힌 같은 태그(예전 표기 포함)는 요청 사본에서 걷어낸다
   const kinds = scene.censorKinds
-  const weight = scene.censorWeight
+  const weights = scene.censorTagWeights
   const target = characters ? censorCharacterIndex(characters) : -1
   const tagged = (value: string): string =>
-    target < 0 ? withCensorTags(value, kinds, weight) : withoutCensorDuplicates(value, kinds)
+    target < 0 ? withCensorTags(value, kinds, weights) : withoutCensorDuplicates(value, kinds)
   const withCharacters = <T extends { prompt: string; promptParts?: PromptParts }>(
     result: T
   ): T & { characterPrompts?: CharacterPromptInput[] } =>
@@ -57,7 +58,7 @@ export function scenePositivePrompt(
       ? {
           ...result,
           characterPrompts: characters.map((c, i) =>
-            i === target ? { ...c, prompt: withCensorTags(c.prompt, kinds, weight) } : c
+            i === target ? { ...c, prompt: withCensorTags(c.prompt, kinds, weights) } : c
           )
         }
       : result
@@ -343,7 +344,7 @@ export function refreshScenePrompts(
     background?: SceneBackground
     negativePrompt: string
     censorKinds?: CensorKind[]
-    censorWeight?: number
+    censorTagWeights?: CensorWeights
     suppressAnal?: boolean
   }
 ): GenerationRequest {

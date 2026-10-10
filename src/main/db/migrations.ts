@@ -476,8 +476,8 @@ export function reconcileSchema(db: Database.Database): void {
   ensureColumn('gen_scenes', 'censor_kinds', "censor_kinds TEXT NOT NULL DEFAULT '[]'")
   ensureColumn('gen_scenes', 'censor_weights', "censor_weights TEXT NOT NULL DEFAULT '{}'")
   ensureColumn('gen_scenes', 'suppress_anal', 'suppress_anal INTEGER NOT NULL DEFAULT 0')
-  // 검열 태그 가중치 (커스텀) — 1이면 가중치 없이 붙인다
-  ensureColumn('gen_scenes', 'censor_weight', 'censor_weight REAL NOT NULL DEFAULT 1')
+  // 부위별 검열 태그 가중치 JSON (커스텀) — 1인 부위는 안 적는다. (censor_weights는 예전 열, 안 씀)
+  ensureColumn('gen_scenes', 'censor_tag_weights', "censor_tag_weights TEXT NOT NULL DEFAULT '{}'")
   ensureColumn('character_prompts', 'char_ref_id', 'char_ref_id INTEGER')
   ensureColumn('gen_scenes', 'deleted_at', 'deleted_at TEXT')
   ensureColumn('gen_scenes', 'export_no', 'export_no INTEGER')

@@ -524,8 +524,8 @@ export interface SceneBundle {
     varietyPlus?: boolean
     /** 이 씬만 투명 배경으로 (없으면 전역 설정을 따른다) */
     transparentBackground?: boolean
-    /** 검열 태그 가중치 (커스텀) — 없으면 1 */
-    censorWeight?: number
+    /** 부위별 검열 태그 가중치 (커스텀) — 없으면 전부 1 */
+    censorTagWeights?: Record<string, number>
     /** 씬별 누드면 옷 벗기기 (커스텀) — 없으면 전체 설정 따름 */
     nudeStrip?: boolean
     /** 씬별 캐릭터 추가 — 없으면 캐릭터 없이 씬만 */
