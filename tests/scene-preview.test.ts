@@ -328,6 +328,35 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(charPrompt('bath, nude')).toBe('blue eyes')
   })
 
+  it('얼굴 인셋 자리는 씬 전체 태그로 조각을 켜지 않고, 몸 자리는 켠다', () => {
+    useCharactersStore.setState({
+      items: [{ ...card(1, 'blue eyes', true), outfitId: 9, role: 'target' }]
+    })
+    useSceneExtrasStore.setState({
+      additionsEnabled: true,
+      additions: {
+        1: {
+          4: {
+            characterIds: [],
+            charRefIds: [],
+            vibeIds: [],
+            slots: [{ x: 0.5, y: 0.5 }, { x: 0.8, y: 0.2 }],
+            slotChars: { 0: 1, 1: 1 },
+            slotRoles: { 0: 'target', 1: 'target' },
+            slotTags: { 0: 'ass focus', 1: 'pink inset, close-up, ahegao' }
+          }
+        }
+      }
+    })
+    const [body, face] = buildSceneRequest({
+      ...scene,
+      prompt: 'bed, vaginal',
+      censorKinds: []
+    }).characterPrompts
+    expect(body.prompt).toContain('skirt lift, panties aside')
+    expect(face.prompt).not.toContain('skirt lift')
+  })
+
   it('reads the tags given to this character only (scene-wide tags go to the target)', () => {
     useCharactersStore.setState({
       items: [

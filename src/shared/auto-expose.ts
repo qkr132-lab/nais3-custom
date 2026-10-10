@@ -77,7 +77,8 @@ export const DEFAULT_EXPOSE_ACTS: ExposeActs = {
     'cum on pussy',
     'presenting',
     'dildo riding',
-    'sitting on face'
+    'sitting on face',
+    'fisting'
   ],
   chest: [
     'paizuri',
@@ -101,7 +102,7 @@ export const DEFAULT_EXPOSE_ACTS: ExposeActs = {
 }
 
 /** 기본 장면 목록의 판 — 기본 목록에 태그를 더하면 올린다. 저장된 목록이 이 판이 아니면 새 기본 태그를 더한다 */
-export const EXPOSE_ACTS_VERSION = 2
+export const EXPOSE_ACTS_VERSION = 3
 
 /** 저장된 목록에 기본 목록에서 빠진 태그를 더한다 — 앱을 올려 기본이 늘어도 예전에 저장한 목록이 뒤처지지 않게 */
 export function withDefaultActs(acts: ExposeActs): ExposeActs {
@@ -211,20 +212,60 @@ function matchesAct(tag: string, acts: readonly string[], exact: ReadonlySet<str
   return acts.some((a) => a.length < tag.length && hasWords(tag, a))
 }
 
+/**
+ * 옷 위를 뜻하는 태그 — 젖은 자국(pussy juice stain)·가린 것(covered nipples)·옷 너머로 비침·패스티.
+ * 이 태그 자체는 신호가 아니고, 있으면 그 부위는 옷을 입은 채라고 본다.
+ */
+const CLOTHED_MARK = /(^|\s)(stain|stains)$|^covered\s|\bthrough (clothes|clothing|panties)\b|\bpasties\b/
+const CHEST_WORDS = /\b(breast|breasts|nipple|nipples|chest|areola|areolae)\b/
+
+/** 옷 위 태그가 가리키는 부위 */
+const clothedArea = (tag: string): ExposeArea | null =>
+  CLOTHED_MARK.test(tag) ? (CHEST_WORDS.test(tag) ? 'chest' : 'lower') : null
+
+/**
+ * 몸 부위·체액 이름만 걸린 약한 신호 — pussy juice, hand on pussy, pussy focus처럼 옷 위로도 되는 것.
+ * 그 부위에 옷 위 태그가 있으면 이것만으로는 켜지 않는다. 행위 태그(vaginal·doggystyle 등)는 그대로 켠다.
+ */
+const WEAK_ACTS = new Set(['pussy', 'pussy juice', 'anus', 'nipples'])
+const isWeakHit = (tag: string, acts: readonly string[]): boolean =>
+  !acts.some(
+    (a) => !WEAK_ACTS.has(a) && (a === tag || (tag.split(' ').length <= 5 && a.length < tag.length && hasWords(tag, a)))
+  )
+
+/**
+ * 얼굴만 나오는 자리 — 자리 태그에 inset·portrait·close-up이 있으면 몸이 화면에 없다.
+ * 이런 자리는 씬 전체 태그로 조각을 켜지 않고, 자리 태그에 직접 적은 노출 태그로만 켠다.
+ */
+export function isFaceSeat(seatTags: string): boolean {
+  return liveTagsOf(seatTags).some(
+    (t) => hasWords(t, 'inset') || t === 'portrait' || t === 'close-up'
+  )
+}
+
 /** 어느 부위를 드러내야 하는지 — 처음 걸린 장면 태그를 이유로 함께 */
 export function neededAreas(
   contexts: string[],
   acts: ExposeActs
 ): Partial<Record<ExposeArea, string>> {
-  const lower = acts.lower.map(norm)
-  const chest = acts.chest.map(norm)
-  const lowerSet = new Set(lower)
-  const chestSet = new Set(chest)
+  const list: Record<ExposeArea, string[]> = {
+    lower: acts.lower.map(norm),
+    chest: acts.chest.map(norm)
+  }
+  const sets: Record<ExposeArea, Set<string>> = {
+    lower: new Set(list.lower),
+    chest: new Set(list.chest)
+  }
+  const tags = contexts.flatMap(liveTagsOf)
+  // 옷 위 태그가 있는 부위
+  const clothed = new Set(tags.map(clothedArea).filter((a): a is ExposeArea => !!a))
   const out: Partial<Record<ExposeArea, string>> = {}
-  for (const text of contexts) {
-    for (const tag of liveTagsOf(text)) {
-      if (!out.lower && matchesAct(tag, lower, lowerSet)) out.lower = tag
-      if (!out.chest && matchesAct(tag, chest, chestSet)) out.chest = tag
+  for (const tag of tags) {
+    if (clothedArea(tag)) continue
+    for (const area of ['lower', 'chest'] as const) {
+      if (out[area] || !matchesAct(tag, list[area], sets[area])) continue
+      if (clothed.has(area) && isWeakHit(tag, list[area])) continue
+      out[area] = tag
     }
   }
   return out

@@ -5,7 +5,7 @@ import { recordNav } from '../lib/nav-history'
 import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { resolveOutfitNegative } from '@shared/outfit'
-import { triggerAreas } from '@shared/auto-expose'
+import { isFaceSeat, triggerAreas } from '@shared/auto-expose'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -291,7 +291,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       })
       // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
       // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
-      const auto = triggerAreas(sceneContexts, exposeActs, outfitChoice)
+      // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 켜지 않고 자리 태그로만
+      const exposeContexts = seated && isFaceSeat(slotTag) ? [slotTag] : sceneContexts
+      const auto = triggerAreas(exposeContexts, exposeActs, outfitChoice)
       // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
       // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
       // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다

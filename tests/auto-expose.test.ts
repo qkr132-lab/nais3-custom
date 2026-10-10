@@ -91,6 +91,31 @@ describe('nsfw 조각이 켜지는 장면', () => {
     )
   })
 
+  it('옷 위 태그(젖은 자국·가림)는 신호가 아니고, 있으면 몸 부위 이름만 걸린 신호도 무시한다', () => {
+    // 젖은 자국 = 옷을 입은 채
+    expect(neededAreas(['crotch focus, pussy juice trail, pussy juice stain'], acts)).toEqual({})
+    expect(neededAreas(["another's hand on pussy, pussy juice stain"], acts)).toEqual({})
+    expect(neededAreas(['covered nipples, bouncing breasts'], acts)).toEqual({})
+    // 행위 태그가 같이 있으면 켠다
+    expect(neededAreas(['pussy juice stain, vaginal'], acts)).toEqual({ lower: 'vaginal' })
+    expect(neededAreas(['covered nipples, paizuri'], acts)).toEqual({ chest: 'paizuri' })
+    // 다른 부위의 옷 위 태그는 상관없다
+    expect(neededAreas(['covered nipples, pussy juice'], acts)).toEqual({ lower: 'pussy juice' })
+  })
+
+  it('얼굴만 나오는 자리 — inset·portrait·close-up', () => {
+    expect(autoExpose.isFaceSeat('inset')).toBe(true)
+    expect(autoExpose.isFaceSeat('3::portrait::')).toBe(true)
+    expect(autoExpose.isFaceSeat('pink inset,1.2::close-up::, ahegao')).toBe(true)
+    expect(autoExpose.isFaceSeat('lower body, crotch focus')).toBe(false)
+    expect(autoExpose.isFaceSeat('-2::portrait::, upper body')).toBe(false)
+  })
+
+  it('fisting도 아래를 드러내는 행위로 본다', () => {
+    expect(neededAreas(['1.5::fisting::'], acts)).toEqual({ lower: 'fisting' })
+    expect(neededAreas(['anal fisting'], acts).lower).toBe('anal fisting')
+  })
+
   it('저장된 목록에 새 기본 태그를 더한다 — 고친 것은 그대로', () => {
     const mine = { lower: ['spread legs', 'Doggystyle'], chest: [] }
     const merged = withDefaultActs(mine)
