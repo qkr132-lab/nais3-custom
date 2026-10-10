@@ -25,8 +25,8 @@ describe('프롬프트 태그 덩어리', () => {
 
   it('조각·와일드카드·주석·Text: 줄은 보지 않는다', () => {
     const v =
-      '<a1>, sky/sea, {a|b}, blue eyes # memo, red\nText: hello world\n# whole comment\nsmile'
-    expect(promptTagTokens(v).map((x) => x.text)).toEqual(['blue eyes', 'smile'])
+      '<a1>, sky/sea, {a|b}, blue eyes # memo, red\nText: hello world\n# whole comment\nsmile, speech bubble, "안녕", “Hello”'
+    expect(promptTagTokens(v).map((x) => x.text)).toEqual(['blue eyes', 'smile', 'speech bubble'])
   })
 
   it('NAI 전용 태그는 사전에 없어도 아는 것으로 친다', () => {

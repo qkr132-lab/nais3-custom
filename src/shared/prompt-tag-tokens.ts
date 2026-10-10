@@ -42,6 +42,8 @@ function splitLine(line: string, offset: number, out: PromptTagToken[]): void {
     if (!inner) continue
     // 조각·와일드카드·선택지는 무엇이 뽑힐지 모르니 판단하지 않는다
     if (/[<>|/]/.test(inner)) continue
+    // 큰따옴표 문구는 그릴 글자(Text:)다 — 태그가 아니다
+    if (/["“”]/.test(inner)) continue
     // 앞 가중치 `1.3::` / 뒤 `::`
     const w = /^-?\d*\.?\d+::/.exec(inner)
     if (w) {
