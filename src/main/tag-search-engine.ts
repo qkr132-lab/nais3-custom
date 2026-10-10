@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { compact, koreanInitials, koreanTypingKey, oneTypo, relatedKey } from './tags-related'
 import { mergeTagRecommendations } from '../shared/tag-search'
 import type { TagMatch, TagSuggestion, TagUsage } from '../shared/tag-search'
-import { tagGroupsFor } from '../shared/tag-groups'
+import { NAI_SPECIAL_TAGS, tagGroupsFor } from '../shared/tag-groups'
 
 interface Row {
   id: number
@@ -375,14 +375,24 @@ export class TagSearchEngine {
       const seen = new Set<string>()
       const grouped: TagSuggestion[] = []
       for (const { group, exact } of groups) {
-        const rows = group.tags
-          .map((t) => this.named(t))
-          .filter((r): r is Row => !!r && !seen.has(r.tag))
-          .sort((a, b) => b.count - a.count)
-        for (const r of rows) {
-          if (seen.has(r.tag)) continue
-          seen.add(r.tag)
-          grouped.push(this.enrich(r, exact ? 'exact' : 'prefix'))
+        const match: TagMatch = exact ? 'exact' : 'prefix'
+        const items: TagSuggestion[] = []
+        for (const t of group.tags) {
+          const r = this.named(t)
+          if (r) {
+            if (!seen.has(r.tag)) items.push(this.enrich(r, match))
+            continue
+          }
+          // 색인에 없는 NAI 전용 태그(품질·미학)는 묶음에서만 직접 만들어 보여 준다
+          const ko = NAI_SPECIAL_TAGS[t]
+          if (ko && !seen.has(t)) items.push({ tag: t, count: 0, type: 'general', ko, match })
+        }
+        // 성격·분위기 묶음은 적은 순서(대표 태그 먼저)를 지키고, 나머지는 사용 수 순
+        if (!group.keepOrder) items.sort((a, b) => b.count - a.count)
+        for (const it of items) {
+          if (seen.has(it.tag)) continue
+          seen.add(it.tag)
+          grouped.push(it)
         }
       }
       result = [...grouped, ...result.filter((r) => !seen.has(r.tag))].slice(0, n)

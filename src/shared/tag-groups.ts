@@ -6,10 +6,14 @@
  * 기준: 단보루 위키 tag group:hair styles (2026-10 확인). 색인에 없는 태그는 검색 때 빠진다.
  */
 
+import { MOOD_TAG_GROUPS } from './tag-groups-mood'
+
 export interface TagGroup {
   /** 검색어 — 띄어쓰기 없이 비교한다 */
   names: string[]
   tags: string[]
+  /** 적은 순서 그대로 보여 준다 (대표 태그 → 표정 → 자세 …). 없으면 사용 수 순 */
+  keepOrder?: boolean
 }
 
 const BANGS = [
@@ -273,7 +277,8 @@ const BODY = [
   'hair censor'
 ]
 
-export const TAG_GROUPS: TagGroup[] = [
+/** 머리 묶음 (단보루 위키 tag group:hair styles) */
+export const HAIR_TAG_GROUPS: TagGroup[] = [
   { names: ['앞머리', '뱅'], tags: BANGS },
   { names: ['옆머리', '사이드락', '옆트임머리'], tags: SIDE },
   { names: ['뒷머리', '뒤머리'], tags: BACK },
@@ -290,6 +295,27 @@ export const TAG_GROUPS: TagGroup[] = [
     tags: [...LENGTH, ...BANGS, ...SIDE, ...BACK, ...TOP, ...CUTS, ...BRAIDS, ...TEXTURE]
   }
 ]
+
+/**
+ * NAI 전용 태그 — 단보루 사전에는 없지만 NAI가 학습한 품질·미학 태그. 묶음 검색에서만 보여 준다
+ * (아카 위키 「노벨AI/태깅」: best > amazing > great > normal > bad > worst quality, very aesthetic > aesthetic > displeasing > very displeasing)
+ */
+export const NAI_SPECIAL_TAGS: Record<string, string> = {
+  'best quality': '최고 품질 (NAI 전용)',
+  'amazing quality': '아주 좋은 품질 (NAI 전용)',
+  'great quality': '좋은 품질 (NAI 전용)',
+  'normal quality': '보통 품질 (NAI 전용)',
+  'bad quality': '나쁜 품질 (NAI 전용)',
+  'worst quality': '최악 품질 (NAI 전용 · 네거티브용)',
+  'very aesthetic': '매우 미적 (NAI 전용)',
+  aesthetic: '미적 (NAI 전용)',
+  displeasing: '불쾌한 (NAI 전용 · 네거티브용)',
+  'very displeasing': '매우 불쾌한 (NAI 전용 · 네거티브용)',
+  masterpiece: '걸작 (NAI V2부터 자동 품질 태그에서 빠짐)'
+}
+
+/** 모든 묶음 — 머리 + 성격·분위기·주제(tag-groups-mood.ts, 생성 파일) */
+export const TAG_GROUPS: TagGroup[] = [...HAIR_TAG_GROUPS, ...MOOD_TAG_GROUPS]
 
 /** 검색어에 맞는 묶음 — 이름과 같으면 exact, 이름의 앞부분이면(뒷머 → 뒷머리) prefix */
 export function tagGroupsFor(query: string): { group: TagGroup; exact: boolean }[] {
