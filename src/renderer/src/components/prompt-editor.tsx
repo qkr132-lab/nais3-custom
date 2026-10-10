@@ -28,6 +28,20 @@ import { useUiPrefsStore } from '../stores/ui-prefs-store'
 const TYPO =
   'whitespace-pre-wrap break-words p-2.5 pr-9 font-mono text-[length:var(--prompt-size,15px)] leading-relaxed [scrollbar-gutter:stable]'
 
+/**
+ * 사전에 없는 태그 표시 — 글자색은 건드리지 않고 물결 밑줄만 긋는다.
+ * 덧층 글자는 투명이라 입력칸 글자가 그대로 보이고, 밑줄만 그 아래 얹힌다
+ * (글자를 색칠하면 입력칸 글자 위에 한 번 더 그려져 번져 보인다).
+ */
+const UNKNOWN_TAG_STYLE: React.CSSProperties = {
+  color: 'transparent',
+  textDecorationLine: 'underline',
+  textDecorationStyle: 'wavy',
+  textDecorationColor: 'rgba(233, 94, 80, 0.7)',
+  textDecorationSkipInk: 'none',
+  textUnderlineOffset: '3px'
+}
+
 export function PromptEditor({
   value,
   onValueChange,
@@ -221,7 +235,7 @@ export function PromptEditor({
                     key={p.key}
                     data-unknown-tag
                     title="단보루 사전에 없는 태그 — 자연어라면 그대로, 태그라면 철자를 확인"
-                    style={{ color: 'var(--danger)' }}
+                    style={UNKNOWN_TAG_STYLE}
                   >
                     {p.text}
                   </span>

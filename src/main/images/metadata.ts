@@ -2,7 +2,7 @@ import { gunzipSync, inflateSync } from 'zlib'
 import sharp from 'sharp'
 import type { ImageMetadata } from '../../shared/types'
 import {
-  QUALITY_TAGS_SUFFIX,
+  splitQualityTags,
   UC_PRESETS_V45_FULL,
   UC_PRESETS_V45_WEB_FULL
 } from '../../shared/nai-presets'
@@ -278,7 +278,7 @@ function normalize(
     variety: params.skip_cfg_above_sigma != null,
     useCoords: params.v4_prompt?.use_coords ?? params.use_coords ?? false,
     // ucPreset·qualityToggle: 직접 필드 우선, 없으면 병합 문자열에서 역추적
-    qualityToggle: params.qualityToggle ?? extra.prompt.endsWith(QUALITY_TAGS_SUFFIX),
+    qualityToggle: params.qualityToggle ?? splitQualityTags(extra.prompt).qualityToggle,
     ucPreset: params.ucPreset ?? inferUcPreset(extra.uc),
     characterPrompts: characterPrompts.length > 0 ? characterPrompts : undefined
   }

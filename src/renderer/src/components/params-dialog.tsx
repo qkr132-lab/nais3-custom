@@ -11,10 +11,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
 
-function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+function Row({
+  label,
+  hint,
+  children
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="shrink-0 text-[13px] text-muted">{label}</span>
+      <span className="shrink-0 text-[13px] text-muted" title={hint}>
+        {label}
+      </span>
       {children}
     </div>
   )
@@ -183,6 +193,13 @@ export function ParamsDialog({
             <Switch
               checked={request.qualityToggle}
               onCheckedChange={(v) => patch({ qualityToggle: v })}
+            />
+          </Row>
+
+          <Row label="따옴표 → Text:" hint="큰따옴표 문구를 글자 블록으로 보내고 no text를 뺀다">
+            <Switch
+              checked={request.textHelper !== false}
+              onCheckedChange={(v) => patch({ textHelper: v })}
             />
           </Row>
 

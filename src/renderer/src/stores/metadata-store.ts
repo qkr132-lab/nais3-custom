@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ImageMetadata, UcPresetIndex } from '@shared/types'
 import {
-  QUALITY_TAGS_SUFFIX,
+  splitQualityTags,
   UC_PRESETS_V45_FULL,
   UC_PRESETS_V45_WEB_FULL
 } from '@shared/nai-presets'
@@ -14,9 +14,7 @@ import { toast } from './toast-store'
 
 /** 병합된 프롬프트/네거티브에서 프리셋을 벗겨 원본(raw)만 남긴다 → 재병합으로 동일 재현 */
 function stripQuality(prompt: string): string {
-  return prompt.endsWith(QUALITY_TAGS_SUFFIX)
-    ? prompt.slice(0, -QUALITY_TAGS_SUFFIX.length)
-    : prompt
+  return splitQualityTags(prompt).prompt
 }
 function stripUcPreset(uc: string, idx: number): string {
   const presets = [

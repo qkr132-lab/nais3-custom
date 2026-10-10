@@ -118,6 +118,8 @@ export interface GenerationRequest {
   ucPreset: UcPresetIndex
   characterPrompts: CharacterPromptInput[]
   useCoords: boolean
+  /** 따옴표 문구를 `Text:` 블록으로 바꿔 보낸다 (커스텀). 없으면 켜짐 */
+  textHelper?: boolean
   /** V5 generation prompt toggle: strip background tags and add `transparent background`. */
   transparentBackground?: boolean
   /** i2i/인페인트 강도·노이즈 (소스가 있을 때 사용) */

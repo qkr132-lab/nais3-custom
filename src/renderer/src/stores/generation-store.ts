@@ -51,7 +51,8 @@ export const DEFAULT_REQUEST: GenerationRequest = {
   qualityToggle: true,
   ucPreset: 0,
   characterPrompts: [],
-  useCoords: false
+  useCoords: false,
+  textHelper: true
 }
 
 /** 모델이 바뀔 때 모델 의존 상한을 다른 스토어에 반영 (순환 참조 방지 — 단방향 주입) */

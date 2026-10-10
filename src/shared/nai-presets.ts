@@ -8,6 +8,52 @@ import type { UcPresetIndex } from './types'
 
 /** 실캡처 확정 (V4.5 full): 프롬프트 "뒤"에 그대로 이어 붙는다 */
 export const QUALITY_TAGS_SUFFIX = ', very aesthetic, masterpiece, no text'
+/** 글자를 그리는 프롬프트(Text: 블록)엔 `no text`를 빼고 붙인다 — 글자 렌더링을 막기 때문 */
+export const QUALITY_TAGS_SUFFIX_TEXT = ', very aesthetic, masterpiece'
+
+/** `Text:` 블록이 시작하는 줄의 위치 (없으면 -1). NAI는 이 줄부터 끝까지를 그릴 글자로 본다 */
+export function textBlockStart(prompt: string): number {
+  const m = /(^|\n)[ \t]*text:/i.exec(prompt)
+  return m ? m.index + m[1].length : -1
+}
+
+/** 큰따옴표(" " “ ”)로 감싼 문구들 — 줄을 넘지 않는 것만, 빈 것은 뺀다 */
+export function quotedPhrases(prompt: string): string[] {
+  const out: string[] = []
+  for (const m of prompt.matchAll(/["“]([^"“”\n]*)["”]/g)) {
+    const t = m[1].trim()
+    if (t) out.push(t)
+  }
+  return out
+}
+
+/**
+ * 따옴표 문구 → `Text:` 블록 (커스텀 · V5 웹이 하는 자동 변환을 API 전송 쪽에서 대신).
+ * 이미 `Text:`를 적었으면 손대지 않는다. 문구가 여럿이면 빈 줄로 나눠 한 블록에 넣는다(공식 문서 방식).
+ * 따옴표 자체는 그대로 둔다 — 말풍선 위치·대사 짝이 문맥에 남아야 한다.
+ */
+export function withTextBlock(prompt: string): string {
+  if (textBlockStart(prompt) >= 0) return prompt
+  const phrases = quotedPhrases(prompt)
+  if (phrases.length === 0) return prompt
+  return prompt.replace(/\s+$/, '') + '\nText: ' + phrases.join('\n\n')
+}
+
+/** 병합 프롬프트에서 자동 품질 태그를 벗겨 원문과 토글 상태를 돌려준다 (메타데이터 판독용) */
+export function splitQualityTags(prompt: string): { prompt: string; qualityToggle: boolean } {
+  if (prompt.endsWith(QUALITY_TAGS_SUFFIX))
+    return { prompt: prompt.slice(0, -QUALITY_TAGS_SUFFIX.length), qualityToggle: true }
+  const at = textBlockStart(prompt)
+  if (at > 0) {
+    const head = prompt.slice(0, at).replace(/\s+$/, '')
+    if (head.endsWith(QUALITY_TAGS_SUFFIX_TEXT))
+      return {
+        prompt: head.slice(0, -QUALITY_TAGS_SUFFIX_TEXT.length) + '\n' + prompt.slice(at),
+        qualityToggle: true
+      }
+  }
+  return { prompt, qualityToggle: false }
+}
 
 const WEB_UC_HEAVY =
   'nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page'
@@ -65,7 +111,10 @@ export function removeComments(prompt: string): string {
 
 export function mergeQualityTags(prompt: string, qualityToggle: boolean): string {
   if (!qualityToggle) return prompt
-  return prompt + QUALITY_TAGS_SUFFIX
+  const at = textBlockStart(prompt)
+  if (at < 0) return prompt + QUALITY_TAGS_SUFFIX
+  // Text: 블록 뒤에 붙은 말은 글자로 그려진다 → 품질 태그는 블록 앞에, `no text`는 뺀다
+  return prompt.slice(0, at).replace(/\s+$/, '') + QUALITY_TAGS_SUFFIX_TEXT + '\n' + prompt.slice(at)
 }
 
 /** 캡처 확정: 프리셋 텍스트 + ", " + 유저 네거티브 순서로 병합 */

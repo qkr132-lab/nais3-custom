@@ -1,5 +1,5 @@
 import type { UcPresetIndex } from './types'
-import { mergeQualityTags, mergeUcPreset, removeComments } from './nai-presets'
+import { mergeQualityTags, mergeUcPreset, removeComments, withTextBlock } from './nai-presets'
 
 export interface PromptCaptionCharacter {
   prompt: string
@@ -13,6 +13,8 @@ export interface PromptCaptionRequest<T extends PromptCaptionCharacter = PromptC
   qualityToggle: boolean
   ucPreset: UcPresetIndex
   characterPrompts: T[]
+  /** 따옴표 문구를 `Text:` 블록으로 (커스텀). 없으면 켜진 것으로 본다 */
+  textHelper?: boolean
 }
 
 export interface PreparedPromptCaptions<T extends PromptCaptionCharacter = PromptCaptionCharacter> {
@@ -28,16 +30,18 @@ export interface PreparedPromptCaptions<T extends PromptCaptionCharacter = Promp
 export function preparePromptCaptions<T extends PromptCaptionCharacter>(
   request: PromptCaptionRequest<T>
 ): PreparedPromptCaptions<T> {
+  const text = (prompt: string): string =>
+    request.textHelper === false ? prompt : withTextBlock(prompt)
   const activeCharacters = request.characterPrompts
     .map((character) => ({
       ...character,
-      prompt: removeComments(character.prompt),
+      prompt: text(removeComments(character.prompt)),
       negativePrompt: removeComments(character.negativePrompt)
     }))
     .filter((character) => character.enabled && character.prompt.trim())
   return {
     positive: {
-      base: mergeQualityTags(removeComments(request.prompt), request.qualityToggle),
+      base: mergeQualityTags(text(removeComments(request.prompt)), request.qualityToggle),
       characters: activeCharacters.map((character) => character.prompt)
     },
     negative: {
