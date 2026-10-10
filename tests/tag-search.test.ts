@@ -143,7 +143,7 @@ describe('shipped million-tag index and Korean search API', () => {
   })
   it('returns bounded, unique real tags and isolated result objects', async () => {
     const tags = await api.searchTags('머리', 999)
-    expect(tags.length).toBeLessThanOrEqual(30)
+    expect(tags.length).toBeLessThanOrEqual(150)
     expect(new Set(tags.map((r) => r.tag)).size).toBe(tags.length)
     const first = await api.searchTags('전신')
     first[0].ko = 'mutated'

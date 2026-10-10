@@ -3,11 +3,16 @@ import { useState } from 'react'
 import type { Scene } from '@shared/types'
 import {
   CENSOR_OPTIONS,
+  CENSOR_WEIGHT_DEFAULT,
+  CENSOR_WEIGHT_MAX,
+  CENSOR_WEIGHT_MIN,
   censorLabel,
   censorPrompt,
   changeCensors,
+  changeCensorWeight,
   changeAnalSuppression,
   normalizeAnalSuppression,
+  normalizeCensorWeight,
   type CensorChanges
 } from '@shared/censor-tags'
 import { useScenesStore } from '../stores/scenes-store'
@@ -24,9 +29,12 @@ export function CensorStatus({
   onEdit: () => void
 }): React.JSX.Element {
   const summary = censorLabel(scene.censorKinds)
+  const weight = normalizeCensorWeight(scene.censorWeight)
   const suppressAnal = normalizeAnalSuppression(scene.suppressAnal)
   const text = [
-    summary ? `검열 태그: ${summary}` : '검열 태그 없음',
+    summary
+      ? `검열 태그: ${summary}${weight !== CENSOR_WEIGHT_DEFAULT ? ` ×${weight}` : ''}`
+      : '검열 태그 없음',
     suppressAnal ? '항문 성행위 억제' : ''
   ]
     .filter(Boolean)
@@ -72,8 +80,26 @@ export function SceneCensorDialog({
   ).length
   const suppressionMixed = suppressionCount > 0 && suppressionCount < n
   const previews = [
-    ...new Set(scenes.map((s) => censorPrompt(changeCensors(s.censorKinds, changes))))
+    ...new Set(
+      scenes.map((s) =>
+        censorPrompt(
+          changeCensors(s.censorKinds, changes),
+          changeCensorWeight(s.censorWeight, changes)
+        )
+      )
+    )
   ]
+  // 가중치 — 씬마다 다르면 "여러 값", 바꾸면 그 값으로 통일
+  const weights = [...new Set(scenes.map((s) => changeCensorWeight(s.censorWeight, changes)))]
+  const weightMixed = weights.length > 1
+  const weightValue = weightMixed ? '' : String(weights[0] ?? CENSOR_WEIGHT_DEFAULT)
+  const [weightText, setWeightText] = useState<string | null>(null)
+  const setWeight = (raw: string): void => {
+    setWeightText(raw)
+    const n = Number(raw)
+    if (raw.trim() && Number.isFinite(n))
+      setChanges((prev) => ({ ...prev, weight: normalizeCensorWeight(n) }))
+  }
   const setAll = (value: boolean): void =>
     setChanges((prev) => ({
       ...prev,
@@ -181,6 +207,87 @@ export function SceneCensorDialog({
               )
             })}
           </fieldset>
+          {/* 가중치 (커스텀) — 기본 1, 1이 아니면 검열 태그를 1.3::…:: 로 묶어 붙인다 */}
+          <div className="space-y-2 rounded-lg border border-line bg-paper p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <label htmlFor="censor-weight" className="text-[13px] font-medium">
+                  가중치
+                </label>
+                <p className="mt-1 text-[11px] text-muted">
+                  {weightMixed ? `씬마다 다름 (${weights.join(' · ')})` : `지금 ${weightValue}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={saving || !n}
+                  onClick={() =>
+                    setWeight(
+                      String(
+                        Math.max(
+                          CENSOR_WEIGHT_MIN,
+                          normalizeCensorWeight(
+                            (Number(weightText ?? weightValue) || CENSOR_WEIGHT_DEFAULT) - 0.1
+                          )
+                        )
+                      )
+                    )
+                  }
+                  aria-label="가중치 0.1 줄이기"
+                >
+                  −
+                </Button>
+                <input
+                  id="censor-weight"
+                  type="number"
+                  inputMode="decimal"
+                  step={0.1}
+                  min={CENSOR_WEIGHT_MIN}
+                  max={CENSOR_WEIGHT_MAX}
+                  placeholder={weightMixed ? '여러 값' : String(CENSOR_WEIGHT_DEFAULT)}
+                  value={weightText ?? weightValue}
+                  disabled={saving || !n}
+                  className="h-8 w-20 rounded-md border border-line bg-surface px-2 text-center text-[13px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
+                  onChange={(e) => setWeight(e.target.value)}
+                  onBlur={() => setWeightText(null)}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={saving || !n}
+                  onClick={() =>
+                    setWeight(
+                      String(
+                        Math.min(
+                          CENSOR_WEIGHT_MAX,
+                          normalizeCensorWeight(
+                            (Number(weightText ?? weightValue) || CENSOR_WEIGHT_DEFAULT) + 0.1
+                          )
+                        )
+                      )
+                    )
+                  }
+                  aria-label="가중치 0.1 늘리기"
+                >
+                  +
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={saving || !n || (!weightMixed && weights[0] === CENSOR_WEIGHT_DEFAULT)}
+                  onClick={() => setWeight(String(CENSOR_WEIGHT_DEFAULT))}
+                >
+                  기본 1.0
+                </Button>
+              </div>
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted">
+              1.0이면 가중치 없이 붙이고, 아니면 검열 태그를 묶어 `1.3::…::`처럼 붙여요. 범위{' '}
+              {CENSOR_WEIGHT_MIN}~{CENSOR_WEIGHT_MAX}.
+            </p>
+          </div>
           <div className="space-y-2 rounded-lg border border-line bg-paper p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>

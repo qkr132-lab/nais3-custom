@@ -464,6 +464,8 @@ export interface Scene {
   background?: import('./background-tags').SceneBackground
   /** Separate generation-time censor controls. Missing in older exports = off. */
   censorKinds?: import('./censor-tags').CensorKind[]
+  /** 검열 태그 가중치 (커스텀) — 기본 1 */
+  censorWeight?: number
   /** Independent negative-prompt suppression. Missing in older scenes = off. */
   suppressAnal?: boolean
   id: number
@@ -848,6 +850,7 @@ export interface IpcInvokeMap {
       items: {
         id: number
         censorKinds: import('./censor-tags').CensorKind[]
+        censorWeight: number
         suppressAnal: boolean
       }[]
     }

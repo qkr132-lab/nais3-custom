@@ -158,6 +158,19 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(request.prompt).not.toContain('censored')
   })
 
+  it('씬 검열 가중치가 1이 아니면 캐릭터 1 끝에 묶음으로 붙는다', () => {
+    const request = buildSceneRequest({ ...scene, censorWeight: 1.4 })
+    expect(request.characterPrompts[0].prompt).toBe(
+      'blue eyes, 1.4::completely white censored anal::'
+    )
+    expect(request.sceneBaseCharacterPrompts).toEqual(['blue eyes'])
+    // 캐릭터가 없으면 기본 프롬프트 끝에
+    useCharactersStore.setState({ items: [] })
+    expect(buildSceneRequest({ ...scene, censorWeight: 0.7 }).prompt).toContain(
+      '0.7::completely white censored anal::'
+    )
+  })
+
   it('falls back to the end of the base prompt when no character is sent', () => {
     useCharactersStore.setState({ items: [card(1, 'blue eyes', false)] })
     const request = buildSceneRequest(scene)
