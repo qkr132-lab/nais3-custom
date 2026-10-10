@@ -368,6 +368,25 @@ export class TagSearchEngine {
         a.row.tag.localeCompare(b.row.tag)
     )
     const result = ranked.slice(0, n).map((r) => this.enrich(r.row, r.match, r.alias))
+    // 한글 복합어로 제대로 찾은 게 없으면 앞 글자를 떼어 다시 찾는다 (윗가슴 → 가슴, 엉덩이골 → 덩이골 → 이골)
+    if (
+      korean &&
+      !initial &&
+      !/\s/.test(q) &&
+      cq.length >= 3 &&
+      !result.some((r) => r.match === 'exact' || r.match === 'prefix')
+    ) {
+      const seen = new Set(result.map((r) => r.tag))
+      for (let i = 1; i <= cq.length - 2 && result.length < n; i++) {
+        for (const r of this.search(cq.slice(i), n)) {
+          if (result.length >= n) break
+          if (seen.has(r.tag) || r.type !== 'general') continue
+          seen.add(r.tag)
+          result.push({ ...r, match: 'related' })
+        }
+        if (result.some((r) => r.match === 'related')) break
+      }
+    }
     // 한글로 찾은 게 적으면 (피스팅 → fisting, anal fisting) 찾은 영어 태그로 다시 찾아 관련 태그를 채운다
     if (korean && !initial && result.length && result.length < n) {
       const seen = new Set(result.map((r) => r.tag))
