@@ -91,7 +91,18 @@ describe('new tag insertion preserves existing neighbors', () => {
     expect(insertAt('blue eyes, sky', 0, 'blue', 'blue hair').edit.next).toBe(
       'blue hair, blue eyes, sky'
     )
-    expect(insertAt('sky, clouds', 3, 'sky', 'night sky').edit.next).toBe('sky, night sky, clouds')
+    expect(insertAt('sky, clouds', 4, 'sky', 'night sky').edit.next).toBe('sky,night sky, clouds')
+  })
+
+  it('영어 단어 끝에 붙여 친 영어는 그 단어를 잇는다 — "a, android18"이 되지 않는다', () => {
+    // 첫 글자 a를 친 뒤 기억이 끊겨(스크롤 등) 두 번째 글자부터 다시 잡는 경우
+    const before = { text: '1girl, a', start: 8, end: 8 }
+    expect(completionAnchor(null, before, '1girl, an', 9)).toBeNull()
+    const range = completionRange('1girl, an', 9)!
+    expect(range.query).toBe('an')
+    expect(completionEdit(range, 'android 18').next).toBe('1girl, android 18, ')
+    // 영어 태그 뒤에 붙여 친 한글은 따로 넣는다
+    expect(completionAnchor(null, { text: 'sky', start: 3, end: 3 }, 'sky복', 4)).not.toBeNull()
   })
 
   it('retains Korean IME replacements, multiword queries and backspace inside the new span', () => {

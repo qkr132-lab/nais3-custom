@@ -69,6 +69,18 @@ export function completionAnchor(
   const role = /^(?:source|target|mutual)#/.exec(before.text.slice(start, end))
   const atRoleBodyStart = role !== null && before.start === start + role[0].length
   if (!atRoleBodyStart && before.start > start && before.start < end) return null
+  // 영어 단어 끝에 붙여 친 영어·숫자는 그 단어를 잇는 것 — 따로 넣으면 a + ndroid가
+  // "a, android18"이 된다. (영어 태그 뒤에 붙여 친 한글은 지금처럼 따로 넣는다)
+  const typed = text.slice(before.start, before.start + added)
+  if (
+    !atRoleBodyStart &&
+    before.start > start &&
+    before.start === end &&
+    /[A-Za-z0-9_)]$/.test(before.text.slice(start, end)) &&
+    /^[A-Za-z0-9_(]/.test(typed) &&
+    !/^(?:source|target|mutual)#/.test(typed)
+  )
+    return null
   return { prefix, suffix }
 }
 

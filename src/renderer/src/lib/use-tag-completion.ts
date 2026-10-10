@@ -238,7 +238,8 @@ export function useTagCompletion(
           } else {
             const response = await window.nais.invoke('tags:search', {
               query: range.query.trim(),
-              limit: 10
+              // 넉넉히 받아 목록을 스크롤로 훑어보며 고른다
+              limit: 50
             })
             items = response.items.map((t) => ({ kind: 'tag' as const, ...t }))
           }

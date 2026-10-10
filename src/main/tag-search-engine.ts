@@ -47,7 +47,7 @@ interface Ranked {
 }
 export const normalizeTagQuery = (s: string): string =>
   s.normalize('NFC').trim().toLowerCase().replace(/_/g, ' ').slice(0, 120)
-const clampLimit = (n: number): number => Math.max(1, Math.min(30, Math.floor(n) || 10))
+const clampLimit = (n: number): number => Math.max(1, Math.min(60, Math.floor(n) || 10))
 const splitAliases = (s: string): string[] =>
   s
     .split(/[(),/;|]/)
@@ -368,6 +368,22 @@ export class TagSearchEngine {
         a.row.tag.localeCompare(b.row.tag)
     )
     const result = ranked.slice(0, n).map((r) => this.enrich(r.row, r.match, r.alias))
+    // 한글로 찾은 게 적으면 (피스팅 → fisting, anal fisting) 찾은 영어 태그로 다시 찾아 관련 태그를 채운다
+    if (korean && !initial && result.length && result.length < n) {
+      const seen = new Set(result.map((r) => r.tag))
+      // 오타·포함 일치에서 다시 찾으면 엉뚱한 게 붙는다 (piston → detroit pistons) — 정확·앞부분 일치만
+      const seeds = result.filter((r) => r.match === 'exact' || r.match === 'prefix').slice(0, 3)
+      for (const top of seeds) {
+        if (result.length >= n) break
+        for (const r of this.search(top.tag, n)) {
+          if (result.length >= n) break
+          // 작가·작품·캐릭터 이름은 빼고 일반 태그만
+          if (seen.has(r.tag) || r.type !== 'general') continue
+          seen.add(r.tag)
+          result.push({ ...r, match: 'related' })
+        }
+      }
+    }
     if (this.cache.size >= 128) this.cache.delete(this.cache.keys().next().value!)
     this.cache.set(cacheKey, result)
     return result.map((r) => ({ ...r }))
