@@ -379,8 +379,7 @@ export function refreshScenePrompts(
     ? { sceneBaseCharacterPrompts: characters.map((c) => c.prompt) }
     : {}
 
-  // 분할 사용 시: 씬 프롬프트를 가변 뒤·디테일 앞에 끼워 전송 프롬프트를 파츠에서 재조립.
-  // (전체 병합문 끝에 붙이면 디테일 뒤 꼬리가 되어 긴 디테일에 묻힌다 — 적용 약해지던 버그)
+  // 분할 사용 시: 예약 당시 원문 파츠에서 다시 조립 (씬은 디테일 뒤 — mergeSceneIntoPromptParts)
   if (request.promptParts && request.sceneBaseAdditionalPrompt != null) {
     const positive = scenePositivePrompt(
       request.sceneBasePrompt,

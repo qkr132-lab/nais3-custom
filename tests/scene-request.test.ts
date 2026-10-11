@@ -71,12 +71,12 @@ describe('대기 씬 요청 최신화', () => {
       negativePrompt: 'new negative'
     })
 
-    // 분할 사용 시 전송 프롬프트는 파츠에서 재조립 — 씬 태그가 가변 뒤·디테일 앞에 온다
-    // (전체 병합문 끝에 붙이면 긴 디테일 뒤 꼬리가 되어 적용이 약해지던 버그의 회귀 방지)
-    expect(refreshed.prompt).toBe('base, variable, 6::new tag::, base detail')
+    // 분할 사용 시 전송 프롬프트는 예약 당시 원문 파츠에서 재조립 — 옛 씬은 사라지고 새 씬이 맨 뒤에
+    // (2026-10-11 유저 「씬은 이제 제일 뒤에」)
+    expect(refreshed.prompt).toBe('base, variable, base detail, 6::new tag::')
     expect(refreshed.negativePrompt).toBe('base negative, new negative')
-    expect(refreshed.promptParts?.additional).toBe('variable, 6::new tag::')
-    expect(refreshed.promptParts?.detail).toBe('base detail')
+    expect(refreshed.promptParts?.additional).toBe('variable')
+    expect(refreshed.promptParts?.detail).toBe('base detail, 6::new tag::')
     expect(refreshed.seed).toBe(123)
     expect(refreshed.width).toBe(832)
   })
@@ -115,8 +115,9 @@ describe('씬 검열 태그 자리 — 첫 캐릭터 맨 끝', () => {
       { base: 'sky', additional: 'clouds', detail: 'detailed' },
       [char('1girl')]
     )
-    expect(result.prompt).toBe('sky, clouds, forest, detailed')
-    expect(result.promptParts?.additional).toBe('clouds, forest')
+    expect(result.prompt).toBe('sky, clouds, detailed, forest')
+    expect(result.promptParts?.additional).toBe('clouds')
+    expect(result.promptParts?.detail).toBe('detailed, forest')
     expect(result.characterPrompts?.[0].prompt).toBe(`1girl, ${TAGS}`)
   })
 
@@ -128,7 +129,8 @@ describe('씬 검열 태그 자리 — 첫 캐릭터 맨 끝', () => {
     // 캐릭터를 넘기지 않은 호출도 같은 자리
     expect(scenePositivePrompt('sky', scene).prompt).toBe(`sky, forest, ${TAGS}`)
     const split = scenePositivePrompt('', scene, { base: 'sky', additional: '', detail: 'hd' }, [])
-    expect(split.promptParts?.additional).toBe(`forest, ${TAGS}`)
+    expect(split.promptParts?.additional).toBe('')
+    expect(split.promptParts?.detail).toBe(`hd, forest, ${TAGS}`)
   })
 
   it('꺼진 캐릭터·빈 칸·주석뿐인 칸은 건너뛰고 실제로 보내는 첫 캐릭터에 붙인다', () => {

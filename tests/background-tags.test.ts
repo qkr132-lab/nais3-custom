@@ -51,7 +51,7 @@ describe('scene backgrounds', () => {
       '{dress}, 1.5::{smile}::'
     )
   })
-  it('inserts the background before detail and only cleans the generation copy', () => {
+  it('inserts the background with the scene after detail and only cleans the generation copy', () => {
     const parts = {
       base: '1girl, white background',
       additional: 'upper body',
@@ -59,7 +59,7 @@ describe('scene backgrounds', () => {
     }
     const scene = { prompt: 'smile, 1.5::white background::', background }
     expect(scenePositivePrompt('', scene, parts).prompt).toBe(
-      '1girl, upper body, smile, forest, sunlight, year 2025'
+      '1girl, upper body, year 2025, smile, forest, sunlight'
     )
     expect(parts.base).toBe('1girl, white background')
     expect(scene.prompt).toBe('smile, 1.5::white background::')
@@ -69,7 +69,7 @@ describe('scene backgrounds', () => {
         { ...scene, background: { ...background, placement: 'before-scene' } },
         parts
       ).prompt
-    ).toBe('1girl, upper body, forest, sunlight, smile, year 2025')
+    ).toBe('1girl, upper body, year 2025, forest, sunlight, smile')
   })
   it('preserves legacy behavior and restores raw backgrounds when cleared', () => {
     expect(scenePositivePrompt('base, white background', { prompt: 'smile' }).prompt).toBe(
