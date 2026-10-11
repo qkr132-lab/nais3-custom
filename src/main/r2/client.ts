@@ -241,6 +241,42 @@ export async function r2ObjectExists(bucket: string, key: string): Promise<boole
   throw new Error(`존재 확인 실패 (${res.status}): ${await errText(res)}`)
 }
 
+/** 객체 하나의 바이트 — 미리보기·내려받기용 */
+export async function r2GetObject(bucket: string, key: string): Promise<Buffer> {
+  const auth = await requireAuth()
+  const res = await client(auth).fetch(`${endpoint(auth)}/${bucket}/${encodeKey(key)}`, {
+    method: 'GET'
+  })
+  if (!res.ok) throw new Error(`내려받기 실패 (${res.status}): ${await errText(res)}`)
+  return Buffer.from(await res.arrayBuffer())
+}
+
+/** prefix 아래 모든 키 — 하위 폴더까지, 폴더 표식(0바이트 키)도 포함. 폴더 통째 내려받기·삭제용 */
+export async function listAllKeys(bucket: string, prefix: string): Promise<R2Object[]> {
+  const auth = await requireAuth()
+  const c = client(auth)
+  const out: R2Object[] = []
+  let token: string | undefined
+  do {
+    const params = new URLSearchParams({ 'list-type': '2', prefix })
+    if (token) params.set('continuation-token', token)
+    const res = await c.fetch(`${endpoint(auth)}/${bucket}?${params}`, { method: 'GET' })
+    if (!res.ok) throw new Error(`목록 실패 (${res.status}): ${await errText(res)}`)
+    const xml = await res.text()
+    for (const item of xmlBlocks(xml, 'Contents')) {
+      const key = xmlValues(item, 'Key')[0] ?? ''
+      if (!key) continue
+      out.push({
+        key,
+        size: Number(xmlValues(item, 'Size')[0] ?? 0),
+        lastModified: xmlValues(item, 'LastModified')[0] ?? ''
+      })
+    }
+    token = xmlValues(xml, 'NextContinuationToken')[0]
+  } while (token)
+  return out
+}
+
 // ── 업로드 큐 (개수 제한 없음 · 동시 3개 · 실패 목록 · 재시도) ─────
 
 interface UploadItem {

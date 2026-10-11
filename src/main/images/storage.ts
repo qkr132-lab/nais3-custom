@@ -44,6 +44,11 @@ export function libraryRoot(): string {
   return join(app.getPath('userData'), 'library')
 }
 
+/** R2 미리보기 캐시 (커스텀) — 버킷에서 한 번 받아 둔 사본. 지워도 다시 받는다 */
+export function r2CacheRoot(): string {
+  return join(app.getPath('userData'), 'r2-cache')
+}
+
 /** 씬 이미지 폴더 경로 — 씬루트/<프리셋>/<씬 이름>/ (저장·폴더 열기 공용) */
 export function sceneDir(presetName: string | null, sceneName: string, sceneId?: number): string {
   const safe = (s: string): string => s.replace(/[/\\:*?"<>|]/g, '_').trim()
@@ -65,7 +70,8 @@ export function isUnderImagesRoot(filePath: string): boolean {
     isInside(imagesRoot(), filePath) ||
     isInside(scenesRoot(), filePath) ||
     isInside(defaultImagesRoot(), filePath) ||
-    isInside(libraryRoot(), filePath)
+    isInside(libraryRoot(), filePath) ||
+    isInside(r2CacheRoot(), filePath)
   )
 }
 

@@ -4,7 +4,7 @@ import {
   type SceneBackground
 } from './background-tags'
 import type { CharacterPromptInput, CharRole, GenerationRequest, PromptParts } from './types'
-import { appendPromptPiece, removeComments } from './nai-presets'
+import { appendPromptPiece, removeComments, splitTextTail } from './nai-presets'
 import {
   withCensorTags,
   withoutCensorDuplicates,
@@ -67,11 +67,11 @@ export function scenePositivePrompt(
     { base: clean(parts.base), additional: clean(parts.additional), detail: clean(parts.detail) },
     scenePrompt
   )
-  const result = {
+  const result = textToLastPart({
     base: withoutCensorDuplicates(merged.base, kinds),
     additional: tagged(merged.additional),
     detail: withoutCensorDuplicates(merged.detail, kinds)
-  }
+  })
   return withCharacters({ prompt: mergePromptParts(result), promptParts: result })
 }
 
@@ -203,6 +203,24 @@ export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: strin
 /** 3분할을 전송 프롬프트 한 줄로 (고정, 가변, 디테일 순 — 빈 칸은 건너뜀) */
 export function mergePromptParts(parts: PromptParts): string {
   return [parts.base, parts.additional, parts.detail].reduce(appendPrompt, '')
+}
+
+/**
+ * 세 칸의 `Text:` 꼬리를 모아 디테일 칸 끝으로 (커스텀).
+ * 씬 프롬프트는 가변 칸에 합쳐지므로 그 안의 Text:가 가변 끝에 남는데, 전송 프롬프트는
+ * 이미 맨 끝으로 보내지만 메타데이터의 3분할 표시에선 가변 끝에 보여 헷갈린다 — 둘을 맞춘다.
+ */
+export function textToLastPart(parts: PromptParts): PromptParts {
+  const b = splitTextTail(parts.base)
+  const a = splitTextTail(parts.additional)
+  const d = splitTextTail(parts.detail)
+  const texts = [b.text, a.text, d.text].filter(Boolean)
+  if (texts.length === 0) return parts
+  return {
+    base: b.body,
+    additional: a.body,
+    detail: appendPrompt(d.body, 'Text: ' + texts.join('\n\n'))
+  }
 }
 
 /**

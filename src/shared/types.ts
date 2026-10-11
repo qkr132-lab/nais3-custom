@@ -1032,6 +1032,19 @@ export interface IpcInvokeMap {
   'r2:retryFailed': { req: void; res: { queued: number } }
   'r2:cancelUpload': { req: void; res: void }
   'r2:clearUploadHistory': { req: void; res: void }
+  // R2 둘러보기 (커스텀) — 미리보기는 userData/r2-cache 사본 경로, 내려받기는 대화상자로 위치 선택
+  'r2:preview': { req: { bucket: string; key: string; lastModified: string }; res: { path: string } }
+  /** 파일 하나면 저장 대화상자, 아니면 폴더 선택 → base 기준 상대 경로로 저장. 폴더는 안의 전부 */
+  'r2:download': {
+    req: { bucket: string; keys: string[]; folders: string[]; base: string }
+    res: { saved: number; failed: { key: string; error: string }[]; canceled: boolean; dir: string }
+  }
+  /** 폴더는 안의 전부 + 폴더 표식까지 */
+  'r2:delete': {
+    req: { bucket: string; keys: string[]; folders: string[] }
+    res: { deleted: number; failed: { key: string; error: string }[] }
+  }
+  'r2:transferStatus': { req: void; res: R2TransferStatus }
 }
 
 /** Automatic R2 synchronization settings, stored independently for each scene preset. */
@@ -1063,6 +1076,14 @@ export interface R2Object {
   key: string
   size: number
   lastModified: string
+}
+
+/** R2 내려받기·삭제 진행 상황 (커스텀) */
+export interface R2TransferStatus {
+  running: boolean
+  kind: 'download' | 'delete'
+  done: number
+  total: number
 }
 
 /** R2 업로드 큐 상태 (커스텀) */
@@ -1106,5 +1127,7 @@ export interface IpcEventMap {
   }
   /** R2 업로드 진행 상황 (커스텀) */
   'r2:progress': R2UploadStatus
+  /** R2 내려받기·삭제 진행 상황 (커스텀) */
+  'r2:transfer': R2TransferStatus
   'r2sync:status': R2SyncStatus
 }

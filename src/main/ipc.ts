@@ -191,6 +191,7 @@ import {
   setR2Auth,
   uploadStatus
 } from './r2/client'
+import { deleteSelection, downloadSelection, previewPath, transferStatus } from './r2/browse'
 import {
   getSyncConfig,
   presetIdsForAllImages,
@@ -570,6 +571,15 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('r2:clearUploadHistory', () => {
     clearUploadHistory()
   })
+  // R2 둘러보기 (커스텀): 미리보기 사본 · 내려받기 · 삭제
+  handle('r2:preview', async ({ bucket, key, lastModified }) => ({
+    path: await previewPath(bucket, key, lastModified)
+  }))
+  handle('r2:download', ({ bucket, keys, folders, base }) =>
+    downloadSelection(bucket, keys, folders, base)
+  )
+  handle('r2:delete', ({ bucket, keys, folders }) => deleteSelection(bucket, keys, folders))
+  handle('r2:transferStatus', () => transferStatus())
   handle('r2sync:getConfig', ({ presetId }) => getSyncConfig(presetId))
   handle('r2sync:setConfig', ({ presetId, config }) => {
     setSyncConfig(presetId, config)

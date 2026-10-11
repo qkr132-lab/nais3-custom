@@ -1,6 +1,11 @@
 import {
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
   CloudUpload,
+  Download,
   ExternalLink,
+  Eye,
   File as FileIcon,
   FileUp,
   Folder,
@@ -14,12 +19,16 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Square,
   Star,
+  Trash2,
   X,
   XCircle
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { R2Object, R2UploadStatus } from '@shared/types'
+import { createPortal } from 'react-dom'
+import type { R2Object, R2TransferStatus, R2UploadStatus } from '@shared/types'
+import { imageUrl } from '../lib/constants'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
@@ -33,6 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
  * - S3 호환 API 직접 호출 → 대시보드의 "한 번에 100개" 제한 없음
  * - 인증 정보는 safeStorage(DPAPI)로 암호화해 로컬에만 저장 (외부 전송 없음)
  * - 폴더 탐색 / 새 폴더 / 파일·폴더 올리기 / OS 드래그 앤 드롭 / 실패 목록·재시도
+ * - 둘러보기: 그림 미리보기(←/→) · 고른 것 내려받기 · 삭제 (폴더는 안의 전부) · Shift 범위 선택
  */
 
 function formatBytes(n: number): string {
@@ -210,6 +220,16 @@ function R2Browser({
     return window.nais.on('r2:progress', setStatus)
   }, [])
 
+  // 둘러보기 (커스텀) — 고른 항목(폴더는 prefix, 파일은 key) · 미리보기 · 내려받기/삭제 진행
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const anchorRef = useRef<string | null>(null)
+  const [preview, setPreview] = useState<number | null>(null)
+  const [transfer, setTransfer] = useState<R2TransferStatus | null>(null)
+  useEffect(() => {
+    void window.nais.invoke('r2:transferStatus', undefined).then(setTransfer)
+    return window.nais.on('r2:transfer', setTransfer)
+  }, [])
+
   // 즐겨찾기 (커스텀) — 버킷+경로에 별명. 클릭 한 번으로 이동
   const [favs, setFavs] = useState<R2Fav[]>([])
   useEffect(() => {
@@ -266,6 +286,8 @@ function R2Browser({
       const res = await window.nais.invoke('r2:list', { bucket, prefix })
       setFolders(res.folders)
       setObjects(res.objects)
+      setSelected(new Set())
+      anchorRef.current = null
     } catch (e) {
       toast(`목록 실패: ${e instanceof Error ? e.message : e}`, 'error')
     } finally {
@@ -327,6 +349,85 @@ function R2Browser({
       await window.nais.invoke('r2:deleteAuth', undefined)
       onDisconnect()
     }
+  }
+
+  // 표시 순서대로의 항목 id — Shift 범위 선택과 전체 선택용
+  const rowIds = [...folders, ...objects.map((o) => o.key)]
+  const toggleSelect = (id: string, shift: boolean): void => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      const anchor = anchorRef.current
+      if (shift && anchor && rowIds.includes(anchor)) {
+        const a = rowIds.indexOf(anchor)
+        const b = rowIds.indexOf(id)
+        const [from, to] = a < b ? [a, b] : [b, a]
+        for (let i = from; i <= to; i++) next.add(rowIds[i])
+      } else if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    anchorRef.current = id
+  }
+  const allSelected = rowIds.length > 0 && rowIds.every((id) => selected.has(id))
+  const toggleAll = (): void => setSelected(allSelected ? new Set() : new Set(rowIds))
+  const split = (ids: string[]): { keys: string[]; dirs: string[] } => ({
+    keys: ids.filter((id) => !id.endsWith('/')),
+    dirs: ids.filter((id) => id.endsWith('/'))
+  })
+  const busy = !!transfer?.running
+
+  const download = async (ids: string[]): Promise<void> => {
+    const { keys, dirs } = split(ids)
+    if (keys.length + dirs.length === 0) return
+    try {
+      const r = await window.nais.invoke('r2:download', {
+        bucket,
+        keys,
+        folders: dirs,
+        base: prefix
+      })
+      if (r.canceled) return
+      if (r.failed.length > 0)
+        toast(`${r.saved}개 저장, ${r.failed.length}개 실패: ${r.failed[0].error}`, 'error')
+      else toast(`${r.saved}개 저장 → ${r.dir}`, 'success')
+    } catch (e) {
+      toast(`내려받기 실패: ${e instanceof Error ? e.message : e}`, 'error')
+    }
+  }
+
+  const remove = async (ids: string[]): Promise<void> => {
+    const { keys, dirs } = split(ids)
+    const n = keys.length + dirs.length
+    if (n === 0) return
+    const what =
+      n === 1
+        ? dirs[0]
+          ? `폴더 ${dirs[0].slice(prefix.length)}`
+          : keys[0].slice(prefix.length)
+        : `${n}개 항목`
+    const ok = await askConfirm('R2에서 삭제', {
+      message: `지울 항목: ${what}\n버킷에서 바로 지워지며 되돌릴 수 없습니다. 폴더는 안의 파일까지 전부 지웁니다.`,
+      confirmLabel: '삭제',
+      danger: true
+    })
+    if (!ok) return
+    try {
+      const r = await window.nais.invoke('r2:delete', { bucket, keys, folders: dirs })
+      if (r.failed.length > 0)
+        toast(`${r.deleted}개 삭제, ${r.failed.length}개 실패: ${r.failed[0].error}`, 'error')
+      else toast(`${r.deleted}개 삭제`, 'success')
+    } catch (e) {
+      toast(`삭제 실패: ${e instanceof Error ? e.message : e}`, 'error')
+    }
+    setPreview(null)
+    void refresh()
+  }
+
+  // 미리보기 대상 — 현재 폴더의 그림만, 표시 순서대로
+  const images = objects.filter((o) => IMAGE_EXT.test(o.key))
+  const openPreview = (key: string): void => {
+    const i = images.findIndex((x) => x.key === key)
+    if (i >= 0) setPreview(i)
   }
 
   // 경로 브레드크럼 (루트 + 세그먼트)
@@ -475,6 +576,49 @@ function R2Browser({
         </div>
       )}
 
+      {/* 고르기 바 (커스텀) — 전체 선택 · 고른 것 내려받기/삭제 · 진행 상황 */}
+      {bucket && rowIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-2 py-1 text-[12.5px]">
+          <button
+            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-muted hover:bg-surface-2 hover:text-ink"
+            onClick={toggleAll}
+          >
+            {allSelected ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} />}
+            전체
+          </button>
+          <span className="text-faint">
+            {selected.size > 0
+              ? `${selected.size}개 선택`
+              : `폴더 ${folders.length} · 파일 ${objects.length}`}
+          </span>
+          {busy && transfer && (
+            <span className="flex items-center gap-1 text-accent">
+              <Loader2 size={12} className="animate-spin" />
+              {transfer.kind === 'download' ? '내려받는 중' : '지우는 중'} {transfer.done}/
+              {transfer.total}
+            </span>
+          )}
+          <span className="flex-1" />
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={selected.size === 0 || busy}
+            onClick={() => void download([...selected])}
+          >
+            <Download size={14} /> 내려받기
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-danger"
+            disabled={selected.size === 0 || busy}
+            onClick={() => void remove([...selected])}
+          >
+            <Trash2 size={14} /> 삭제
+          </Button>
+        </div>
+      )}
+
       {/* 목록 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {buckets.length === 0 && (
@@ -490,38 +634,83 @@ function R2Browser({
         <div className="space-y-px">
           {folders.map((f) => {
             const name = f.slice(prefix.length).replace(/\/$/, '')
+            const on = selected.has(f)
             return (
-              <button
+              <div
                 key={f}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-2"
-                onDoubleClick={() => setPrefix(f)}
-                onClick={() => setPrefix(f)}
+                className={cn(
+                  'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-surface-2',
+                  on && 'bg-accent/10'
+                )}
               >
-                <Folder size={15} className="shrink-0 text-[#c9a34f]" />
-                <span className="min-w-0 flex-1 truncate">{name}</span>
-              </button>
+                <button
+                  className="grid size-5 shrink-0 place-items-center text-muted hover:text-ink"
+                  title="선택 (Shift: 범위)"
+                  onClick={(e) => toggleSelect(f, e.shiftKey)}
+                >
+                  {on ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} />}
+                </button>
+                <button
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  onClick={() => setPrefix(f)}
+                >
+                  <Folder size={15} className="shrink-0 text-[#c9a34f]" />
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                </button>
+                <RowActions
+                  disabled={busy}
+                  onDownload={() => void download([f])}
+                  onDelete={() => void remove([f])}
+                />
+              </div>
             )
           })}
           {objects.map((o) => {
             const name = o.key.slice(prefix.length)
             const isImg = IMAGE_EXT.test(name)
+            const on = selected.has(o.key)
             return (
               <div
                 key={o.key}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-surface-2"
-              >
-                {isImg ? (
-                  <ImageIcon size={15} className="shrink-0 text-accent/80" />
-                ) : (
-                  <FileIcon size={15} className="shrink-0 text-muted" />
+                className={cn(
+                  'group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-surface-2',
+                  on && 'bg-accent/10'
                 )}
-                <span className="min-w-0 flex-1 truncate">{name}</span>
+              >
+                <button
+                  className="grid size-5 shrink-0 place-items-center text-muted hover:text-ink"
+                  title="선택 (Shift: 범위)"
+                  onClick={(e) => toggleSelect(o.key, e.shiftKey)}
+                >
+                  {on ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} />}
+                </button>
+                <button
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center gap-2 text-left',
+                    isImg ? 'cursor-zoom-in' : 'cursor-default'
+                  )}
+                  title={isImg ? '미리보기' : undefined}
+                  onClick={() => (isImg ? openPreview(o.key) : toggleSelect(o.key, false))}
+                >
+                  {isImg ? (
+                    <ImageIcon size={15} className="shrink-0 text-accent/80" />
+                  ) : (
+                    <FileIcon size={15} className="shrink-0 text-muted" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                </button>
                 <span className="shrink-0 font-mono text-[11.5px] text-faint">
                   {formatBytes(o.size)}
                 </span>
                 <span className="w-36 shrink-0 text-right font-mono text-[11px] text-faint">
                   {o.lastModified.slice(0, 19).replace('T', ' ')}
                 </span>
+                <RowActions
+                  disabled={busy}
+                  onPreview={isImg ? () => openPreview(o.key) : undefined}
+                  onDownload={() => void download([o.key])}
+                  onDelete={() => void remove([o.key])}
+                />
               </div>
             )
           })}
@@ -540,7 +729,208 @@ function R2Browser({
           </div>
         </div>
       )}
+
+      {/* 그림 미리보기 (커스텀) */}
+      {preview !== null && images[preview] && (
+        <R2Preview
+          bucket={bucket}
+          images={images}
+          index={preview}
+          prefix={prefix}
+          busy={busy}
+          onIndex={setPreview}
+          onClose={() => setPreview(null)}
+          onDownload={(key) => void download([key])}
+          onDelete={(key) => void remove([key])}
+        />
+      )}
     </div>
+  )
+}
+
+/** 줄 끝 작은 버튼들 — 마우스를 올리면 보인다 */
+function RowActions({
+  disabled,
+  onPreview,
+  onDownload,
+  onDelete
+}: {
+  disabled: boolean
+  onPreview?: () => void
+  onDownload: () => void
+  onDelete: () => void
+}): React.JSX.Element {
+  const cls =
+    'grid size-6 place-items-center rounded text-faint opacity-0 hover:bg-surface hover:text-ink group-hover:opacity-100 disabled:pointer-events-none'
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      {onPreview && (
+        <button className={cls} title="미리보기" onClick={onPreview}>
+          <Eye size={13} />
+        </button>
+      )}
+      <button className={cls} title="내려받기" disabled={disabled} onClick={onDownload}>
+        <Download size={13} />
+      </button>
+      <button
+        className={cn(cls, 'hover:text-danger')}
+        title="삭제"
+        disabled={disabled}
+        onClick={onDelete}
+      >
+        <Trash2 size={13} />
+      </button>
+    </span>
+  )
+}
+
+/**
+ * 그림 미리보기 (커스텀) — 버킷에서 한 번 받아 둔 로컬 사본(userData/r2-cache)을 보여 준다.
+ * ←/→로 폴더 안 그림 이동(양옆은 미리 받아 둠), Esc 닫기, 아래에 내려받기·삭제.
+ */
+function R2Preview({
+  bucket,
+  images,
+  index,
+  prefix,
+  busy,
+  onIndex,
+  onClose,
+  onDownload,
+  onDelete
+}: {
+  bucket: string
+  images: R2Object[]
+  index: number
+  prefix: string
+  busy: boolean
+  onIndex: (i: number) => void
+  onClose: () => void
+  onDownload: (key: string) => void
+  onDelete: (key: string) => void
+}): React.JSX.Element {
+  const img = images[index]
+  const hasPrev = index > 0
+  const hasNext = index < images.length - 1
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft' && hasPrev) onIndex(index - 1)
+      else if (e.key === 'ArrowRight' && hasNext) onIndex(index + 1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, hasPrev, hasNext, onIndex, onClose])
+
+  // 양옆 그림은 미리 받아 둔다 (결과는 캐시에만)
+  useEffect(() => {
+    for (const n of [images[index - 1], images[index + 1]]) {
+      if (n)
+        void window.nais
+          .invoke('r2:preview', { bucket, key: n.key, lastModified: n.lastModified })
+          .catch(() => undefined)
+    }
+  }, [bucket, images, index])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <button
+        className="absolute right-4 top-4 grid size-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+        onClick={onClose}
+      >
+        <X size={20} />
+      </button>
+      {hasPrev && (
+        <button
+          className="absolute left-4 grid size-11 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          onClick={(e) => {
+            e.stopPropagation()
+            onIndex(index - 1)
+          }}
+        >
+          <ChevronLeft size={24} />
+        </button>
+      )}
+      <PreviewImage key={img.key} bucket={bucket} object={img} />
+      {hasNext && (
+        <button
+          className="absolute right-4 grid size-11 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          onClick={(e) => {
+            e.stopPropagation()
+            onIndex(index + 1)
+          }}
+        >
+          <ChevronRight size={24} />
+        </button>
+      )}
+      <div
+        className="absolute bottom-4 left-1/2 flex max-w-[90vw] -translate-x-1/2 items-center gap-2 rounded-full bg-white/10 py-1 pl-4 pr-1.5 text-[12.5px] text-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="min-w-0 truncate">{img.key.slice(prefix.length)}</span>
+        <span className="shrink-0 font-mono text-[11px] text-white/70">
+          {formatBytes(img.size)} · {index + 1}/{images.length}
+        </span>
+        <button
+          className="flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 hover:bg-white/15 disabled:opacity-50"
+          disabled={busy}
+          onClick={() => onDownload(img.key)}
+        >
+          <Download size={13} /> 내려받기
+        </button>
+        <button
+          className="flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-red-300 hover:bg-white/15 disabled:opacity-50"
+          disabled={busy}
+          onClick={() => onDelete(img.key)}
+        >
+          <Trash2 size={13} /> 삭제
+        </button>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+/** 사본을 받아 그린다 — key가 바뀌면 부모가 새로 만든다(key prop) */
+function PreviewImage({ bucket, object }: { bucket: string; object: R2Object }): React.JSX.Element {
+  const [path, setPath] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let alive = true
+    window.nais
+      .invoke('r2:preview', { bucket, key: object.key, lastModified: object.lastModified })
+      .then((r) => {
+        if (alive) setPath(r.path)
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [bucket, object.key, object.lastModified])
+
+  if (error)
+    return (
+      <div
+        className="rounded-lg bg-white/10 px-4 py-3 text-[13px] text-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        불러오지 못했습니다: {error}
+      </div>
+    )
+  if (!path) return <Loader2 size={28} className="animate-spin text-white/80" />
+  return (
+    <img
+      src={imageUrl(path)}
+      className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
+      alt=""
+    />
   )
 }
 
