@@ -32,7 +32,7 @@ describe('Text: 블록은 어디에 적어도 전송 프롬프트 맨 끝으로'
     expect(appendPromptPiece('base,', ', scene')).toBe('base, scene')
   })
 
-  it('3분할: 가변 칸의 씬 프롬프트에 Text:가 있어도 디테일 뒤로 간다', () => {
+  it('3분할: 씬 프롬프트는 디테일 뒤에, 그 안의 Text:는 맨 끝으로', () => {
     const r = scenePositivePrompt(
       '',
       { prompt: SCENE },
@@ -43,12 +43,14 @@ describe('Text: 블록은 어디에 적어도 전송 프롬프트 맨 끝으로'
       }
     )
     expect(r.prompt).toBe(
-      `fixed, variable, ${SCENE.slice(0, SCENE.indexOf(', Text:'))}, quality detail\nText: PIZZA MOZZARELLA♪`
+      `fixed, variable, quality detail, ${SCENE.slice(0, SCENE.indexOf(', Text:'))}\nText: PIZZA MOZZARELLA♪`
     )
     expect(mergePromptParts(r.promptParts!)).toBe(r.prompt)
     // 3분할 표시(메타데이터)도 전송과 같은 자리: 가변엔 Text: 없음, 디테일 끝에
     expect(r.promptParts!.additional).not.toMatch(/text:/i)
-    expect(r.promptParts!.detail).toBe('quality detail\nText: PIZZA MOZZARELLA♪')
+    expect(r.promptParts!.detail).toBe(
+      `quality detail, ${SCENE.slice(0, SCENE.indexOf(', Text:'))}\nText: PIZZA MOZZARELLA♪`
+    )
     // 검열 태그가 가변에 붙어도 Text:는 디테일 끝
     const c = scenePositivePrompt(
       '',
@@ -59,8 +61,8 @@ describe('Text: 블록은 어디에 적어도 전송 프롬프트 맨 끝으로'
         detail: ''
       }
     )
-    expect(c.promptParts!.additional).toMatch(/completely white censored penis$/)
-    expect(c.promptParts!.detail).toBe('Text: PIZZA MOZZARELLA♪')
+    expect(c.promptParts!.additional).toBe('')
+    expect(c.promptParts!.detail).toMatch(/completely white censored penis\nText: PIZZA MOZZARELLA♪$/)
     expect(c.prompt).toMatch(/completely white censored penis\nText: PIZZA MOZZARELLA♪$/)
   })
 

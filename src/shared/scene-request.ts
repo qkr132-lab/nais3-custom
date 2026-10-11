@@ -67,10 +67,11 @@ export function scenePositivePrompt(
     { base: clean(parts.base), additional: clean(parts.additional), detail: clean(parts.detail) },
     scenePrompt
   )
+  // 검열 태그는 씬과 같은 칸(디테일 끝)에 — 씬 묶음이 통째로 맨 뒤에 가도록
   const result = textToLastPart({
     base: withoutCensorDuplicates(merged.base, kinds),
-    additional: tagged(merged.additional),
-    detail: withoutCensorDuplicates(merged.detail, kinds)
+    additional: withoutCensorDuplicates(merged.additional, kinds),
+    detail: tagged(merged.detail)
   })
   return withCharacters({ prompt: mergePromptParts(result), promptParts: result })
 }
@@ -192,11 +193,14 @@ export function sceneContextsFor(input: {
   return [...(role === 'target' || !anyRole ? prompts : []), roleTagsFor(role, scene), ...tags]
 }
 
-/** 씬 프롬프트는 3분할의 가변(additional) 영역에만 합친다. */
+/**
+ * 씬 프롬프트는 3분할의 맨 뒤(디테일 뒤)에 붙는다 (2026-10-11 유저 「씬은 이제 제일 뒤에 오게 하자」).
+ * 예전엔 가변 칸에 넣었는데, 그러면 디테일(화풍·품질)이 씬 내용 뒤에 와서 장면 묘사가 묻혔다.
+ */
 export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: string): PromptParts {
   return {
     ...parts,
-    additional: appendPrompt(parts.additional, scenePrompt)
+    detail: appendPrompt(parts.detail, scenePrompt)
   }
 }
 

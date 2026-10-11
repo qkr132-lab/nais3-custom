@@ -37,7 +37,7 @@ describe('대기 씬 요청 최신화', () => {
     expect(appendPrompt('base,', ', scene')).toBe('base, scene')
   })
 
-  it('씬 프롬프트는 3분할의 가변 영역에만 넣는다', () => {
+  it('씬 프롬프트는 3분할 맨 뒤(디테일 뒤)에 붙는다', () => {
     expect(
       mergeSceneIntoPromptParts(
         { base: 'fixed', additional: 'variable', detail: 'quality detail' },
@@ -45,8 +45,8 @@ describe('대기 씬 요청 최신화', () => {
       )
     ).toEqual({
       base: 'fixed',
-      additional: 'variable, scene tag',
-      detail: 'quality detail'
+      additional: 'variable',
+      detail: 'quality detail, scene tag'
     })
   })
 
