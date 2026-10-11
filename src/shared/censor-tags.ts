@@ -179,9 +179,7 @@ export function withoutCensorDuplicates(prompt: string, value: unknown): string 
 export function withCensorTags(prompt: string, value: unknown, weights: unknown = {}): string {
   const extra = censorPrompt(value, weights)
   if (!extra) return prompt
-  const clean = withoutCensorDuplicates(prompt, value)
-  return clean
-    ? `${clean}${commentStart(clean.slice(clean.lastIndexOf('\n') + 1)) !== -1 ? '\n' : ', '}${extra}`
-    : extra
+  // 검열 태그가 `Text:` 블록 뒤에 붙으면 글자로 그려진다 → 공용 조인이 블록을 맨 끝으로 돌린다
+  return appendPromptPiece(withoutCensorDuplicates(prompt, value), extra)
 }
-import { commentStart, removeComments } from './nai-presets'
+import { appendPromptPiece, commentStart, removeComments } from './nai-presets'

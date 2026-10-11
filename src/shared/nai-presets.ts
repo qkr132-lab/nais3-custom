@@ -11,10 +11,47 @@ export const QUALITY_TAGS_SUFFIX = ', very aesthetic, masterpiece, no text'
 /** 글자를 그리는 프롬프트(Text: 블록)엔 `no text`를 빼고 붙인다 — 글자 렌더링을 막기 때문 */
 export const QUALITY_TAGS_SUFFIX_TEXT = ', very aesthetic, masterpiece'
 
-/** `Text:` 블록이 시작하는 줄의 위치 (없으면 -1). NAI는 이 줄부터 끝까지를 그릴 글자로 본다 */
+/**
+ * `Text:` 블록이 시작하는 위치 (없으면 -1) — 줄 처음·콤마 뒤·공백 뒤 어디든.
+ * NAI는 여기부터 프롬프트 끝까지를 그릴 글자로 보므로, 이 뒤에 붙는 태그는 전부 글자가 된다.
+ */
 export function textBlockStart(prompt: string): number {
-  const m = /(^|\n)[ \t]*text:/i.exec(prompt)
-  return m ? m.index + m[1].length : -1
+  const m = /(?:^|[\s,])text:/i.exec(prompt)
+  return m ? m.index + m[0].length - 'text:'.length : -1
+}
+
+/** 프롬프트를 본문과 `Text:` 꼬리(접두사 뗀 글자 내용)로 가른다. 꼬리가 없으면 text는 '' */
+export function splitTextTail(prompt: string): { body: string; text: string } {
+  const at = textBlockStart(prompt)
+  if (at < 0) return { body: prompt, text: '' }
+  return {
+    body: prompt.slice(0, at).replace(/[\s,]+$/, ''),
+    text: prompt.slice(at + 'text:'.length).trim()
+  }
+}
+
+/**
+ * 프롬프트 뒤에 덩어리를 붙인다 — 경계의 중복 콤마 정리, 앞쪽 마지막 줄이 주석이면 줄바꿈으로.
+ * 어느 쪽에 `Text:` 블록이 있어도 **합친 결과의 맨 끝**으로 보낸다 (여럿이면 빈 줄로 이어 한 블록).
+ * 3분할 병합·씬 프롬프트·검열 태그·캐릭터 카드+복장+자리 태그가 전부 이걸로 붙으므로
+ * 어디에 적어도 글자 블록 뒤에 태그가 따라붙지 않는다.
+ */
+export function appendPromptPiece(base: string, add: string): string {
+  const b = splitTextTail(base)
+  const a = splitTextTail(add)
+  const body = joinBodies(b.body, a.body)
+  const texts = [b.text, a.text].filter(Boolean)
+  if (texts.length === 0) return body
+  return (body ? body + '\n' : '') + 'Text: ' + texts.join('\n\n')
+}
+
+function joinBodies(base: string, add: string): string {
+  const b = base.trim().replace(/,\s*$/, '')
+  const a = add.trim().replace(/^,\s*/, '')
+  if (!b) return a
+  if (!a) return b
+  if (commentStart(b.slice(b.lastIndexOf('\n') + 1)) !== -1) return `${b}\n${a}`
+  return `${b}, ${a}`
 }
 
 /** 큰따옴표(" " “ ”)로 감싼 문구들 — 줄을 넘지 않는 것만, 빈 것은 뺀다 */
@@ -45,7 +82,7 @@ export function splitQualityTags(prompt: string): { prompt: string; qualityToggl
     return { prompt: prompt.slice(0, -QUALITY_TAGS_SUFFIX.length), qualityToggle: true }
   const at = textBlockStart(prompt)
   if (at > 0) {
-    const head = prompt.slice(0, at).replace(/\s+$/, '')
+    const head = prompt.slice(0, at).replace(/[\s,]+$/, '')
     if (head.endsWith(QUALITY_TAGS_SUFFIX_TEXT))
       return {
         prompt: head.slice(0, -QUALITY_TAGS_SUFFIX_TEXT.length) + '\n' + prompt.slice(at),
@@ -114,7 +151,9 @@ export function mergeQualityTags(prompt: string, qualityToggle: boolean): string
   const at = textBlockStart(prompt)
   if (at < 0) return prompt + QUALITY_TAGS_SUFFIX
   // Text: 블록 뒤에 붙은 말은 글자로 그려진다 → 품질 태그는 블록 앞에, `no text`는 뺀다
-  return prompt.slice(0, at).replace(/\s+$/, '') + QUALITY_TAGS_SUFFIX_TEXT + '\n' + prompt.slice(at)
+  return (
+    prompt.slice(0, at).replace(/[\s,]+$/, '') + QUALITY_TAGS_SUFFIX_TEXT + '\n' + prompt.slice(at)
+  )
 }
 
 /** 캡처 확정: 프리셋 텍스트 + ", " + 유저 네거티브 순서로 병합 */

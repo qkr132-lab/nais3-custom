@@ -4,7 +4,7 @@ import {
   type SceneBackground
 } from './background-tags'
 import type { CharacterPromptInput, CharRole, GenerationRequest, PromptParts } from './types'
-import { commentStart, removeComments } from './nai-presets'
+import { appendPromptPiece, removeComments } from './nai-presets'
 import {
   withCensorTags,
   withoutCensorDuplicates,
@@ -75,15 +75,8 @@ export function scenePositivePrompt(
   return withCharacters({ prompt: mergePromptParts(result), promptParts: result })
 }
 
-/** 기본 프롬프트 뒤에 씬 프롬프트를 붙이되 경계의 중복 콤마만 정리한다. */
-export function appendPrompt(base: string, add: string): string {
-  const b = base.trim().replace(/,\s*$/, '')
-  const a = add.trim().replace(/^,\s*/, '')
-  if (!b) return a
-  if (!a) return b
-  if (commentStart(b.slice(b.lastIndexOf('\n') + 1)) !== -1) return `${b}\n${a}`
-  return `${b}, ${a}`
-}
+/** 기본 프롬프트 뒤에 씬 프롬프트를 붙이되 경계의 중복 콤마만 정리한다 (`Text:` 블록은 맨 끝으로). */
+export const appendPrompt = appendPromptPiece
 
 /** Always rebuild managed negatives from the raw fields so switching off restores them. */
 export function sceneNegativePrompt(
