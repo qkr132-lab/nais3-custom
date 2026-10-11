@@ -94,7 +94,7 @@ describe('scene token preview uses the actual generation request builder', () =>
     expect(preview).toHaveLength(1)
     expect(preview[0].entryId).toBeNull()
     expect(preview[0].request).toEqual(buildSceneRequest(scene))
-    expect(preview[0].request.prompt).toContain('sky, clouds, forest')
+    expect(preview[0].request.prompt).toContain('sky, clouds, detailed, forest')
     // 검열 태그는 기본 프롬프트가 아니라 캐릭터 1 맨 끝 — 토큰 미리보기도 같은 요청을 센다
     expect(preview[0].request.prompt).not.toContain('censored')
     expect(preview[0].request.characterPrompts[0].prompt).toBe(
@@ -175,8 +175,9 @@ describe('scene token preview uses the actual generation request builder', () =>
     useCharactersStore.setState({ items: [card(1, 'blue eyes', false)] })
     const request = buildSceneRequest(scene)
     expect(request.characterPrompts).toEqual([])
-    expect(request.prompt).toBe('sky, clouds, forest, completely white censored anal, detailed')
-    expect(request.promptParts?.additional).toBe('clouds, forest, completely white censored anal')
+    expect(request.prompt).toBe('sky, clouds, detailed, forest, completely white censored anal')
+    expect(request.promptParts?.additional).toBe('clouds')
+    expect(request.promptParts?.detail).toBe('detailed, forest, completely white censored anal')
   })
 
   it('rebuilds character 1 from the saved original when the queue refreshes the scene', async () => {

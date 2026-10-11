@@ -149,11 +149,14 @@ describe('씬 검열 태그', () => {
       { prompt: 'completely white censored penis', censorKinds: ['penis', 'vulva'] },
       parts
     )
+    // 씬·검열 태그는 디테일 뒤(맨 끝)에 (2026-10-11)
     expect(result.prompt).toBe(
-      'sky, flowers, completely white censored penis, completely white censored pussy, 2:: clouds::'
+      'sky, flowers, 2:: clouds::, completely white censored penis, completely white censored pussy'
     )
     expect(parts.base).toBe('white penis censor, sky')
-    expect(result.promptParts?.detail).toBe('2:: clouds::')
+    expect(result.promptParts?.detail).toBe(
+      '2:: clouds::, completely white censored penis, completely white censored pussy'
+    )
   })
   it('ignores censor weights saved by older versions', () => {
     const legacy = {
