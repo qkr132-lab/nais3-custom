@@ -1,3 +1,4 @@
+import { blockNextTo, blockToPosition, sameOrder } from '@shared/scene-order'
 import type { CensorChanges } from '@shared/censor-tags'
 import { requestForPromptMode } from '@shared/prompt-state'
 import { create } from 'zustand'
@@ -118,6 +119,10 @@ interface ScenesState {
   pasteSceneClipboard: (targetId: number | null) => Promise<void>
   /** 선택(또는 지정) 씬들을 목록 맨 앞/맨 뒤로 이동 (커스텀) */
   moveScenesToEdge: (ids: number[], edge: 'front' | 'back') => Promise<void>
+  /** 고른 씬들을 기준 씬 바로 앞/뒤로 (커스텀) — 서로의 순서 유지. 기준이 고른 것 안이면 무시 */
+  moveScenesNextTo: (ids: number[], targetId: number, side: 'before' | 'after') => Promise<void>
+  /** 고른 씬들의 첫 장이 N번째(1부터)가 되게 (커스텀). 옮긴 뒤 그 자리로 스크롤 */
+  moveScenesToPosition: (ids: number[], position: number) => Promise<void>
   bulkDelete: () => Promise<void>
   /** 선택 씬만 예약 증감 (배치 수 단위) — 커스텀 */
   bulkAdjustReserve: (delta: number) => Promise<void>
@@ -505,6 +510,17 @@ function registerImageDeleteUndo(get: () => ScenesState, ids: number[]): void {
 
 const libraryViews = new Map<string, { presetId: number; selectedId: number | null }>()
 let librarySeq = 0
+
+/** 옮긴 묶음의 첫 장(화면 순서 기준)이 보이게 스크롤 — 카드의 data-scene-id로 찾는다 */
+function scrollToScene(ids: number[], order: number[]): void {
+  const first = order.find((id) => ids.includes(id))
+  if (first == null) return
+  window.requestAnimationFrame(() => {
+    document
+      .querySelector(`[data-scene-id="${first}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+}
 
 export const useScenesStore = create<ScenesState>((set, get) => ({
   libraryKind: 'scene',
@@ -1020,6 +1036,21 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       .filter((id) => !set_.has(id))
     const next = edge === 'front' ? [...moving, ...rest] : [...rest, ...moving]
     await get().reorder(next)
+    scrollToScene(moving, next)
+  },
+  moveScenesNextTo: async (ids, targetId, side) => {
+    const all = get().scenes.map((s) => s.id)
+    const next = blockNextTo(all, ids, targetId, side)
+    if (sameOrder(all, next)) return
+    await get().reorder(next)
+    scrollToScene(ids, all)
+  },
+  moveScenesToPosition: async (ids, position) => {
+    const all = get().scenes.map((s) => s.id)
+    const next = blockToPosition(all, ids, position)
+    if (sameOrder(all, next)) return
+    await get().reorder(next)
+    scrollToScene(ids, all)
   },
   bulkDelete: async () => {
     const ids = [...get().selection]

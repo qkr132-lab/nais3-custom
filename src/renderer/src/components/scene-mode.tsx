@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   CalendarX,
   ChevronDown,
+  ChevronUp,
   ClipboardPaste,
   Cloud,
   CloudOff,
@@ -49,10 +50,12 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
-import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
+import { rectSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
+import { dropBlock, sameOrder } from '@shared/scene-order'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   memo,
@@ -607,18 +610,44 @@ function SceneGrid(): React.JSX.Element {
   // DragOverlay 사용: 드래그 중엔 가벼운 클론이 커서를 따라가고 원본은 숨겨 프레임 저하 방지
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [dragScene, setDragScene] = useState<Scene | null>(null)
+  // 끌고 있는 묶음 — 고른 카드를 끌면 고른 전부(화면 순서), 아니면 그 한 장 (커스텀)
+  const [dragIds, setDragIds] = useState<number[]>([])
+  const sceneIdOf = (id: string | number): number => Number(String(id).replace('scene-', ''))
   const onDragStart = (e: DragStartEvent): void => {
-    setDragScene(scenes.find((s) => `scene-${s.id}` === e.active.id) ?? null)
+    const scene = scenes.find((s) => `scene-${s.id}` === e.active.id) ?? null
+    setDragScene(scene)
+    const sel = useScenesStore.getState().selection
+    setDragIds(
+      scene
+        ? sel.has(scene.id) && sel.size > 1
+          ? scenes.filter((s) => sel.has(s.id)).map((s) => s.id)
+          : [scene.id]
+        : []
+    )
+  }
+  const onDragCancel = (): void => {
+    setDragScene(null)
+    setDragIds([])
+  }
+  // 묶음을 끌 땐 같은 묶음의 (흐려진) 다른 카드는 놓을 자리 후보에서 뺀다 —
+  // 안 그러면 그 위에 놓았을 때 dropBlock이 그대로 돌려줘 드래그가 조용히 무시된다
+  const collision: CollisionDetection = (args) => {
+    if (dragIds.length <= 1) return closestCenter(args)
+    const skip = new Set(dragIds.map((id) => `scene-${id}`))
+    skip.delete(String(args.active.id))
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((c) => !skip.has(String(c.id)))
+    })
   }
   const onDragEnd = (e: DragEndEvent): void => {
-    setDragScene(null)
+    const moving = dragIds
+    onDragCancel()
     const { active, over } = e
-    if (!over || active.id === over.id) return
-    const ids = scenes.map((s) => `scene-${s.id}`)
-    const from = ids.indexOf(String(active.id))
-    const to = ids.indexOf(String(over.id))
-    if (from < 0 || to < 0) return
-    void reorder(arrayMove(scenes, from, to).map((s) => s.id))
+    if (!over || active.id === over.id || moving.length === 0) return
+    const all = scenes.map((s) => s.id)
+    const next = dropBlock(all, moving, sceneIdOf(active.id), sceneIdOf(over.id))
+    if (!sameOrder(all, next)) void reorder(next)
   }
 
   // 스트리밍: 현재 생성 중인 씬과 미리보기 프레임 (해당 씬 카드에만 전달)
@@ -1067,10 +1096,12 @@ function SceneGrid(): React.JSX.Element {
       >
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={collision}
           onDragStart={onDragStart}
-          onDragCancel={() => setDragScene(null)}
+          onDragCancel={onDragCancel}
           onDragEnd={onDragEnd}
+          // 긴 목록: 가장자리 자동 스크롤을 조금 빠르게 (기본 10)
+          autoScroll={{ acceleration: 16 }}
         >
           <SortableContext
             items={scenes.map((s) => `scene-${s.id}`)}
@@ -1092,6 +1123,7 @@ function SceneGrid(): React.JSX.Element {
                   onExportFavorites={onExportSceneFavorites}
                   onClearImages={onClearSceneImages}
                   onBeginShiftSelection={beginShiftSelection}
+                  dragged={dragIds.length > 1 && dragIds.includes(scene.id)}
                 />
               ))}
               <button
@@ -1128,6 +1160,11 @@ function SceneGrid(): React.JSX.Element {
                     {dragScene.name}
                   </div>
                 </div>
+                {dragIds.length > 1 && (
+                  <span className="absolute right-1.5 top-1.5 rounded-full bg-accent px-2 py-0.5 text-[12px] font-bold text-white shadow">
+                    {dragIds.length}개 함께 이동
+                  </span>
+                )}
               </div>
             )}
           </DragOverlay>
@@ -1250,8 +1287,27 @@ function BulkBar({
   const bulkExportZip = useScenesStore((s) => s.bulkExportZip)
   const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
   const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
+  const moveScenesToEdge = useScenesStore((s) => s.moveScenesToEdge)
+  const moveScenesToPosition = useScenesStore((s) => s.moveScenesToPosition)
+  const total = useScenesStore((s) => s.scenes.length)
 
   const n = selection.size
+
+  // 고른 씬들을 N번째로 (커스텀) — 첫 장이 그 번호가 되게, 옮긴 뒤 그 자리로 스크롤
+  const moveToPosition = async (): Promise<void> => {
+    const max = Math.max(1, total - n + 1)
+    const raw = await askText(
+      `이동할 위치 (1~${max}) — 고른 ${n}개의 첫 장이 이 번째가 됩니다`,
+      '1'
+    )
+    if (raw == null) return
+    const pos = Number(raw.trim())
+    if (!Number.isInteger(pos) || pos < 1 || pos > max) {
+      toast(`1~${max} 사이의 정수를 입력하세요`, 'info')
+      return
+    }
+    await moveScenesToPosition([...selection], pos)
+  }
 
   // 누드면 옷 벗기기 (커스텀) — 선택한 씬만 켜고 끈다. 전체 설정 따름 = 씬에서 정한 값을 지움
   const bulkNudeStrip = (enabled: boolean | undefined): void => {
@@ -1289,6 +1345,28 @@ function BulkBar({
       </Button>
       <Button size="sm" variant="ghost" onClick={clearSelection} disabled={disabled}>
         해제
+      </Button>
+      <div className="mx-1 h-4 w-px bg-line" />
+
+      {/* 고른 씬 묶음 이동 (커스텀) — 맨 앞·맨 뒤·N번째로. 카드 우클릭엔 「이 씬 앞/뒤에」 */}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void moveScenesToEdge([...selection], 'front')}
+      >
+        <ArrowUpToLine size={13} /> 맨 앞
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => void moveScenesToEdge([...selection], 'back')}
+      >
+        <ArrowDownToLine size={13} /> 맨 뒤
+      </Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void moveToPosition()}>
+        <ArrowRight size={13} /> N번째로
       </Button>
       <div className="mx-1 h-4 w-px bg-line" />
 
@@ -1647,11 +1725,14 @@ const SceneCard = memo(function SceneCard({
   onClearImages,
   onBeginShiftSelection,
   onOpenCensors,
-  onUseBackground
+  onUseBackground,
+  dragged = false
 }: {
   scene: Scene
   live: string | null
   generating: boolean
+  /** 다른 카드를 끄는 중, 이 카드도 같은 묶음으로 따라감 (흐리게) */
+  dragged?: boolean
   onOpenAddition: (sceneIds: number[]) => void
   onExportFavorites: (id: number) => void
   onClearImages: (id: number, name: string) => void
@@ -1674,8 +1755,8 @@ const SceneCard = memo(function SceneCard({
   const sceneClipboard = useScenesStore((s) => s.sceneClipboard)
   const selectionActive = editMode || selection.size > 0
   // Shift/Ctrl 제스처는 아래 pointerdown에서 따로 가로채고, 일반 드래그는 편집 중에도 재정렬에 쓴다.
-  // 여러 씬이 선택된 상태만 잠가 "선택 전체 이동"으로 오해하지 않게 한다.
-  const sortable = useSortable({ id: `scene-${scene.id}`, disabled: selection.size > 1 })
+  // 고른 카드를 끌면 고른 전부가 함께 간다 (2026-10-12 유저 「멀티 선택 드래그」)
+  const sortable = useSortable({ id: `scene-${scene.id}` })
 
   // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
@@ -1826,14 +1907,15 @@ const SceneCard = memo(function SceneCard({
           {...sortable.listeners}
           data-scene-id={scene.id}
           title={
-            selection.size > 1
-              ? '다중 선택을 끝낸 뒤 드래그하면 순서를 바꿀 수 있습니다'
+            checked && selection.size > 1
+              ? `드래그하면 선택한 ${selection.size}개가 함께 이동`
               : '클릭해서 열기 · 드래그해서 순서 변경'
           }
           className={cn(
             'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
             selectionActive && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
-            sortable.isDragging && 'shadow-xl'
+            sortable.isDragging && 'shadow-xl',
+            dragged && 'opacity-30'
           )}
           style={dndStyle(sortable)}
           onPointerDown={(e) => {
@@ -1851,6 +1933,8 @@ const SceneCard = memo(function SceneCard({
           }}
           onContextMenu={(e) => {
             if (checked) return // 선택된 카드 우클릭은 현재 다중 선택을 그대로 유지
+            // 편집 모드에서 고른 게 있으면 다른 카드 우클릭도 선택을 지우지 않는다 — 메뉴 「이 씬 앞/뒤에」용
+            if (editMode && selection.size > 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey) return
             if (e.shiftKey) {
               selectRangeTo(scene.id)
             } else {
@@ -2139,6 +2223,27 @@ const SceneCard = memo(function SceneCard({
         <ContextMenuItem onSelect={() => moveToEdge('back')}>
           <ArrowDownToLine size={13} /> 맨 뒤로{multi ? ` (${multiN}개)` : ''}
         </ContextMenuItem>
+        {/* 고른 씬들을 이 카드 자리로 — 잘라내기 없이 바로 (커스텀) */}
+        {selection.size > 0 && !checked && (
+          <>
+            <ContextMenuItem
+              onSelect={() =>
+                void useScenesStore.getState().moveScenesNextTo([...selection], scene.id, 'before')
+              }
+            >
+              <ChevronUp size={13} className="text-sky-400" /> 선택한 {selection.size}개를 이 씬
+              앞에
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() =>
+                void useScenesStore.getState().moveScenesNextTo([...selection], scene.id, 'after')
+              }
+            >
+              <ChevronDown size={13} className="text-sky-400" /> 선택한 {selection.size}개를 이 씬
+              뒤에
+            </ContextMenuItem>
+          </>
+        )}
         <ContextMenuSeparator />
         {otherPresets.length > 0 && (
           <>
