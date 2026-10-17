@@ -42,6 +42,8 @@ export interface FileSlotExtras {
   slots?: Pos[]
   /** 자리 번호 → uid */
   slotChars?: Record<string, string>
+  /** 자리 번호 → 카드 이름 — 카드를 싣지 않는 파일용. 가져오는 쪽의 같은 이름 카드를 그 자리에 앉힌다 */
+  slotCharNames?: Record<string, string>
   slotRoles?: Record<string, CharRole>
   slotTags?: Record<string, string>
   /** uid → 이 씬에서만 얹는 태그 */
@@ -100,26 +102,39 @@ function nonEmpty<T extends object>(o: T): T | undefined {
 export function encodeSlotExtras(
   setup: Omit<SceneSetup, 'characterIds'>,
   uidOf: (id: number) => string | undefined,
-  outfitUidOf: (id: number) => string | undefined = () => undefined
+  outfitUidOf: (id: number) => string | undefined = () => undefined,
+  /** 카드를 싣지 않을 때 자리 배정을 이름으로 남기기 위한 조회 */
+  nameOf: (id: number) => string | undefined = () => undefined
 ): FileSlotExtras {
   const count = setup.slots?.length ?? 0
   const out: FileSlotExtras = {}
   if (count) out.slots = setup.slots!.map((p) => ({ x: p.x, y: p.y }))
 
-  const seats: Record<string, string> = {}
+  // 자리 번호 → 카드 id (새 방식 slotChars 우선, 구형 slotOf는 빈 자리만)
+  const seatIds: Record<number, number> = {}
   for (const [at, id] of Object.entries(setup.slotChars ?? {})) {
     const i = Number(at)
-    const uid = uidOf(id)
-    if (i >= 0 && i < count && uid) seats[i] = uid
+    if (i >= 0 && i < count) seatIds[i] = id
   }
   for (const [id, at] of Object.entries(setup.slotOf ?? {})) {
-    const uid = uidOf(Number(id))
-    if (!uid || at < 0 || at >= count || seats[at] !== undefined) continue
-    if (Object.values(seats).includes(uid)) continue
-    seats[at] = uid
+    if (at < 0 || at >= count || seatIds[at] !== undefined) continue
+    if (Object.values(seatIds).includes(Number(id))) continue
+    seatIds[at] = Number(id)
+  }
+  const seats: Record<string, string> = {}
+  const names: Record<string, string> = {}
+  for (const [at, id] of Object.entries(seatIds)) {
+    const uid = uidOf(id)
+    if (uid) seats[at] = uid
+    else {
+      const name = nameOf(id)?.trim()
+      if (name) names[at] = name
+    }
   }
   const slotChars = nonEmpty(seats)
   if (slotChars) out.slotChars = slotChars
+  const slotCharNames = nonEmpty(names)
+  if (slotCharNames) out.slotCharNames = slotCharNames
 
   const roles: Record<string, CharRole> = {}
   for (const [at, role] of Object.entries(setup.slotRoles ?? {})) {
@@ -175,7 +190,9 @@ export function encodeSlotExtras(
 export function decodeSlotExtras(
   file: FileSlotExtras,
   idOf: (uid: string) => number | undefined,
-  outfitIdOf: (uid: string) => number | undefined = () => undefined
+  outfitIdOf: (uid: string) => number | undefined = () => undefined,
+  /** 이름으로 적힌 자리 배정을 가져오는 쪽 카드로 — 없으면 못 찾은 연결로 센다 */
+  idOfName: (name: string) => number | undefined = () => undefined
 ): { extras: Omit<SceneSetup, 'characterIds'>; dropped: number } {
   let dropped = 0
   const extras: Omit<SceneSetup, 'characterIds'> = {}
@@ -188,6 +205,13 @@ export function decodeSlotExtras(
     const i = Number(at)
     if (!(i >= 0 && i < count)) continue
     const id = idOf(uid)
+    if (id === undefined) dropped++
+    else slotChars[i] = id
+  }
+  for (const [at, name] of Object.entries(file.slotCharNames ?? {})) {
+    const i = Number(at)
+    if (!(i >= 0 && i < count) || slotChars[i] !== undefined || typeof name !== 'string') continue
+    const id = idOfName(name)
     if (id === undefined) dropped++
     else slotChars[i] = id
   }
@@ -266,7 +290,8 @@ export function setupOutfitIds(setup: SceneSetup): number[] {
 export function encodeSetup(
   setup: SceneSetup,
   uidOf: (id: number) => string | undefined,
-  outfitUidOf: (id: number) => string | undefined = () => undefined
+  outfitUidOf: (id: number) => string | undefined = () => undefined,
+  nameOf: (id: number) => string | undefined = () => undefined
 ): FileSetup {
   const characters = setupCharacterIds(setup)
     .map(uidOf)
@@ -288,14 +313,15 @@ export function encodeSetup(
   }
   if (Object.keys(roles).length) out.roles = roles
 
-  return { ...out, ...encodeSlotExtras(setup, uidOf, outfitUidOf) }
+  return { ...out, ...encodeSlotExtras(setup, uidOf, outfitUidOf, nameOf) }
 }
 
 /** 파일의 씬 구성을 id 모양으로. 바이브·캐릭레퍼 연결은 파일에 없으므로 빈 채로 둔다 */
 export function decodeSetup(
   file: FileSetup,
   idOf: (uid: string) => number | undefined,
-  outfitIdOf: (uid: string) => number | undefined = () => undefined
+  outfitIdOf: (uid: string) => number | undefined = () => undefined,
+  idOfName: (name: string) => number | undefined = () => undefined
 ): { setup: SceneSetup; dropped: number } {
   let dropped = 0
   const characterIds: number[] = []
@@ -321,7 +347,7 @@ export function decodeSetup(
   }
   if (Object.keys(roles).length) setup.roles = roles
 
-  const slot = decodeSlotExtras(file, idOf, outfitIdOf)
+  const slot = decodeSlotExtras(file, idOf, outfitIdOf, idOfName)
   return { setup: { ...setup, ...slot.extras }, dropped: dropped + slot.dropped }
 }
 

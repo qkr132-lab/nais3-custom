@@ -81,7 +81,7 @@ afterEach(() => {
 })
 
 describe('씬 JSON 내보내기', () => {
-  it('지운 씬은 빼고, 자리(위치·역할·자리 태그)와 하는쪽/당하는쪽 위치·태그만 싣는다', async () => {
+  it('지운 씬은 빼고, 자리(위치·역할·자리 태그·앉은 카드 이름)와 하는쪽/당하는쪽 위치·태그만 싣는다', async () => {
     const presetId = createPreset('p')
     const alive = scene(presetId, 'alive')
     scene(presetId, 'gone', true)
@@ -126,10 +126,12 @@ describe('씬 JSON 내보내기', () => {
       characters: [],
       useCoords: true,
       slots: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }],
+      // 앉은 카드는 이름으로만 — 가져오는 쪽의 같은 이름 카드가 앉는다 (카드 내용은 안 실림)
+      slotCharNames: { 0: 'added' },
       slotRoles: { 0: 'target', 1: 'source' },
       slotTags: { 0: 'upper body', 1: 'standing' }
     })
-    expect(JSON.stringify(file)).not.toMatch(/added|tagged|blush|smile|tears/)
+    expect(JSON.stringify(file)).not.toMatch(/added tags|tagged|blush|smile|tears/)
   })
 
   it('자리도 위치 적용도 없는 씬은 구성을 싣지 않는다', async () => {

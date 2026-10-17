@@ -913,10 +913,16 @@ export async function exportScenesJson(presetId: number): Promise<{
   const transparent = extrasFile.transparentBackgrounds?.[String(presetId)] ?? {}
   const nudeStrips = extrasFile.nudeStrips?.[String(presetId)] ?? {}
   const noCard = (): undefined => undefined
+  // 자리에 앉힌 카드는 이름으로만 적는다 — 가져오는 쪽 캐릭터 탭의 같은 이름 카드가 앉는다
+  const nameStmt = getDb().prepare(
+    'SELECT name FROM character_prompts WHERE id = ? AND deleted_at IS NULL'
+  )
+  const nameOf = (id: number): string | undefined =>
+    (nameStmt.get(id) as { name: string } | undefined)?.name || undefined
   const layoutOf = (sceneId: number): FileSetup | undefined => {
     const s = additions[String(sceneId)]
     if (!setupHasContent(s)) return undefined
-    const file = encodeSetup(s!, noCard)
+    const file = encodeSetup(s!, noCard, undefined, nameOf)
     return file.slots?.length || file.useCoords !== undefined ? file : undefined
   }
 
@@ -1195,6 +1201,18 @@ function importSceneBundle(
     // 복장 먼저 — 카드와 씬 구성이 가리킨다
     const outfitOfUid = importOutfits(bundle.outfits)
     const idOfUid = new Map<string, number>()
+    // 이름으로 적힌 자리 배정 → 같은 이름의 카드 (켜진 것, 앞쪽 순)
+    const byNameStmt = db.prepare(
+      'SELECT id FROM character_prompts WHERE deleted_at IS NULL AND name = ? ORDER BY enabled DESC, sort_order, id LIMIT 1'
+    )
+    const nameCache = new Map<string, number | undefined>()
+    const idOfName = (name: string): number | undefined => {
+      const key = name.trim()
+      if (!key) return undefined
+      if (!nameCache.has(key))
+        nameCache.set(key, (byNameStmt.get(key) as { id: number } | undefined)?.id)
+      return nameCache.get(key)
+    }
     for (const c of cards) {
       const name = c.name?.trim() || '캐릭터'
       const negative = typeof c.negativePrompt === 'string' ? c.negativePrompt : ''
@@ -1269,7 +1287,8 @@ function importSceneBundle(
         ? decodeSetup(
             s.setup,
             (uid) => idOfUid.get(uid),
-            (uid) => outfitOfUid.get(uid)
+            (uid) => outfitOfUid.get(uid),
+            idOfName
           )
         : { setup: { characterIds: [], charRefIds: [], vibeIds: [] } as SceneSetup, dropped: 0 }
       dropped += r.dropped

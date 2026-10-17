@@ -339,6 +339,24 @@ export function seatSlots(
     seatCount.set(pick.id, (seatCount.get(pick.id) ?? 0) + 1)
   }
 
+  // 5) 배정 기록이 하나도 없는 자리 묶음(JSON으로 가져온 씬)이면, 빈 자리에 아직 안 앉은 캐릭터를
+  //    순서대로 앉힌다 (2026-10-17) — 자리는 쓰라고 만든 것. 누군가를 직접 앉힌 묶음은 일부러 비운
+  //    자리일 수 있으니 그대로 둔다. 역할이 걸린 자리엔 역할이 다른 캐릭터는 앉히지 않는다.
+  const assigned =
+    Object.keys(layout.slotChars ?? {}).length > 0 ||
+    Object.keys(layout.slotOf ?? {}).length > 0 ||
+    chars.some((c) => c.slotNo != null)
+  if (!assigned) {
+    for (let i = 0; i < count; i++) {
+      if (bySlot.has(i)) continue
+      const seatedIds = new Set(bySlot.values())
+      const role = layout.slotRoles?.[i]
+      const c = chars.find((x) => !seatedIds.has(x.id) && (!role || !x.role || x.role === role))
+      if (!c) continue
+      bySlot.set(i, c.id)
+    }
+  }
+
   const bySlots = new Map<number, number[]>()
   for (const index of [...bySlot.keys()].sort((a, b) => a - b)) {
     const charId = bySlot.get(index) as number
