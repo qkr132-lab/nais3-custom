@@ -53,6 +53,7 @@ interface ScenesState {
   lastSelectedId: number | null // Shift 범위 선택 기준점 (커스텀)
   columns: number // 2~5
   cardOrientation: 'portrait' | 'landscape' // 카드 비율 고정 (해상도 무관)
+  gridView: 'card' | 'row' // 씬 화면 보기: 카드 / 이름 목록 (커스텀)
 
   // 상세 이미지 (페이지네이션)
   images: SceneImage[]
@@ -79,6 +80,7 @@ interface ScenesState {
   setEditMode: (v: boolean) => void
   setColumns: (n: number) => void
   setCardOrientation: (o: 'portrait' | 'landscape') => void
+  setGridView: (v: 'card' | 'row') => void
   toggleSelected: (id: number) => void
   /** Shift+클릭 범위 선택 — lastSelectedId부터 id까지 (커스텀) */
   selectRangeTo: (id: number) => void
@@ -576,6 +578,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   columns: Number(localStorage.getItem('scene_columns')) || 3,
   cardOrientation:
     (localStorage.getItem('scene_orientation') as 'portrait' | 'landscape') || 'portrait',
+  gridView: localStorage.getItem('scene_grid_view') === 'row' ? 'row' : 'card',
   images: [],
   imagesTotal: 0,
   imagesLoading: false,
@@ -674,6 +677,10 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   setCardOrientation: (cardOrientation) => {
     set({ cardOrientation })
     localStorage.setItem('scene_orientation', cardOrientation)
+  },
+  setGridView: (gridView) => {
+    set({ gridView })
+    localStorage.setItem('scene_grid_view', gridView)
   },
   toggleSelected: (id) => {
     const next = new Set(get().selection)

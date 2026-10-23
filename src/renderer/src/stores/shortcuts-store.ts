@@ -21,6 +21,7 @@ export type ShortcutAction =
   | 'openCharRef'
   | 'openParams'
   | 'resetFragmentCounters'
+  | 'findScene'
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   generate: '생성 / 씬 생성',
@@ -35,7 +36,8 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   openVibe: '바이브 열기',
   openCharRef: '레퍼런스 열기',
   openParams: '생성 파라미터 열기',
-  resetFragmentCounters: '조각 순차 카운터 리셋'
+  resetFragmentCounters: '조각 순차 카운터 리셋',
+  findScene: '씬 찾기'
 }
 
 const DEFAULTS: Record<ShortcutAction, string> = {
@@ -51,7 +53,9 @@ const DEFAULTS: Record<ShortcutAction, string> = {
   openVibe: 'Mod+I',
   openCharRef: 'Mod+Shift+I',
   openParams: 'Mod+P',
-  resetFragmentCounters: 'Mod+Shift+R'
+  resetFragmentCounters: 'Mod+Shift+R',
+  // Mod+F는 「조각 열기」라 Shift를 더한다
+  findScene: 'Mod+Shift+F'
 }
 
 const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
@@ -140,6 +144,11 @@ function runAction(action: ShortcutAction): void {
         .getState()
         .resetSequential()
         .then(() => toast('조각 순차 카운터를 리셋했습니다', 'success'))
+      break
+    case 'findScene':
+      // 씬·배경 화면의 씬 격자가 듣는다 (씬 상세가 열려 있으면 듣는 곳이 없어 아무 일도 없다)
+      if (layout.centerMode === 'scene' || layout.centerMode === 'background')
+        window.dispatchEvent(new CustomEvent('shortcut:findScene'))
       break
   }
 }

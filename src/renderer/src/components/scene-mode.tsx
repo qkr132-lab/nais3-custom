@@ -23,6 +23,8 @@ import {
   ImageOff,
   Images as ImageIcon,
   Layers,
+  LayoutGrid,
+  List,
   Loader2,
   Minus,
   MoreVertical,
@@ -33,6 +35,7 @@ import {
   RefreshCw,
   RotateCcw,
   Scissors,
+  Search,
   SlidersHorizontal,
   ShieldCheck,
   Shirt,
@@ -54,7 +57,12 @@ import {
   type DragEndEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
-import { rectSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
+import {
+  rectSortingStrategy,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 import { dropBlock, sameOrder } from '@shared/scene-order'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -62,6 +70,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties
@@ -69,8 +78,28 @@ import {
 import type { CharRole, CharRoles, R2SyncConfig, Scene, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { RESOLUTIONS, imageUrl } from '../lib/constants'
+import {
+  anchoredScrollTop,
+  findSceneMatches,
+  gridKeyAllowed,
+  isRestoreEcho,
+  parseSavedScrolls,
+  resolveFindCurrent,
+  sceneLabel,
+  sceneScrollKey,
+  scrollTopForThumb,
+  serializeSavedScrolls,
+  stepMatch,
+  thumbMetrics,
+  topSceneIndex,
+  topSceneIndexBy,
+  type KeyZone,
+  type ScrollAnchor,
+  type ThumbMetrics
+} from '../lib/scene-nav'
 import { useGenerationStore } from '../stores/generation-store'
 import { useScenesStore } from '../stores/scenes-store'
+import { formatCombo, useShortcutsStore } from '../stores/shortcuts-store'
 import { useSceneExtrasStore, hasAddition } from '../stores/scene-extras-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useOutfitsStore } from '../stores/outfits-store'
@@ -432,11 +461,13 @@ function IconBtn({
   icon,
   tip,
   active,
+  disabled,
   onClick
 }: {
   icon: React.ReactNode
   tip: string
   active?: boolean
+  disabled?: boolean
   onClick: () => void
 }): React.JSX.Element {
   return (
@@ -444,9 +475,12 @@ function IconBtn({
       <TooltipTrigger asChild>
         <button
           onClick={onClick}
+          aria-label={tip}
+          disabled={disabled}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md transition-colors',
-            active ? 'bg-accent text-white' : 'text-muted hover:bg-surface-2 hover:text-fg'
+            'grid size-8 shrink-0 place-items-center rounded-md transition-colors disabled:opacity-30',
+            active ? 'bg-accent text-white' : 'text-muted hover:bg-surface-2 hover:text-fg',
+            disabled && 'pointer-events-none'
           )}
         >
           {icon}
@@ -457,8 +491,125 @@ function IconBtn({
   )
 }
 
-// 씬 그리드 스크롤 위치 — 다른 페이지/씬 상세를 다녀와도 위치 복원 (언마운트돼도 유지)
-let savedGridScroll = 0
+// 씬 격자 스크롤 위치 — 「라이브러리 종류:프리셋 id」별로 기억한다. 다른 페이지·씬 상세를 다녀와도,
+// 프리셋을 바꿨다 돌아와도, 앱을 다시 켜도 그 프리셋에서 보던 자리로 돌아온다
+// (언마운트돼도 남게 모듈 변수에 두고 localStorage에 디바운스로 저장).
+// px 만 적으면 보기(카드 ↔ 이름 목록)·열 수·카드 비율·창 폭이 바뀐 뒤 다른 씬을 가리키므로
+// 「화면 맨 위 씬 id + 그 카드 위쪽과의 오프셋」을 적고 scrollTop 은 보조로만 둔다
+const SCROLL_STORAGE_KEY = 'scene_grid_scroll'
+const SCROLL_SAVE_DELAY = 400
+const savedScrolls: Record<string, ScrollAnchor> = readSavedScrolls()
+let scrollSaveTimer: number | undefined
+
+function readSavedScrolls(): Record<string, ScrollAnchor> {
+  try {
+    return parseSavedScrolls(localStorage.getItem(SCROLL_STORAGE_KEY))
+  } catch {
+    return {}
+  }
+}
+
+function flushSavedScrolls(): void {
+  window.clearTimeout(scrollSaveTimer)
+  scrollSaveTimer = undefined
+  try {
+    localStorage.setItem(SCROLL_STORAGE_KEY, serializeSavedScrolls(savedScrolls))
+  } catch {
+    /* 저장소를 못 쓰면 이번 실행 동안만 기억한다 */
+  }
+}
+
+// top 이 0 이하(맨 위)면 기본값이라 기억값을 지운다
+function rememberScroll(key: string, anchor: ScrollAnchor): void {
+  if (anchor.top > 0) savedScrolls[key] = anchor
+  else delete savedScrolls[key]
+  window.clearTimeout(scrollSaveTimer)
+  scrollSaveTimer = window.setTimeout(flushSavedScrolls, SCROLL_SAVE_DELAY)
+}
+
+// 격자 바깥 여백(p-3). 화면 맨 위 씬을 가를 때, 이 간격 이하로만 걸친 카드는 지나간 것으로 본다
+const GRID_PAD = 12
+
+/** 격자 안 카드들의 씬 id와 아래 끝(스크롤 내용 좌표) — 화면 순서 */
+function measureCards(scroller: HTMLElement): { ids: number[]; bottoms: number[] } {
+  const base = scroller.getBoundingClientRect().top - scroller.scrollTop
+  const ids: number[] = []
+  const bottoms: number[] = []
+  scroller.querySelectorAll<HTMLElement>('[data-scene-id]').forEach((el) => {
+    ids.push(Number(el.dataset.sceneId))
+    bottoms.push(el.getBoundingClientRect().bottom - base)
+  })
+  return { ids, bottoms }
+}
+
+/**
+ * 지금 화면 맨 위에 오는 씬과 그 카드 위쪽의 오프셋, 보조 scrollTop.
+ * scroll 이벤트마다 부르므로 카드를 전부 재지 않고 이분 탐색으로 몇 장만 잰다.
+ */
+function captureScroll(scroller: HTMLElement): ScrollAnchor {
+  const top = scroller.scrollTop
+  const cards = scroller.querySelectorAll<HTMLElement>('[data-scene-id]')
+  if (cards.length === 0) return { id: null, offset: 0, top }
+  const scrollerTop = scroller.getBoundingClientRect().top
+  const base = scrollerTop - top
+  const index = topSceneIndexBy(
+    cards.length,
+    (i) => cards[i].getBoundingClientRect().bottom - base,
+    top + GRID_PAD
+  )
+  const card = cards[index]
+  return {
+    id: Number(card.dataset.sceneId),
+    offset: card.getBoundingClientRect().top - scrollerTop,
+    top
+  }
+}
+
+/** 지금 화면 맨 위에 오는 씬의 id (없으면 null) */
+function topSceneId(scroller: HTMLElement): number | null {
+  return captureScroll(scroller).id
+}
+
+/**
+ * 기억해 둔 자리로 되돌린다 — 그 씬 카드가 있으면 카드 위쪽을 저장한 오프셋에 맞추고(보기·열 수·창 폭이
+ * 달라도 같은 씬), 없으면(지워졌거나 옛 형식) 보조 scrollTop 으로. 기억값이 없으면 맨 위.
+ */
+function restoreScroll(scroller: HTMLElement, saved: ScrollAnchor | undefined): void {
+  const card =
+    saved?.id != null ? scroller.querySelector<HTMLElement>(`[data-scene-id="${saved.id}"]`) : null
+  if (saved && card) {
+    const rect = card.getBoundingClientRect()
+    scroller.scrollTop = anchoredScrollTop(
+      scroller.scrollTop,
+      rect.top,
+      scroller.getBoundingClientRect().top,
+      rect.height,
+      saved.offset,
+      GRID_PAD
+    )
+  } else scroller.scrollTop = saved?.top ?? 0
+}
+
+/** 글자를 치는 칸에 있는가 */
+function isTextEntry(target: EventTarget | null): boolean {
+  const el = target instanceof HTMLElement ? target : null
+  if (!el) return false
+  return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)
+}
+
+/** 대화상자·메뉴·목록 상자가 열려 있는가 — 격자 키 이동과 찾기 Esc 를 접어 둘 때 */
+function overlayOpen(): boolean {
+  return (
+    document.querySelector(
+      '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
+    ) != null
+  )
+}
+
+/** 글자를 치는 칸에 있거나, 대화상자·메뉴·목록 상자가 열려 있는가 — 격자 키 이동을 접어 둘 때 */
+function keysBelongElsewhere(target: EventTarget | null): boolean {
+  return isTextEntry(target) || overlayOpen()
+}
 
 /** 여러 씬에 연속 번호를 붙일 시작값을 묻는다. 선택/전체 번호 매기기에서 공용. */
 async function askStartNumber(count: number): Promise<number | null> {
@@ -490,6 +641,10 @@ function SceneGrid(): React.JSX.Element {
   const setColumns = useScenesStore((s) => s.setColumns)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
   const setCardOrientation = useScenesStore((s) => s.setCardOrientation)
+  const gridView = useScenesStore((s) => s.gridView)
+  const setGridView = useScenesStore((s) => s.setGridView)
+  const libraryKind = useScenesStore((s) => s.libraryKind)
+  const findBinding = useShortcutsStore((s) => s.bindings.findScene)
   const adjustReserveAll = useScenesStore((s) => s.adjustReserveAll)
   const clearReserveAll = useScenesStore((s) => s.clearReserveAll)
   const gridClipboard = useScenesStore((s) => s.sceneClipboard)
@@ -513,10 +668,11 @@ function SceneGrid(): React.JSX.Element {
   const [additionSceneIds, setAdditionSceneIds] = useState<number[] | null>(null)
   const [hideBulkBarForPainting, setHideBulkBarForPainting] = useState(false)
 
-  // 스크롤 위치 복원 — 마운트 직후 + 씬 목록이 늦게 로드된 경우 한 번 더
+  // 스크롤 위치 복원 — 마운트 직후, 프리셋을 바꾼 뒤, 씬 목록이 늦게 로드된 경우에 한 번씩
   const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const [gridWidth, setGridWidth] = useState(0)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const update = (): void => setGridWidth(el.clientWidth)
@@ -533,13 +689,198 @@ function SceneGrid(): React.JSX.Element {
         : gridWidth > 0 && gridWidth < 1100
           ? Math.min(columns, 3)
           : columns
+  // 프리셋을 바꾸면 activePresetId가 먼저 바뀌고 새 씬 목록은 조금 뒤에 온다. 그 사이의 옛 목록과
+  // 클램프로 생기는 scroll 이벤트가 새 열쇠 자리를 덮어쓰지 않게, 목록이 활성 프리셋 것일 때만
+  // 복원하고 기록한다 (shownScrollKeyRef = 지금 화면에 자리를 맞춰 둔 열쇠)
+  const scrollKey = sceneScrollKey(libraryKind, activePresetId)
+  const scenesReady = scenes.length > 0 && scenes[0].presetId === activePresetId
+  const shownScrollKeyRef = useRef<string | null>(null)
+  // 복원해 둔 scrollTop — 복원이 일으킨 scroll 이벤트(요청과 다르게 잘린 값 포함)가 기억값을 덮어쓰지 못하게,
+  // 이 자리와 같은 이벤트는 건너뛰고 사용자가 움직여 다른 자리가 되면 풀린다
+  const restoredTopRef = useRef<number | null>(null)
   useLayoutEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = savedGridScroll
-  }, [])
-  useEffect(() => {
     const el = scrollRef.current
-    if (el && savedGridScroll > 0 && el.scrollTop === 0) el.scrollTop = savedGridScroll
-  }, [scenes.length])
+    if (!el) return
+    if (!scenesReady || gridWidth === 0) {
+      shownScrollKeyRef.current = null
+      restoredTopRef.current = null
+      return
+    }
+    if (shownScrollKeyRef.current === scrollKey) return
+    shownScrollKeyRef.current = scrollKey
+    restoreScroll(el, savedScrolls[scrollKey])
+    restoredTopRef.current = el.scrollTop
+  }, [scrollKey, scenesReady, gridWidth])
+  useEffect(() => {
+    window.addEventListener('beforeunload', flushSavedScrolls)
+    return () => {
+      window.removeEventListener('beforeunload', flushSavedScrolls)
+      flushSavedScrolls()
+    }
+  }, [])
+
+  // 보기(카드 ↔ 이름 목록)를 바꿔도 보던 씬이 화면 맨 위에 남게 — 바꾸기 직전의 맨 위 씬을 적어 둔다
+  const viewAnchorRef = useRef<number | null>(null)
+  const toggleGridView = (): void => {
+    const el = scrollRef.current
+    viewAnchorRef.current = el ? topSceneId(el) : null
+    setGridView(gridView === 'card' ? 'row' : 'card')
+  }
+  useLayoutEffect(() => {
+    const id = viewAnchorRef.current
+    viewAnchorRef.current = null
+    const el = scrollRef.current
+    const card = id == null ? null : el?.querySelector<HTMLElement>(`[data-scene-id="${id}"]`)
+    if (!el || !card) return
+    el.scrollTop += card.getBoundingClientRect().top - el.getBoundingClientRect().top - GRID_PAD
+  }, [gridView])
+
+  // 씬 찾기 — 목록은 거르지 않고(순서 맥락 유지) 일치 카드로 가서 강조한다
+  // 현재 일치는 순번이 아니라 씬 id 로 들고 있다 — 씬이 지워지거나 끌려 가거나 이름이 바뀌어
+  // 일치 목록이 달라져도, 보던 카드가 조작 없이 다른 씬으로 옮겨 가지 않게
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findId, setFindId] = useState<number | null>(null)
+  const [findFocusTick, setFindFocusTick] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+  const matches = useMemo(
+    () => (findOpen ? findSceneMatches(scenes, findQuery) : []),
+    [findOpen, scenes, findQuery]
+  )
+  // 새 목록에서의 현재 순번(0부터). 목록 맞춤 효과가 돌기 전의 한 번(그려지지 않음)은 0으로 둔다
+  const matchPos = Math.max(0, findId == null ? 0 : matches.indexOf(findId))
+  const foundId = findId != null && matches.includes(findId) ? findId : null
+  const revealScene = useCallback((id: number): void => {
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-scene-id="${id}"]`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [])
+  const openFind = useCallback((): void => {
+    setFindOpen(true)
+    setFindFocusTick((tick) => tick + 1)
+  }, [])
+  const closeFind = useCallback((): void => {
+    setFindOpen(false)
+    setFindQuery('')
+    setFindId(null)
+  }, [])
+  const changeFindQuery = (value: string): void => {
+    setFindQuery(value)
+    const first = findSceneMatches(scenes, value)[0] ?? null
+    setFindId(first)
+    if (first != null) revealScene(first)
+  }
+  const stepFind = (step: 1 | -1): void => {
+    if (matches.length === 0) return
+    const next = matches[stepMatch(matches.length, matchPos, step)]
+    setFindId(next)
+    revealScene(next)
+  }
+  // 씬 목록이 바뀌어 일치가 달라지면 현재 일치를 맞춘다: 그 id 가 아직 일치면 그대로(순번만 따라감),
+  // 없어졌으면 그 자리 뒤의 일치(없으면 첫 일치)로 옮기고 그때만 화면을 옮긴다.
+  // 프리셋·라이브러리가 바뀌면 새 목록이 올 때 처음부터(첫 일치, 화면은 기억해 둔 자리 그대로).
+  // 레이아웃 효과라 어긋난 한 번은 화면에 그려지지 않는다
+  const findOrderRef = useRef<number[]>([])
+  const findScopeRef = useRef(scrollKey)
+  useLayoutEffect(() => {
+    // 프리셋을 바꾸는 중 — 옛 목록이 남아 있는 동안은 기다린다 (빈 목록은 그대로 빈 일치로 본다)
+    if (scenes.length > 0 && !scenesReady) return
+    const order = scenes.map((s) => s.id)
+    const prevOrder = findOrderRef.current
+    findOrderRef.current = order
+    const reset = findScopeRef.current !== scrollKey
+    findScopeRef.current = scrollKey
+    if (!findOpen) return
+    const next = resolveFindCurrent({ prevId: findId, prevOrder, order, matches, reset })
+    if (next.id !== findId) setFindId(next.id)
+    if (next.moved && next.id != null) revealScene(next.id)
+  }, [findOpen, findId, scenes, scenesReady, matches, scrollKey, revealScene])
+  useEffect(() => {
+    window.addEventListener('shortcut:findScene', openFind)
+    return () => window.removeEventListener('shortcut:findScene', openFind)
+  }, [openFind])
+  useEffect(() => {
+    if (findFocusTick === 0) return
+    findInputRef.current?.focus()
+    findInputRef.current?.select()
+  }, [findFocusTick])
+  // 찾기 칸이 열려 있는 동안은 포커스가 입력칸 밖(툴바·격자 빈 곳)에 있어도 Esc 로 닫는다.
+  // 대화상자·메뉴가 열려 있으면 그쪽 Esc 이므로 양보하고, 입력칸 안의 Esc 는 입력칸이 이미 처리해
+  // (preventDefault + stopPropagation) 여기까지 오지 않는다
+  useEffect(() => {
+    if (!findOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
+      if (overlayOpen()) return
+      closeFind()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [findOpen, closeFind])
+
+  // Home/End/PageUp/PageDown — 글자 칸이나 대화상자에 포커스가 없고, 씬 화면(툴바·격자)이 키 받을 자리일 때
+  // 격자를 한 번에 옮긴다. 포커스가 격자 밖 요소에 있거나, 포커스가 body 인데 마지막 pointerdown 이 격자 밖이면
+  // (오른쪽 히스토리·왼쪽 패널·덮개 패널의 빈 곳을 누른 뒤) 그 패널의 기본 키 스크롤에 양보한다.
+  // 마운트 직후에는 방금 이 화면으로 들어온 것이라 격자 쪽으로 본다
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // 부드럽게 가는 중에 키를 또 누르면(꾹 누름 포함) 가는 중인 도착점에서 이어 더한다.
+    // 안 그러면 누를 때마다 지금 자리에서 다시 출발해 한 화면씩밖에 못 간다
+    let pendingTop: number | null = null
+    let pendingTimer: number | undefined
+    let lastPointerInside = true
+    const settle = (): void => {
+      pendingTop = null
+      window.clearTimeout(pendingTimer)
+    }
+    const scroller = scrollRef.current
+    scroller?.addEventListener('scrollend', settle)
+    // 캡처 단계 — 카드·막대가 pointerdown 을 막아도 놓치지 않는다
+    const onPointerDown = (e: PointerEvent): void => {
+      const root = rootRef.current
+      lastPointerInside = root != null && e.target instanceof Node && root.contains(e.target)
+    }
+    const zoneOf = (target: EventTarget | null): KeyZone => {
+      if (
+        !(target instanceof Node) ||
+        target === document.body ||
+        target === document.documentElement
+      )
+        return 'neutral'
+      return rootRef.current?.contains(target) ? 'inside' : 'outside'
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented || e.isComposing) return
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (!['Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) return
+      if (keysBelongElsewhere(e.target)) return
+      if (!gridKeyAllowed(zoneOf(e.target), lastPointerInside)) return
+      const el = scrollRef.current
+      if (!el) return
+      e.preventDefault()
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      const page = el.clientHeight * 0.9
+      const from = pendingTop ?? el.scrollTop
+      const top =
+        e.key === 'Home'
+          ? 0
+          : e.key === 'End'
+            ? max
+            : Math.min(max, Math.max(0, from + (e.key === 'PageUp' ? -page : page)))
+      pendingTop = top
+      window.clearTimeout(pendingTimer)
+      pendingTimer = window.setTimeout(settle, 700)
+      el.scrollTo({ top, behavior: 'smooth' })
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      scroller?.removeEventListener('scrollend', settle)
+      window.clearTimeout(pendingTimer)
+    }
+  }, [])
 
   // Shift+왼쪽 드래그: 커서가 지나간 카드까지 목록 순서대로 연속 선택한다.
   // 전역 pointermove를 쓰므로 빠르게 드래그해 중간 카드를 건너뛰어도 selectRangeTo가 사이를 채운다.
@@ -778,7 +1119,10 @@ function SceneGrid(): React.JSX.Element {
   )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface">
+    <div
+      ref={rootRef}
+      className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface"
+    >
       {/* 툴바 — 한 행: 프리셋 드롭다운 + 아이콘(툴팁) */}
       <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-2 py-1.5">
         <PresetDropdown />
@@ -887,6 +1231,13 @@ function SceneGrid(): React.JSX.Element {
             setTrashOpen(true)
           }}
         />
+        {/* 씬 찾기 — 씬이 많을 때 이름·번호로 바로 가기 */}
+        <IconBtn
+          icon={<Search size={16} />}
+          tip={`씬 찾기 (${formatCombo(findBinding)})`}
+          active={findOpen}
+          onClick={openFind}
+        />
         <div className="mx-1 h-5 w-px bg-line" />
 
         {/* 큐 반복: 캐릭터/레퍼런스 조합을 바꿔가며 예약 전체 반복 (NAIS2 Custom) */}
@@ -972,7 +1323,13 @@ function SceneGrid(): React.JSX.Element {
           />
         )}
         <div className="mx-1 h-5 w-px bg-line" />
-        {/* 카드 비율: 세로/가로 (해상도와 무관하게 고정) */}
+        {/* 보기: 카드 ↔ 이름 목록 (씬이 많을 때 촘촘히) */}
+        <IconBtn
+          icon={gridView === 'card' ? <LayoutGrid size={16} /> : <List size={16} />}
+          tip={gridView === 'card' ? '카드 보기 (클릭: 이름 목록)' : '이름 목록 (클릭: 카드)'}
+          onClick={toggleGridView}
+        />
+        {/* 카드 비율: 세로/가로 (해상도와 무관하게 고정). 이름 목록에서는 쓰지 않는다 */}
         <IconBtn
           icon={
             cardOrientation === 'portrait' ? (
@@ -982,16 +1339,23 @@ function SceneGrid(): React.JSX.Element {
             )
           }
           tip={cardOrientation === 'portrait' ? '세로 카드 (클릭: 가로)' : '가로 카드 (클릭: 세로)'}
+          disabled={gridView === 'row'}
           onClick={() =>
             setCardOrientation(cardOrientation === 'portrait' ? 'landscape' : 'portrait')
           }
         />
         {/* 열 수 (2~5) */}
-        <div className="flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5">
+        <div
+          className={cn(
+            'flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5',
+            gridView === 'row' && 'opacity-40'
+          )}
+        >
           {[2, 3, 4, 5].map((n) => (
             <button
               key={n}
               onClick={() => setColumns(n)}
+              disabled={gridView === 'row'}
               className={cn(
                 'grid h-6 w-6 place-items-center rounded text-[12px] font-medium transition-colors',
                 columns === n ? 'bg-paper text-ink shadow-sm' : 'text-muted hover:text-ink'
@@ -1086,93 +1450,179 @@ function SceneGrid(): React.JSX.Element {
         )}
       </AnimatePresence>
 
-      {/* 카드 그리드 (열 수만큼 폭에 꽉 차게). scrollbar-gutter로 스크롤바 등장 시 밀림 방지 */}
-      <div
-        ref={scrollRef}
-        onScroll={(e) => {
-          savedGridScroll = e.currentTarget.scrollTop
-        }}
-        className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar"
-      >
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collision}
-          onDragStart={onDragStart}
-          onDragCancel={onDragCancel}
-          onDragEnd={onDragEnd}
-          // 긴 목록: 가장자리 자동 스크롤을 조금 빠르게 (기본 10)
-          autoScroll={{ acceleration: 16 }}
+      {/* 카드 그리드 (열 수만큼 폭에 꽉 차게). scrollbar-gutter로 스크롤바 등장 시 밀림 방지.
+          빠른 이동 막대·찾기 칸은 이 영역 위에 겹쳐 둔다 */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            if (shownScrollKeyRef.current !== scrollKey) return
+            // 위치 복원이 일으킨 이벤트(요청과 다르게 잘린 값 포함)는 기억값을 덮어쓰지 않는다
+            if (isRestoreEcho(restoredTopRef.current, e.currentTarget.scrollTop)) return
+            restoredTopRef.current = null
+            rememberScroll(scrollKey, captureScroll(e.currentTarget))
+          }}
+          className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar"
         >
-          <SortableContext
-            items={scenes.map((s) => `scene-${s.id}`)}
-            strategy={rectSortingStrategy}
-          >
-            <div
-              className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }}
+          <div ref={contentRef}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={collision}
+              onDragStart={onDragStart}
+              onDragCancel={onDragCancel}
+              onDragEnd={onDragEnd}
+              // 긴 목록: 가장자리 자동 스크롤을 조금 빠르게 (기본 10)
+              autoScroll={{ acceleration: 16 }}
             >
-              {scenes.map((scene) => (
-                <SceneCard
-                  key={scene.id}
-                  scene={scene}
-                  live={scene.id === generatingSceneId ? previewPng : null}
-                  generating={scene.id === generatingSceneId}
-                  onOpenAddition={setAdditionSceneIds}
-                  onOpenCensors={setCensorSceneIds}
-                  onUseBackground={setUseBackground}
-                  onExportFavorites={onExportSceneFavorites}
-                  onClearImages={onClearSceneImages}
-                  onBeginShiftSelection={beginShiftSelection}
-                  dragged={dragIds.length > 1 && dragIds.includes(scene.id)}
-                />
-              ))}
-              <button
-                onClick={() => void create(isBackground ? '새 배경' : '새 씬')}
-                className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-faint transition hover:text-accent"
-                style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
+              <SortableContext
+                items={scenes.map((s) => `scene-${s.id}`)}
+                strategy={gridView === 'row' ? verticalListSortingStrategy : rectSortingStrategy}
               >
-                <Plus size={22} />
-                <span className="text-[12px]">{isBackground ? '배경 추가' : '씬 추가'}</span>
-              </button>
-            </div>
-          </SortableContext>
-          {/* 드래그 중 커서를 따라가는 가벼운 클론 (원본은 숨김) */}
-          <DragOverlay dropAnimation={null}>
-            {dragScene && (
-              <div
-                className="relative overflow-hidden rounded-lg border border-accent bg-surface-2 shadow-2xl"
-                style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
-              >
-                {dragScene.thumbnail ? (
-                  <img
-                    src={`data:image/webp;base64,${dragScene.thumbnail}`}
-                    className="h-full w-full object-cover"
-                    draggable={false}
-                    alt=""
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-paper text-faint">
-                    <ImageOff size={26} strokeWidth={1.3} />
-                  </div>
-                )}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6">
-                  <div className="truncate text-[13px] font-semibold text-white drop-shadow">
-                    {dragScene.name}
-                  </div>
+                <div
+                  className={cn('grid', gridView === 'row' ? 'gap-1' : 'gap-3')}
+                  style={{
+                    gridTemplateColumns: `repeat(${gridView === 'row' ? 1 : effectiveColumns}, minmax(0, 1fr))`
+                  }}
+                >
+                  {scenes.map((scene, index) => (
+                    <SceneCard
+                      key={scene.id}
+                      scene={scene}
+                      variant={gridView}
+                      order={gridView === 'row' ? index + 1 : undefined}
+                      found={scene.id === foundId}
+                      live={scene.id === generatingSceneId ? previewPng : null}
+                      generating={scene.id === generatingSceneId}
+                      onOpenAddition={setAdditionSceneIds}
+                      onOpenCensors={setCensorSceneIds}
+                      onUseBackground={setUseBackground}
+                      onExportFavorites={onExportSceneFavorites}
+                      onClearImages={onClearSceneImages}
+                      onBeginShiftSelection={beginShiftSelection}
+                      dragged={dragIds.length > 1 && dragIds.includes(scene.id)}
+                    />
+                  ))}
+                  {gridView === 'row' ? (
+                    <button
+                      onClick={() => void create(isBackground ? '새 배경' : '새 씬')}
+                      className="flex h-10 items-center justify-center gap-1.5 rounded-md border border-dashed border-line text-faint transition hover:text-accent"
+                    >
+                      <Plus size={16} />
+                      <span className="text-[12px]">{isBackground ? '배경 추가' : '씬 추가'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => void create(isBackground ? '새 배경' : '새 씬')}
+                      className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-faint transition hover:text-accent"
+                      style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
+                    >
+                      <Plus size={22} />
+                      <span className="text-[12px]">{isBackground ? '배경 추가' : '씬 추가'}</span>
+                    </button>
+                  )}
                 </div>
-                {dragIds.length > 1 && (
-                  <span className="absolute right-1.5 top-1.5 rounded-full bg-accent px-2 py-0.5 text-[12px] font-bold text-white shadow">
-                    {dragIds.length}개 함께 이동
-                  </span>
+              </SortableContext>
+              {/* 드래그 중 커서를 따라가는 가벼운 클론 (원본은 숨김) */}
+              <DragOverlay dropAnimation={null}>
+                {dragScene && gridView === 'row' && (
+                  <div className="flex h-full items-center gap-2 rounded-md border border-accent bg-surface-2 px-3 shadow-2xl">
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                      {dragScene.name}
+                    </span>
+                    {dragIds.length > 1 && (
+                      <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[12px] font-bold text-white shadow">
+                        {dragIds.length}개 함께 이동
+                      </span>
+                    )}
+                  </div>
                 )}
-              </div>
+                {dragScene && gridView === 'card' && (
+                  <div
+                    className="relative overflow-hidden rounded-lg border border-accent bg-surface-2 shadow-2xl"
+                    style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
+                  >
+                    {dragScene.thumbnail ? (
+                      <img
+                        src={`data:image/webp;base64,${dragScene.thumbnail}`}
+                        className="h-full w-full object-cover"
+                        draggable={false}
+                        alt=""
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-paper text-faint">
+                        <ImageOff size={26} strokeWidth={1.3} />
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6">
+                      <div className="truncate text-[13px] font-semibold text-white drop-shadow">
+                        {dragScene.name}
+                      </div>
+                    </div>
+                    {dragIds.length > 1 && (
+                      <span className="absolute right-1.5 top-1.5 rounded-full bg-accent px-2 py-0.5 text-[12px] font-bold text-white shadow">
+                        {dragIds.length}개 함께 이동
+                      </span>
+                    )}
+                  </div>
+                )}
+              </DragOverlay>
+            </DndContext>
+            {scenes.length === 0 && (
+              <p className="mt-6 text-center text-[13px] text-faint">
+                씬을 추가해 프롬프트와 해상도를 저장하고, +로 예약한 뒤 좌측 생성 버튼으로 뽑으세요.
+              </p>
             )}
-          </DragOverlay>
-        </DndContext>
-        {scenes.length === 0 && (
-          <p className="mt-6 text-center text-[13px] text-faint">
-            씬을 추가해 프롬프트와 해상도를 저장하고, +로 예약한 뒤 좌측 생성 버튼으로 뽑으세요.
-          </p>
+          </div>
+        </div>
+        <SceneScrollBar
+          scrollRef={scrollRef}
+          contentRef={contentRef}
+          scenes={scenes}
+          layoutKey={`${scenes.length}|${gridView}|${effectiveColumns}|${cardOrientation}`}
+        />
+        {findOpen && (
+          <div
+            role="search"
+            className="absolute right-5 top-2 z-20 flex h-8 items-center gap-1.5 rounded-lg border border-line bg-paper pl-2 pr-1 shadow-lg"
+          >
+            <Search size={14} className="shrink-0 text-faint" />
+            <input
+              ref={findInputRef}
+              value={findQuery}
+              aria-label="씬 찾기"
+              placeholder="씬 이름 또는 번호"
+              className="w-40 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint"
+              onChange={(e) => changeFindQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  closeFind()
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  stepFind(e.shiftKey ? -1 : 1)
+                }
+              }}
+            />
+            {findQuery.trim() !== '' && (
+              <span
+                className={cn(
+                  'shrink-0 text-[12px] tabular-nums',
+                  matches.length > 0 ? 'text-muted' : 'text-danger'
+                )}
+              >
+                {matches.length > 0 ? `${matchPos + 1}/${matches.length}` : '없음'}
+              </span>
+            )}
+            <button
+              onClick={closeFind}
+              aria-label="찾기 닫기"
+              className="grid size-6 shrink-0 place-items-center rounded text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              <X size={13} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -1193,6 +1643,177 @@ function SceneGrid(): React.JSX.Element {
       />
       {/* 폴더로 내보내기 이름 충돌 다이얼로그 (커스텀, 상단 툴바용) */}
       {folderExport.dialog}
+    </div>
+  )
+}
+
+// 빠른 이동 막대의 길 위·아래 여백(px)
+const SCROLL_TRACK_PAD = 4
+
+/**
+ * 빠른 이동 막대 — 씬 격자 스크롤 영역 오른쪽 가장자리(격자 바깥 여백 안)에 겹쳐 둔 얇은 세로 막대.
+ * 내용이 넘칠 때만 보이고, 손잡이나 막대 아무 곳을 누르고 끌면 그 비율 위치로 바로 간다.
+ * 끄는 동안 막대 왼쪽에 「{순번} · {씬 이름}」 말풍선이 포인터 높이를 따라온다.
+ * 카드(dnd-kit 끌기 대상) 바깥이라 카드 끌기와 겹치지 않고, 포인터 캡처로 창 밖에서도 끌기가 이어진다.
+ */
+function SceneScrollBar({
+  scrollRef,
+  contentRef,
+  scenes,
+  layoutKey
+}: {
+  scrollRef: React.RefObject<HTMLDivElement | null>
+  contentRef: React.RefObject<HTMLDivElement | null>
+  scenes: Scene[]
+  /** 바뀌면 손잡이를 다시 잰다 (씬 수·보기·열 수 등 내용 높이를 바꾸는 값) */
+  layoutKey: string
+}): React.JSX.Element {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [metrics, setMetrics] = useState<ThumbMetrics>({ visible: false, size: 0, top: 0 })
+  const [bubble, setBubble] = useState<{ y: number; label: string } | null>(null)
+  // 끄는 중이면 손잡이를 잡은 높이(손잡이 위에서 눌렀으면 그 자리, 아니면 손잡이 가운데)
+  const dragRef = useRef<{ pointerId: number; grab: number; userSelect: string } | null>(null)
+
+  const measure = useCallback((): void => {
+    const scroller = scrollRef.current
+    const track = trackRef.current
+    if (!scroller || !track) return
+    const next = thumbMetrics(
+      scroller.scrollTop,
+      scroller.scrollHeight,
+      scroller.clientHeight,
+      track.clientHeight
+    )
+    setMetrics((prev) =>
+      prev.visible === next.visible &&
+      Math.abs(prev.size - next.size) < 0.5 &&
+      Math.abs(prev.top - next.top) < 0.5
+        ? prev
+        : next
+    )
+  }, [scrollRef])
+
+  useLayoutEffect(() => {
+    measure()
+  }, [measure, layoutKey])
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    scroller.addEventListener('scroll', measure, { passive: true })
+    const observer = new ResizeObserver(measure)
+    observer.observe(scroller)
+    if (contentRef.current) observer.observe(contentRef.current)
+    return () => {
+      scroller.removeEventListener('scroll', measure)
+      observer.disconnect()
+    }
+  }, [scrollRef, contentRef, measure])
+  // 끄다가 격자가 사라지면(씬 상세로 이동 등) 막아 둔 글자 선택을 되돌린다
+  useEffect(
+    () => () => {
+      if (dragRef.current) document.body.style.userSelect = dragRef.current.userSelect
+    },
+    []
+  )
+
+  /** 포인터 높이 → 그 비율의 위치로 바로 이동하고 말풍선을 갱신 */
+  const jumpTo = (clientY: number): void => {
+    const scroller = scrollRef.current
+    const track = trackRef.current
+    const drag = dragRef.current
+    if (!scroller || !track || !drag) return
+    const trackTop = track.getBoundingClientRect().top
+    const y = clientY - trackTop
+    scroller.scrollTop = scrollTopForThumb(
+      y - drag.grab,
+      scroller.scrollHeight,
+      scroller.clientHeight,
+      track.clientHeight
+    )
+    const { ids, bottoms } = measureCards(scroller)
+    const at = topSceneIndex(bottoms, scroller.scrollTop + GRID_PAD)
+    const index = at < 0 ? -1 : scenes.findIndex((s) => s.id === ids[at])
+    setBubble(
+      index < 0
+        ? null
+        : {
+            y: Math.min(Math.max(y, 0), track.clientHeight) + SCROLL_TRACK_PAD,
+            label: sceneLabel(index, scenes[index].name)
+          }
+    )
+    measure()
+  }
+
+  const endDrag = (): void => {
+    const drag = dragRef.current
+    if (!drag) return
+    document.body.style.userSelect = drag.userSelect
+    dragRef.current = null
+    setBubble(null)
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        'group absolute inset-y-0 right-0 z-10 w-3 touch-none select-none',
+        !metrics.visible && 'invisible pointer-events-none'
+      )}
+      onMouseDown={(e) => e.preventDefault()}
+      onWheel={(e) => scrollRef.current?.scrollBy({ top: e.deltaY })}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || dragRef.current || !trackRef.current) return
+        const y = e.clientY - trackRef.current.getBoundingClientRect().top
+        const onThumb = y >= metrics.top && y <= metrics.top + metrics.size
+        dragRef.current = {
+          pointerId: e.pointerId,
+          grab: onThumb ? y - metrics.top : metrics.size / 2,
+          userSelect: document.body.style.userSelect
+        }
+        document.body.style.userSelect = 'none'
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        } catch {
+          /* 캡처를 못 잡아도 막대 위에서는 끌기가 이어진다 */
+        }
+        jumpTo(e.clientY)
+      }}
+      onPointerMove={(e) => {
+        if (dragRef.current?.pointerId === e.pointerId) jumpTo(e.clientY)
+      }}
+      onPointerUp={(e) => {
+        if (dragRef.current?.pointerId === e.pointerId) endDrag()
+      }}
+      onPointerCancel={(e) => {
+        if (dragRef.current?.pointerId === e.pointerId) endDrag()
+      }}
+      onLostPointerCapture={(e) => {
+        if (dragRef.current?.pointerId === e.pointerId) endDrag()
+      }}
+    >
+      <div
+        ref={trackRef}
+        className="absolute inset-x-0"
+        style={{ top: SCROLL_TRACK_PAD, bottom: SCROLL_TRACK_PAD }}
+      >
+        {metrics.visible && (
+          <div
+            className={cn(
+              'absolute right-0.5 w-1 rounded-full transition-[width,background-color] duration-100',
+              bubble ? 'w-2 bg-accent/70' : 'bg-muted/40 group-hover:w-2 group-hover:bg-muted/60'
+            )}
+            style={{ top: metrics.top, height: metrics.size }}
+          />
+        )}
+      </div>
+      {bubble && (
+        <div
+          className="pointer-events-none absolute right-full mr-2 max-w-64 -translate-y-1/2 truncate whitespace-nowrap rounded-md border border-line bg-surface px-2.5 py-1 text-[12px] font-medium text-ink shadow-lg"
+          style={{ top: bubble.y }}
+        >
+          {bubble.label}
+        </div>
+      )}
     </div>
   )
 }
@@ -1726,11 +2347,20 @@ const SceneCard = memo(function SceneCard({
   onBeginShiftSelection,
   onOpenCensors,
   onUseBackground,
+  variant = 'card',
+  order,
+  found = false,
   dragged = false
 }: {
   scene: Scene
   live: string | null
   generating: boolean
+  /** card = 썸네일 카드, row = 한 줄짜리 이름 목록 (같은 컴포넌트·같은 제스처) */
+  variant?: 'card' | 'row'
+  /** row에서 보이는 순번(목록 순서, 1부터) */
+  order?: number
+  /** 씬 찾기의 현재 일치 — 강조 테두리 */
+  found?: boolean
   /** 다른 카드를 끄는 중, 이 카드도 같은 묶음으로 따라감 (흐리게) */
   dragged?: boolean
   onOpenAddition: (sceneIds: number[]) => void
@@ -1788,6 +2418,7 @@ const SceneCard = memo(function SceneCard({
   }
 
   const checked = selection.has(scene.id)
+  const isRow = variant === 'row'
   // 이미지 우선순위: 생성 중 스트리밍 > 저장 썸네일(가벼움, 드래그 렉 방지) > 원본 > 없음.
   // 카드는 작게 표시되므로 640 webp 썸네일이면 충분히 선명하고, 풀해상도 대신 써서 드래그가 부드럽다.
   const src = live
@@ -1898,6 +2529,105 @@ const SceneCard = memo(function SceneCard({
     }
   }
 
+  // 이름 목록(row) 한 줄 — 순번 · 이름 · 그림 수 · 내보내기 번호 · V+ · 생성 중 · 예약.
+  // 클릭 열기·선택·Shift 칠하기·드래그·우클릭 메뉴는 바깥 요소가 카드와 똑같이 맡는다
+  const rowBody = (
+    <>
+      {selectionActive && (
+        <span
+          className={cn(
+            'grid size-5 shrink-0 place-items-center rounded border-2 transition',
+            checked ? 'border-accent bg-accent text-white' : 'border-faint bg-black/10'
+          )}
+        >
+          {checked && <span className="text-[11px] leading-none">✓</span>}
+        </span>
+      )}
+      <span className="w-8 shrink-0 text-right font-mono text-[12px] tabular-nums text-faint">
+        {order}
+      </span>
+      <div className="min-w-0 flex-1">
+        {editMode ? (
+          <input
+            className="h-7 w-full truncate rounded bg-paper px-2 text-[13px] font-medium text-ink outline-none ring-1 ring-line focus:ring-accent"
+            value={scene.name}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => void update(scene.id, { name: e.target.value })}
+          />
+        ) : (
+          <div className="truncate text-[13px] font-medium text-ink">{scene.name}</div>
+        )}
+      </div>
+      <span className="w-14 shrink-0 text-right text-[12px] tabular-nums text-muted">
+        {scene.imageCount > 0 && `${scene.imageCount}장`}
+      </span>
+      <span className="grid w-9 shrink-0 place-items-center">
+        {scene.exportNo != null && (
+          <button
+            className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white transition hover:bg-accent"
+            title="클릭해서 씬 번호 수정"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              void editSingleSceneNumber()
+            }}
+          >
+            {String(scene.exportNo).padStart(2, '0')}
+          </button>
+        )}
+      </span>
+      <span className="grid w-9 shrink-0 place-items-center">
+        {scene.varietyPlus && (
+          <span
+            className="flex h-5 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white"
+            title="이 씬은 Variety+가 적용됩니다"
+          >
+            <Sparkles size={10} /> V+
+          </span>
+        )}
+      </span>
+      <span className="grid w-4 shrink-0 place-items-center">
+        {generating && (
+          <Loader2 size={14} className="animate-spin text-accent" aria-label="생성 중" />
+        )}
+      </span>
+      <span className="grid w-7 shrink-0 place-items-center">
+        {badgeCount > 0 && (
+          <span
+            className="grid h-5 min-w-5 place-items-center rounded-full bg-danger px-1 text-[12px] font-bold text-white"
+            title="예약 + 생성 대기"
+          >
+            {badgeCount}
+          </span>
+        )}
+      </span>
+      <div
+        className="flex shrink-0 items-center gap-0.5 rounded-full bg-paper p-0.5"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          className="grid size-5 place-items-center rounded-full text-ink hover:bg-surface-2 disabled:opacity-30"
+          // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (카드와 같다)
+          disabled={scene.reserveCount + queueRemaining === 0}
+          onClick={() => void adjustReserve(scene.id, -1)}
+        >
+          <Minus size={13} />
+        </button>
+        <span className="min-w-4 text-center text-[12px] font-medium text-ink">
+          {scene.reserveCount}
+        </span>
+        <button
+          className="grid size-5 place-items-center rounded-full text-ink hover:bg-surface-2"
+          onClick={() => void adjustReserve(scene.id, 1)}
+        >
+          <Plus size={13} />
+        </button>
+      </div>
+    </>
+  )
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -1912,8 +2642,11 @@ const SceneCard = memo(function SceneCard({
               : '클릭해서 열기 · 드래그해서 순서 변경'
           }
           className={cn(
-            'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
+            isRow
+              ? 'group relative flex h-10 touch-none items-center gap-2 overflow-hidden rounded-md border bg-surface-2 px-2 transition'
+              : 'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
             selectionActive && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
+            found && 'border-accent ring-[3px] ring-accent ring-offset-2 ring-offset-surface',
             sortable.isDragging && 'shadow-xl',
             dragged && 'opacity-30'
           )}
@@ -1957,235 +2690,241 @@ const SceneCard = memo(function SceneCard({
             }
           }}
         >
-          <div className="relative" style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}>
-            {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
-            {src ? (
-              <img
-                src={src}
-                className="h-full w-full cursor-pointer object-cover"
-                draggable={false}
-                alt=""
-              />
-            ) : (
-              <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
-                <ImageOff size={26} strokeWidth={1.3} />
-              </div>
-            )}
-
-            {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
-            {generating && !live && (
-              <div className="absolute inset-0 grid place-items-center bg-black/40">
-                <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
-              </div>
-            )}
-
-            {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
-            {badgeCount > 0 && (
-              <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
-                {badgeCount}
-              </span>
-            )}
-
-            {/* 씬별 variety+ 적용 표시 (커스텀) */}
-            {scene.varietyPlus && (
-              <span
-                className={cn(
-                  'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
-                  badgeCount > 0 ? 'left-9' : 'left-1.5'
+          {isRow ? (
+            rowBody
+          ) : (
+            <>
+              <div className="relative" style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}>
+                {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
+                {src ? (
+                  <img
+                    src={src}
+                    className="h-full w-full cursor-pointer object-cover"
+                    draggable={false}
+                    alt=""
+                  />
+                ) : (
+                  <div className="flex h-full w-full cursor-pointer items-center justify-center bg-paper text-faint">
+                    <ImageOff size={26} strokeWidth={1.3} />
+                  </div>
                 )}
-                title="이 씬은 Variety+가 적용됩니다"
-              >
-                <Sparkles size={10} /> V+
-              </span>
-            )}
 
-            {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
-            {additionsEnabled && !editMode && (
-              <button
-                className={cn(
-                  'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
-                  badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
-                  additionCount > 0
-                    ? 'bg-accent text-white hover:bg-accent/85'
-                    : 'bg-black/60 text-white/90 hover:bg-black/80'
+                {/* 생성 준비 중(프리뷰 뜨기 전) 스피너 */}
+                {generating && !live && (
+                  <div className="absolute inset-0 grid place-items-center bg-black/40">
+                    <Loader2 size={28} className="animate-spin text-white" strokeWidth={2} />
+                  </div>
                 )}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onOpenAddition([scene.id])
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
-              >
-                <UserPlus size={14} />
-                {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
-              </button>
-            )}
 
-            {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
-            {canUseTransparentBackground && !editMode && (
-              <button
-                type="button"
-                data-testid={`scene-transparent-bg-${scene.id}`}
-                aria-pressed={transparentEnabled}
-                className={cn(
-                  'absolute right-1.5 top-9 z-10 grid size-7 place-items-center rounded-full text-white shadow transition',
-                  transparentEnabled
-                    ? 'bg-accent hover:bg-accent/85'
-                    : 'bg-black/60 text-white/80 hover:bg-black/80'
+                {/* 예약 수 + 생성 중 남은 수 — 좌측 상단 붉은 원 (생성이 진행되며 줄어든다) */}
+                {badgeCount > 0 && (
+                  <span className="absolute left-1.5 top-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-1.5 text-[12px] font-bold text-white shadow">
+                    {badgeCount}
+                  </span>
                 )}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  toggleSceneTransparentBackground()
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onDoubleClick={(e) => {
-                  e.stopPropagation()
-                  inheritTransparentBackground()
-                }}
-                title={
-                  transparentOverride === undefined
-                    ? `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (click to override)`
-                    : `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (double-click to use global)`
-                }
-              >
-                <ImageOff size={14} />
-              </button>
-            )}
 
-            {selectionActive ? (
-              <span
-                className={cn(
-                  'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
-                  checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
-                )}
-              >
-                {checked && <span className="text-[11px] leading-none">✓</span>}
-              </span>
-            ) : (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
+                {/* 씬별 variety+ 적용 표시 (커스텀) */}
+                {scene.varietyPlus && (
+                  <span
+                    className={cn(
+                      'absolute top-1.5 flex h-6 items-center gap-0.5 rounded-full bg-violet-500/85 px-1.5 text-[10px] font-bold text-white shadow',
+                      badgeCount > 0 ? 'left-9' : 'left-1.5'
+                    )}
+                    title="이 씬은 Variety+가 적용됩니다"
                   >
-                    <MoreVertical size={14} />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="end"
-                  className="w-40 p-1"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MenuItem
-                    icon={<Pencil size={13} />}
-                    label="이름 변경"
-                    onClick={() => void renameScene()}
-                  />
-                  <MenuItem
-                    icon={<Copy size={13} />}
-                    label="복제"
-                    onClick={() => void duplicate(scene.id)}
-                  />
-                  <MenuItem
-                    icon={<FolderOpen size={13} />}
-                    label="폴더 열기"
-                    onClick={() => void openFolder()}
-                  />
-                  <MenuItem
-                    icon={<Trash2 size={13} />}
-                    label="삭제"
-                    danger
-                    onClick={() => void removeScene()}
-                  />
-                </PopoverContent>
-              </Popover>
-            )}
+                    <Sparkles size={10} /> V+
+                  </span>
+                )}
 
-            {/* 하단 그라디언트 + 이름 + 예약 +/- */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
-              <div className="pointer-events-auto flex items-end justify-between gap-1">
-                <div className="min-w-0">
-                  {editMode ? (
-                    <input
-                      className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
-                      value={scene.name}
+                {/* 씬별 캐릭터 추가 버튼 — 기능이 켜져 있으면 항상 표시. 선택 있음=강조색, 없음=반투명 */}
+                {additionsEnabled && !editMode && (
+                  <button
+                    className={cn(
+                      'absolute left-1.5 z-10 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold shadow transition',
+                      badgeCount > 0 || scene.varietyPlus ? 'top-9' : 'top-1.5',
+                      additionCount > 0
+                        ? 'bg-accent text-white hover:bg-accent/85'
+                        : 'bg-black/60 text-white/90 hover:bg-black/80'
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenAddition([scene.id])
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title="이 씬에만 추가 적용할 캐릭터/레퍼런스 선택"
+                  >
+                    <UserPlus size={14} />
+                    {additionCount > 0 ? `캐릭터 ${additionCount}` : '캐릭터+'}
+                  </button>
+                )}
+
+                {/* 우측 상단 — 편집 모드 체크박스 / 일반 3점 메뉴 */}
+                {canUseTransparentBackground && !editMode && (
+                  <button
+                    type="button"
+                    data-testid={`scene-transparent-bg-${scene.id}`}
+                    aria-pressed={transparentEnabled}
+                    className={cn(
+                      'absolute right-1.5 top-9 z-10 grid size-7 place-items-center rounded-full text-white shadow transition',
+                      transparentEnabled
+                        ? 'bg-accent hover:bg-accent/85'
+                        : 'bg-black/60 text-white/80 hover:bg-black/80'
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSceneTransparentBackground()
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      inheritTransparentBackground()
+                    }}
+                    title={
+                      transparentOverride === undefined
+                        ? `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (click to override)`
+                        : `Scene Transparent BG: ${transparentEnabled ? 'on' : 'off'} (double-click to use global)`
+                    }
+                  >
+                    <ImageOff size={14} />
+                  </button>
+                )}
+
+                {selectionActive ? (
+                  <span
+                    className={cn(
+                      'absolute right-1.5 top-1.5 grid size-5 place-items-center rounded border-2 transition',
+                      checked ? 'border-accent bg-accent text-white' : 'border-white/80 bg-black/30'
+                    )}
+                  >
+                    {checked && <span className="text-[11px] leading-none">✓</span>}
+                  </span>
+                ) : (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical size={14} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      className="w-40 p-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MenuItem
+                        icon={<Pencil size={13} />}
+                        label="이름 변경"
+                        onClick={() => void renameScene()}
+                      />
+                      <MenuItem
+                        icon={<Copy size={13} />}
+                        label="복제"
+                        onClick={() => void duplicate(scene.id)}
+                      />
+                      <MenuItem
+                        icon={<FolderOpen size={13} />}
+                        label="폴더 열기"
+                        onClick={() => void openFolder()}
+                      />
+                      <MenuItem
+                        icon={<Trash2 size={13} />}
+                        label="삭제"
+                        danger
+                        onClick={() => void removeScene()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                )}
+
+                {/* 하단 그라디언트 + 이름 + 예약 +/- */}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
+                  <div className="pointer-events-auto flex items-end justify-between gap-1">
+                    <div className="min-w-0">
+                      {editMode ? (
+                        <input
+                          className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
+                          value={scene.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onChange={(e) => void update(scene.id, { name: e.target.value })}
+                        />
+                      ) : (
+                        <div className="truncate text-[13px] font-semibold text-white drop-shadow">
+                          {scene.name}
+                        </div>
+                      )}
+                      {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
+                      {(scene.imageCount > 0 || scene.exportNo != null) && (
+                        <div className="mt-1 flex items-center gap-1">
+                          {scene.exportNo != null && (
+                            <button
+                              className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
+                              title="클릭해서 씬 번호 수정"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void editSingleSceneNumber()
+                              }}
+                            >
+                              {String(scene.exportNo).padStart(2, '0')}
+                            </button>
+                          )}
+                          {scene.imageCount > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
+                              <ImageIcon size={12} />
+                              {scene.imageCount}장
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* 예약 +/- */}
+                    <div
+                      className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
                       onClick={(e) => e.stopPropagation()}
                       onPointerDown={(e) => e.stopPropagation()}
-                      onChange={(e) => void update(scene.id, { name: e.target.value })}
-                    />
-                  ) : (
-                    <div className="truncate text-[13px] font-semibold text-white drop-shadow">
-                      {scene.name}
+                    >
+                      <button
+                        className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
+                        // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
+                        disabled={scene.reserveCount + queueRemaining === 0}
+                        onClick={() => void adjustReserve(scene.id, -1)}
+                      >
+                        <Minus size={13} />
+                      </button>
+                      <span className="min-w-4 text-center text-[12px] font-medium text-white">
+                        {scene.reserveCount}
+                      </span>
+                      <button
+                        className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
+                        onClick={() => void adjustReserve(scene.id, 1)}
+                      >
+                        <Plus size={13} />
+                      </button>
                     </div>
-                  )}
-                  {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
-                  {(scene.imageCount > 0 || scene.exportNo != null) && (
-                    <div className="mt-1 flex items-center gap-1">
-                      {scene.exportNo != null && (
-                        <button
-                          className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
-                          title="클릭해서 씬 번호 수정"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void editSingleSceneNumber()
-                          }}
-                        >
-                          {String(scene.exportNo).padStart(2, '0')}
-                        </button>
-                      )}
-                      {scene.imageCount > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
-                          <ImageIcon size={12} />
-                          {scene.imageCount}장
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* 예약 +/- */}
-                <div
-                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <button
-                    className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
-                    // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
-                    disabled={scene.reserveCount + queueRemaining === 0}
-                    onClick={() => void adjustReserve(scene.id, -1)}
-                  >
-                    <Minus size={13} />
-                  </button>
-                  <span className="min-w-4 text-center text-[12px] font-medium text-white">
-                    {scene.reserveCount}
-                  </span>
-                  <button
-                    className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
-                    onClick={() => void adjustReserve(scene.id, 1)}
-                  >
-                    <Plus size={13} />
-                  </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-          {scene.kind === 'background' ? (
-            <button
-              type="button"
-              className="h-8 w-full border-t border-line bg-accent-soft text-xs text-accent"
-              disabled={!scene.prompt.trim()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onUseBackground(scene)
-              }}
-            >
-              이 배경을 씬에 사용
-            </button>
-          ) : (
-            <CensorStatus scene={scene} onEdit={() => onOpenCensors([scene.id])} />
+              {scene.kind === 'background' ? (
+                <button
+                  type="button"
+                  className="h-8 w-full border-t border-line bg-accent-soft text-xs text-accent"
+                  disabled={!scene.prompt.trim()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onUseBackground(scene)
+                  }}
+                >
+                  이 배경을 씬에 사용
+                </button>
+              ) : (
+                <CensorStatus scene={scene} onEdit={() => onOpenCensors([scene.id])} />
+              )}
+            </>
           )}
         </div>
       </ContextMenuTrigger>

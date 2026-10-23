@@ -94,3 +94,14 @@ boundary evidence; no actual image generation is performed.
 
 All harness files live under `tests/ui`, already excluded by the installer's
 `!tests/*` packaging rule. No production entry point imports this directory.
+
+Scene grid navigation: open `/scene-grid.html` (`?kind=background` for the background library,
+`?count=300` for more scenes per preset, `?busy=5` to mark the 5th scene as generating, `?panels=1`
+to put scrollable fake side panels next to the grid for checking that Home/End/PageUp/PageDown only
+move the grid when the last click or the focus was inside it). It renders
+the actual `SceneMode` with two fake presets of 120 fictional scenes (canvas-drawn thumbnails) and an
+in-memory fake `window.nais`, so no network, file or NAI call is made. Covers the quick-scroll bar and
+its bubble, scene find (`Ctrl+Shift+F`, Enter / Shift+Enter, Esc), Home/End/PageUp/PageDown, scroll
+position per preset (`scene_grid_scroll`), and the one-line name list view (`scene_grid_view`) with
+drag reorder, multi-select drag, Shift painting and the context menu. `window.sceneGridFixture` exposes
+the recorded IPC calls, reorders and store state for checks from the browser console.
