@@ -1121,10 +1121,10 @@ function SceneGrid(): React.JSX.Element {
   return (
     <div
       ref={rootRef}
-      className="flex min-h-0 flex-1 flex-col rounded-xl border border-line bg-surface"
+      className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-line bg-surface"
     >
       {/* 툴바 — 한 행: 프리셋 드롭다운 + 아이콘(툴팁) */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-2 py-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-2 py-1.5">
         <PresetDropdown />
         <div className="mx-1 h-5 w-px bg-line" />
         <IconBtn icon={<FileDown size={16} />} tip="JSON 내보내기" onClick={exportJson} />

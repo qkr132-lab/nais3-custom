@@ -195,21 +195,27 @@ export default function App(): React.JSX.Element {
               </motion.div>
             )}
           </AnimatePresence>
-          {centerMode === 'scene' || centerMode === 'background' ? (
-            <SceneMode key={centerMode} kind={centerMode} />
-          ) : centerMode === 'outfit' ? (
-            <OutfitMode />
-          ) : centerMode === 'composition' ? (
-            <CompositionMode />
-          ) : centerMode === 'director' ? (
-            <DirectorMode />
-          ) : centerMode === 'library' ? (
-            <LibraryMode />
-          ) : centerMode === 'upload' ? (
-            <UploadMode />
-          ) : centerMode === 'main' ? (
-            <PreviewPane />
-          ) : null}
+          {/* 가운데 칸은 남는 폭까지만 — min-w-0 이 없으면 넓은 툴바·격자가 줄지 않아 오른쪽 히스토리를 창 밖으로 민다
+              (1920 창에서 왼쪽 패널을 넓히면 히스토리 「전체 비우기」 휴지통이 안 보이던 문제) */}
+          {centerMode !== 'web' && (
+            <div className="flex min-h-0 min-w-0 flex-1">
+              {centerMode === 'scene' || centerMode === 'background' ? (
+                <SceneMode key={centerMode} kind={centerMode} />
+              ) : centerMode === 'outfit' ? (
+                <OutfitMode />
+              ) : centerMode === 'composition' ? (
+                <CompositionMode />
+              ) : centerMode === 'director' ? (
+                <DirectorMode />
+              ) : centerMode === 'library' ? (
+                <LibraryMode />
+              ) : centerMode === 'upload' ? (
+                <UploadMode />
+              ) : centerMode === 'main' ? (
+                <PreviewPane />
+              ) : null}
+            </div>
+          )}
           {/* 웹 모드는 hidden 유지 렌더 — 모드를 오가도 페이지/로그인이 유지된다 */}
           <WebModeKeepAlive active={centerMode === 'web'} />
           <AnimatePresence initial={false}>

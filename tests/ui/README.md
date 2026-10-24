@@ -98,7 +98,9 @@ All harness files live under `tests/ui`, already excluded by the installer's
 Scene grid navigation: open `/scene-grid.html` (`?kind=background` for the background library,
 `?count=300` for more scenes per preset, `?busy=5` to mark the 5th scene as generating, `?panels=1`
 to put scrollable fake side panels next to the grid for checking that Home/End/PageUp/PageDown only
-move the grid when the last click or the focus was inside it). It renders
+move the grid when the last click or the focus was inside it; `?panels=app&left=560` lays the grid
+out like the real app — a direct child of the row beside a 240px history column — to check that a
+wide prompt panel no longer pushes the history off the window). It renders
 the actual `SceneMode` with two fake presets of 120 fictional scenes (canvas-drawn thumbnails) and an
 in-memory fake `window.nais`, so no network, file or NAI call is made. Covers the quick-scroll bar and
 its bubble, scene find (`Ctrl+Shift+F`, Enter / Shift+Enter, Esc), Home/End/PageUp/PageDown, scroll

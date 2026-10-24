@@ -21,6 +21,8 @@ import './placement.css'
  *   ?count=300        프리셋당 씬 수 (기본 120)
  *   ?busy=5           순번 5번 씬을 「생성 중」으로 표시
  *   ?panels=1         격자 양옆에 스크롤되는 가짜 패널(왼쪽 프롬프트·오른쪽 히스토리)을 둔다 — 키 이동 범위 확인용
+ *   ?panels=app       실제 앱과 같은 배치(격자를 줄의 직속 칸으로 + 오른쪽 히스토리 240px) — &left=폭 으로 왼쪽 패널 폭.
+ *                     넓은 창에서 왼쪽 패널을 넓혀도 히스토리가 창 밖으로 밀리지 않는지 확인용
  * 시험용 함수는 window.sceneGridFixture (기록된 IPC 호출·순서·상태 조회)
  */
 
@@ -253,6 +255,23 @@ function FakePanel({ testId, title }: { testId: string; title: string }): React.
 
 function Workspace(): React.JSX.Element {
   useEffect(() => bindShortcuts(), [])
+  // ?panels=app — 실제 앱(App.tsx)과 같은 배치: 씬 화면을 감싸지 않고 줄의 직속 칸으로, 오른쪽 히스토리 240px(shrink-0).
+  // 넓은 창에서 씬 화면이 줄지 않고 히스토리를 화면 밖으로 미는지 보는 용도 (?left=폭 으로 왼쪽 패널 폭)
+  if (params.get('panels') === 'app')
+    return (
+      <main className="relative flex h-full min-h-0 gap-3 px-3 pb-3">
+        <aside
+          data-testid="fake-left"
+          className="shrink-0 rounded-xl border border-line bg-surface"
+          style={{ width: Number(params.get('left') ?? 560) }}
+        />
+        <SceneMode kind={kind} />
+        <aside
+          data-testid="fake-right"
+          className="h-full w-[240px] shrink-0 overflow-hidden rounded-xl border border-line bg-surface"
+        />
+      </main>
+    )
   if (params.get('panels') !== '1')
     return (
       <main className="flex h-full flex-col p-3">
