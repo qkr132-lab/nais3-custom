@@ -361,6 +361,31 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     )
   })
 
+  it('씬의 옷 벗기기 버튼은 하는쪽까지 둘 다 벗긴다 (장면 태그의 nude 는 당하는쪽만)', () => {
+    useOutfitsStore.setState({ kinds: { 'school swimsuit': 'cloth', suit: 'cloth' } })
+    useCharactersStore.setState({
+      items: [
+        { ...card(1, 'blue eyes, school swimsuit', true), outfitId: 9, role: 'target' },
+        { ...card(2, 'green eyes, suit', true), role: 'source' }
+      ]
+    })
+    const prompts = (prompt: string): string[] =>
+      buildSceneRequest({ ...scene, prompt, censorKinds: [] }).characterPrompts.map((c) => c.prompt)
+    // 장면 태그의 nude — 전체 설정이 켜져 있으면 당하는쪽만 벗긴다
+    useOutfitsStore.setState({ stripOnNude: true })
+    const [target, source] = prompts('bath, nude')
+    expect(target).toContain('completely nude')
+    expect(source).toContain('suit')
+    expect(source).not.toContain('nude')
+    // 버튼 — 누드 태그가 없어도 둘 다 벗긴다
+    useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
+    const [t2, s2] = prompts('onsen, bathing')
+    expect(t2).not.toContain('school swimsuit')
+    expect(t2).toContain('completely nude')
+    expect(s2).not.toContain('suit')
+    expect(s2).toContain('nude, completely nude')
+  })
+
   it('하는쪽 태그의 행위(breast punch)로 당하는쪽 가슴 조각이 켜진다', () => {
     useCharactersStore.setState({
       items: [
