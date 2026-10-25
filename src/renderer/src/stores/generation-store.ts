@@ -468,6 +468,7 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       },
       outfit: dressed.outfit,
       sex: readings[index].body.futa ? null : sexes[index],
+      giver: c.role === 'source',
       who: { index, name: c.name, id: c.id }
     })
     // 후타 재조립 — 상대 태그도 후타 구성에 맞게. 젖힘 엔진은 바꾸기 전 원문을 읽는다 (아래 own 은 원문)

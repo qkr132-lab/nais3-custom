@@ -45,13 +45,22 @@ export interface EyeContexts {
   scene?: readonly string[]
   /** 하는쪽/당하는쪽 태그 칸 */
   role?: readonly string[]
-  /** 이 캐릭터만의 글 — 씬별 캐릭터 태그·자리 태그·상대 태그 */
+  /** 이 캐릭터만의 글 — 씬별 캐릭터 태그·상대 태그 (자리 태그를 seat 로 따로 주지 않으면 자리 태그도 여기) */
   char?: readonly string[]
+  /**
+   * 자리 태그 — char 와 같은 범위다. 「안 바꿈」 이유에서 인셋 자리라고 말해도 되는지(눈 뜬 표현이 자리 태그에서 왔는지)를
+   * 가리는 데만 따로 둔다
+   */
+  seat?: readonly string[]
 }
 
 /** 글 목록만 주면 씬 전체 글로 본다 (범위를 가르지 않는 호출) */
 const groupsOf = (contexts: EyeContexts | readonly string[]): EyeContexts =>
   Array.isArray(contexts) ? { scene: contexts as readonly string[] } : (contexts as EyeContexts)
+
+/** 범위 하나의 글 — 이 캐릭터만의 글(char)은 자리 태그(seat)를 함께 읽는다 */
+const textsOf = (g: EyeContexts, scope: EyeScope): readonly string[] =>
+  scope === 'char' ? [...(g.char ?? []), ...(g.seat ?? [])] : (g[scope] ?? [])
 
 const SCOPES: EyeScope[] = ['scene', 'role', 'char']
 
@@ -74,11 +83,25 @@ const QUALIFIER = /^(?:half|partly|partially|slightly|barely|almost|nearly|mostl
 /** 부정어 — her eyes are not closed · without closing her eyes · never closes her eyes */
 const NEGATION =
   /^(?:not|no|never|without|nor|neither|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|won't|can't|cannot|couldn't|wouldn't|shouldn't|unable|refuses|refused|fails|failed)$/
+/** 닫힘 바로 뒤에서 감은 눈이 아니라는 말 — eyes closed halfway · eyes wide open */
+const AFTER_WIDE = /^(?:wide|halfway|partway|partly|partially|slightly)$/
+const AFTER_OPEN = /^(?:open|opened)$/
+const AFTER_MOUTH_OPEN = /^(?:open|opened|agape|ajar)$/
+
 /**
- * 닫힘 바로 뒤에서 감은 눈이 아니라는 말 — eyes closed halfway · eyes wide open · open eyes closed mouth ·
- * (쉼표 없이 이어 쓴 글 mouth closed eyes wide open). 눈이 보이거나 닫힌 것이 눈이 아니다
+ * 닫힘 낱말(end) 바로 뒤가 「눈이 보인다」거나 「닫힌 것이 눈이 아니다」를 말하는가.
+ * 쉼표 없이 이어 쓴 글을 가른다 — mouth closed eyes wide open(눈 뜸) · open eyes closed mouth(닫힌 것은 입) 는 막고,
+ * closed eyes open mouth · eyes closed mouth open(입이 열림)은 감은 눈이다.
+ * byEyesFirst = 「eyes … closed」 어순 — 닫힘 뒤의 mouth 는 닫힌 입일 수 있어 입이 열렸다는 말이 이어질 때만 감은 눈으로 본다
  */
-const AFTER_BLOCK = /^(?:wide|open|opened|halfway|partway|partly|partially|slightly|mouth)$/
+function afterBlocksClosed(words: string[], end: number, byEyesFirst: boolean): boolean {
+  const next = words[end + 1] ?? ''
+  const after = words[end + 2] ?? ''
+  if (AFTER_WIDE.test(next)) return true
+  if (AFTER_OPEN.test(next)) return after !== 'mouth'
+  if (byEyesFirst && next === 'mouth') return !AFTER_MOUTH_OPEN.test(after)
+  return false
+}
 /** 눈과 닫힘 사이에 끼울 수 있는 말의 최대 개수 (eyes are tightly closed = 2개) */
 const MAX_FILLERS = 3
 
@@ -94,6 +117,10 @@ const wordsOf = (s: string): string[] =>
 /** 눈의 주인 — F/M = 지칭어로 정해짐, other = 상대(another's · your …)의 눈, null = 모름 */
 type EyeOwner = 'F' | 'M' | 'other' | null
 
+/** her/his 와 눈 사이에 이 낱말이 끼면 her/his 는 소유격이 아니라 목적어다 — he kisses her with eyes closed */
+const OWNER_BREAK =
+  /^(?:with|to|at|in|on|by|for|of|from|against|into|onto|toward|towards|and|as|while|then|but)$/
+
 function eyeOwner(words: string[], i: number): EyeOwner {
   // 눈 바로 앞의 소유 표현 — her eyes · his closed eyes · the man's eyes
   const before = words[i - 1] ?? ''
@@ -104,6 +131,7 @@ function eyeOwner(words: string[], i: number): EyeOwner {
     if (w === 'her' || /^(?:woman|girl|female|lady)'s$/.test(w)) return 'F'
     if (w === 'his' || /^(?:man|male|boy|guy)'s$/.test(w)) return 'M'
     if (w === 'their') return null
+    if (OWNER_BREAK.test(w)) break
   }
   // 소유 표현이 없으면 토막 앞쪽의 주어 — she keeps eyes closed
   for (let k = 0; k < Math.min(words.length, 4); k++) {
@@ -159,12 +187,16 @@ function sayEyesClosed(text: string, sex: NudeStripSex | null): boolean {
     if (words[i] !== 'eyes') continue
     // 닫힘 낱말이 있는 자리 — (a) closed eyes (b) eyes (are tightly) closed (c) closes her eyes
     let end = -1
+    let eyesFirst = false
     const prev = words[i - 1] ?? ''
     if (CLOSED.test(prev) && !QUALIFIER.test(words[i - 2] ?? '')) end = i
     if (end < 0) {
       let j = i + 1
       while (j < words.length && j <= i + MAX_FILLERS && FILLER.test(words[j])) j++
-      if (j < words.length && CLOSED.test(words[j])) end = j
+      if (j < words.length && CLOSED.test(words[j])) {
+        end = j
+        eyesFirst = true
+      }
     }
     if (end < 0) {
       let k = i - 1
@@ -173,7 +205,7 @@ function sayEyesClosed(text: string, sex: NudeStripSex | null): boolean {
         end = i
     }
     if (end < 0) continue
-    if (AFTER_BLOCK.test(words[end + 1] ?? '')) continue
+    if (afterBlocksClosed(words, end, eyesFirst)) continue
     const start = Math.max(0, i - 4)
     if (words.slice(start, end + 1).some((w) => NEGATION.test(w))) continue
     if (!ownedBy(eyeOwner(words, i), sex)) continue
@@ -197,35 +229,81 @@ const isSqueezedFace = (t: string): boolean => /^tight-shut-eyes-face\d+$/.test(
 // ── 잠듦 ────────────────────────────────────────────────
 
 /**
- * 잠든 상태를 말하는 태그 (단보루 실존) — sleeping · sleeping upright · sleeping on person · sleeping on desk · sleep molestation (당하는 쪽이 잠듦).
+ * 잠든 상태를 말하는 태그 (단보루 실존) — sleeping · sleeping upright · sleeping on person · sleeping on desk.
  * 못 넣는 것 — half-asleep · sleepy · waking up · feigning sleep · unconscious · fainting · sleeping bag · sleepwear · sleeping animal
  */
 const SLEEP_TAG =
-  /^(?:(?:fast|sound|deeply|deep) )?asleep$|^sleeping(?: (?:upright|on person|on desk|soundly|peacefully|deeply|quietly))?$|^sleep molestation$/
+  /^(?:(?:fast|sound|deeply|deep) )?asleep$|^sleeping(?: (?:upright|on person|on desk|soundly|peacefully|deeply|quietly))?$/
+/**
+ * 자는 사람을 당하는 쪽이 가리키는 태그 — sleep molestation (잠든 사람에게 하는 행위: 잠든 쪽은 받는 쪽이다).
+ * 하는쪽 캐릭터에게는 근거가 아니다 — 깨어서 행위하는 쪽의 눈을 가리면 거꾸로 된 그림이 된다
+ */
+const SLEEP_RECEIVER_TAG = /^sleep molestation$/
 /** 잠듦이 아니게 만드는 말 — 반쯤 · 깨는 중 · 자는 척 · 잠들려는 참 · 침낭 · 잠옷 */
 const SLEEP_BLOCK =
   /^(?:half|barely|almost|nearly|about|trying|try|tries|pretend|pretends|pretending|feign|feigns|feigning|fake|fakes|faking|wake|wakes|waking|woke|awake|awaken|bag|bags|pill|pills|mat|position|gown|wear|quarters|sleepy|drowsy|falling|falls|fall|fell|nodding)$/
-/** 「sleeping 다음」에 오면 자는 사람이 따로 있다는 말 — her sleeping partner */
+/** 「sleeping 다음」에 오면 자는 사람이 따로 있다는 말 — her sleeping partner · his sleeping mother */
 const SLEEPER_NOUN: [RegExp, EyeOwner][] = [
-  [/^(?:partner|husband|boyfriend|lover|friend|child|baby|cat|dog|pet|animal|bird|fox)$/, 'other'],
+  [
+    /^(?:partners?|husband|wife|boyfriend|girlfriend|lover|friends?|child|children|baby|kid|kids|cat|dog|pet|animal|bird|fox|sister|brother|mother|mom|mum|father|dad|daughter|son|master|guest|customer|stranger|victim|companion|roommate|neighbou?r|teacher|student|boss|maid|servant|prisoner|twin|siblings?|parents?)$/,
+    'other'
+  ],
   [/^(?:man|boy|guy|male)$/, 'M'],
   [/^(?:girl|woman|lady|female)$/, 'F']
 ]
+/** 소유격 + sleeping 다음에 와도 자는 사람이 소유자 자신인 몸 낱말 — her sleeping face */
+const SLEEPER_BODY =
+  /^(?:face|body|head|eyes|self|expression|form|figure|features|profile|posture|pose|appearance|look|looks)$/
+/** sleeping 다음에 와서 「자는 사람」이 아니라 상태를 이어 말하는 낱말 — 이때의 her sleeping 은 소유자가 자는 것이다 */
+const SLEEP_CONTINUES =
+  /^(?:with|on|in|at|by|beside|next|under|and|but|while|as|because|when|so|to|after|before|from|during|like|together|around|against|upon|over|still|soundly|peacefully|deeply|quietly|fast|too|also|again|now|then|here|there|upright)$/
+/** 같이 자는 사람을 가리켜 「성관계」 뜻으로 쓰는 낱말 — sleeping with him · sleeps with her boyfriend */
+const SLEEP_WITH_PERSON =
+  /^(?:him|them|me|you|us|himself|someone|somebody|everyone|anyone|another|strangers?|men|women|man|woman|guy|guys|boy|boys|girl|girls|partners?|husband|wife|boyfriend|girlfriend|lovers?|friends?|sister|brother|mother|mom|mum|father|dad|boss|teacher|master|customers?|clients?|king|prince|knight|neighbou?r)$/
 
-/** 토막 하나가 이 캐릭터가 잠들었다고 말하는가 (소문자·norm 한 글) — 태그는 누구에게나, 문장은 주어로 가른다 */
-function saySleeping(text: string, sex: NudeStripSex | null): boolean {
+/** asleep/sleeping/sleeps 가 「누구와 잔다」(성관계 완곡어)로 쓰였는가 — she is sleeping with him · they sleep together */
+function sleepsWithSomeone(words: string[], i: number): boolean {
+  const next = words[i + 1] ?? ''
+  if (next === 'together') return true
+  if (next !== 'with') return false
+  const a = words[i + 2] ?? ''
+  if (/^(?:the|a|an|my|your|our|his|their|her)$/.test(a)) {
+    const b = words[i + 3]
+    // 「with her」로 끝나면 목적어다 — with her eyes closed 와 가른다
+    if (b === undefined) return a === 'her' || a === 'his'
+    return SLEEP_WITH_PERSON.test(b)
+  }
+  return SLEEP_WITH_PERSON.test(a)
+}
+
+/**
+ * 토막 하나가 이 캐릭터가 잠들었다고 말하는가 (소문자·norm 한 글) — 태그는 누구에게나, 문장은 주어로 가른다.
+ * giver = 이 캐릭터가 하는쪽이다 — sleep molestation 은 자는 쪽(받는 쪽)의 태그라 하는쪽에게는 근거가 아니다
+ */
+function saySleeping(text: string, sex: NudeStripSex | null, giver = false): boolean {
   if (SLEEP_TAG.test(text)) return true
+  if (!giver && SLEEP_RECEIVER_TAG.test(text)) return true
   const words = wordsOf(text)
   if (words.some((w) => SLEEP_BLOCK.test(w))) return false
   for (let i = 0; i < words.length; i++) {
     if (!/^(?:asleep|sleeping|sleeps)$/.test(words[i])) continue
     if (words.slice(Math.max(0, i - 4), i).some((w) => NEGATION.test(w))) continue
     if (words.slice(i + 1, i + 3).some((w) => NEGATION.test(w))) continue
+    if (sleepsWithSomeone(words, i)) continue
     let owner = subjectOwner(words, i)
     // her sleeping partner — 자는 사람은 다음 낱말이 가리킨다
     const noun = words[i + 1] ?? ''
     if (words[i] === 'sleeping') {
       for (const [re, who] of SLEEPER_NOUN) if (re.test(noun)) owner = who
+      // her sleeping X — X 가 사람·물건이면 자는 것은 소유자가 아니라 X 다 (몸 낱말·이어 말하는 낱말만 소유자 몫)
+      if (
+        /^(?:her|his|their|my|your)$/.test(words[i - 1] ?? '') &&
+        noun &&
+        !SLEEPER_BODY.test(noun) &&
+        !SLEEP_CONTINUES.test(noun) &&
+        !BE_WORD.test(noun)
+      )
+        owner = SLEEPER_NOUN.some(([re]) => re.test(noun)) ? owner : null
     }
     if (owner === null) continue
     if (!ownedBy(owner, sex)) continue
@@ -236,24 +314,33 @@ function saySleeping(text: string, sex: NudeStripSex | null): boolean {
 
 // ── 눈 가림 ──────────────────────────────────────────────
 
-/**
- * 눈가리개가 눈을 덮고 있지 않다는 말 — blindfold lift · blindfold removed · blindfold around neck · blindfold on head ·
- * unworn blindfold · no blindfold · see-through blindfold(비쳐 보임) · 한쪽 눈만(over one eye)
- */
-const COVER_BLOCK =
-  /^(?:lift|lifted|lifting|lifts|remove|removed|removing|removes|off|unworn|no|without|not|never|see-through|transparent|sheer|mesh|translucent|loose|loosened|untied|untie|pulled|pulling|pushed|pushing|slipped|slipping|down|up|holding|holds|hold|taking|takes|took|hanging|dangling|fallen|dropped|one|eye)$/
-/** 머리 위·목에 걸쳤다는 말 — blindfold on head · blindfold around neck · mask on her forehead */
+/** 눈가리개 낱말 — blindfold · blindfolds · blindfolded · blindfolding (명사·동사·분사) */
+const BLINDFOLD_WORD = /^blindfold(?:s|ed|ing)?$/
+const SLEEP_WORDS = /^(?:sleep|sleeping)$/
+
+/** 눈가리개·수면 안대를 푸는·올리는·벗은 낱말 — blindfold lift · blindfold removed · unworn blindfold · see-through blindfold */
+const LIFT_WORD =
+  /^(?:lift|lifted|lifting|lifts|raise|raised|raising|raises|remove|removed|removing|removes|off|unworn|loose|loosened|loosen|loosening|taking|takes|took|taken|dropped|fallen|see-through|transparent|sheer|mesh|translucent)$/
+/** 푸는 동작 — untie · untied · untying · undo · undoing · undone · unwrap · unfasten · unbuckle … */
+const UN_WORD =
+  /^un(?:tie|ties|tied|tying|do|does|doing|done|wrap|wraps|wrapped|wrapping|fasten|fastens|fastened|fastening|buckle|buckles|buckled|buckling|knot|knots|knotted|knotting|lace|laces|laced|lacing|clasp|clasps|clasped|clasping|hook|hooks|hooked|hooking)$/
+/** 옮기는 동작 — 눈 위로 끌어내린 것(pulled over her eyes)은 덮은 것이라, 가까이에 eyes 가 있으면 푼 것으로 보지 않는다 */
+const MOVE_WORD = /^(?:pulled|pulling|pushed|pushing|slipped|slipping|slid|sliding|shoved)$/
+/** 손에 든 것·걸린 것 — 쓰고 있지 않다 (물건 바로 앞뒤 2낱말만) */
+const HELD_WORD = /^(?:holding|holds|hold|held|hanging|dangling|carrying|carries|carried)$/
+/** 한쪽 눈만 — blindfold over one eye */
+const SINGLE_WORD = /^(?:one|single|eye)$/
+/** 머리 위·목에 걸쳤다는 말 — blindfold on head · blindfold around neck · mask on her forehead (around head 는 눈가리개를 쓴 묘사라 뺀다) */
 const WORN_ELSEWHERE =
-  /\b(?:on|atop|above|around|over) (?:the |her |his |their )?(?:head|forehead|neck)\b/
+  /\b(?:(?:on|onto|atop|above) (?:the |her |his |their )?(?:head|forehead)|around (?:the |her |his |their )?neck)\b/
 /** 손가락 사이로 엿보는 표현 — peeking through fingers · 머리카락이 가린 것(hair over eyes)은 이번 범위 밖 */
 const PEEK =
   /^(?:peek|peeks|peeking|peeked|through|between|fingers|gap|gaps|spread|hair|bangs|fringe)$/
 const COVER_VERB = /^(?:cover|covers|covered|covering)$/
-/** 눈을 덮는 물건·손 — hands over her eyes · bandages over eyes · penis over eyes */
+/** 눈을 덮는 물건·손 — hands over her eyes · bandages over eyes · penis over eyes (dick/cock/arm over eyes 는 단보루에 없는 표기라 읽지 않는다) */
 const COVER_THING = /^(?:hand|hands|bandage|bandages|gauze|penis)$/
 /** eyes covered 뒤에서 가린 것이 아니라 묻은 것을 뜻하는 말 — covered in tears · covered with cum */
 const COVERED_STAIN = /^(?:in|with)$/
-const SLEEP_WORDS = /^(?:sleep|sleeping)$/
 
 /** 눈 가림 물건의 종류 — 눈가리개(blindfold) · 수면 안대(sleep mask). 「들어 올림」 표현이 이 물건들에만 영향을 준다 */
 type MaskKind = 'blindfold' | 'sleep'
@@ -263,26 +350,120 @@ interface CoverHit {
   mask: MaskKind | null
 }
 
+/** words[i] 가 눈가리개·수면 안대 낱말인가 — 어느 물건인지 */
+function maskKindAt(words: string[], i: number): MaskKind | null {
+  const w = words[i]
+  if (BLINDFOLD_WORD.test(w)) return 'blindfold'
+  if (w === 'mask' && SLEEP_WORDS.test(words[i - 1] ?? '')) return 'sleep'
+  return null
+}
+
+/**
+ * words[i] 의 눈가리개·수면 안대가 눈을 덮고 있지 않다는 말이 가까이 있는가 — 앞뒤 3낱말만 본다 (조각 전체를 읽지 않는다).
+ * single = 한쪽 눈만(one eye)도 덮고 있지 않은 것으로 센다. 부정어(no · not · without · never)도 센다
+ */
+function maskNotCovering(words: string[], i: number, single: boolean): boolean {
+  const person = words[i] === 'blindfolded'
+  const eyesNear = words.slice(Math.max(0, i - 3), i + 6).includes('eyes')
+  for (let k = Math.max(0, i - 3); k <= Math.min(words.length - 1, i + 3); k++) {
+    if (k === i) continue
+    const w = words[k]
+    if (LIFT_WORD.test(w) || UN_WORD.test(w) || NEGATION.test(w)) return true
+    if (MOVE_WORD.test(w) && !eyesNear) return true
+    if (!person && HELD_WORD.test(w) && Math.abs(k - i) <= 2) return true
+    if (single && SINGLE_WORD.test(w)) return true
+  }
+  // blindfold up · blindfold down — 바로 뒤에 붙은 up/down 만 (blindfolded and tied up 의 up 은 아니다)
+  return !person && /^(?:up|down)$/.test(words[i + 1] ?? '')
+}
+
+const DET_NEUTRAL = /^(?:the|a|an|that|this)$/
+const PERSON_F = /^(?:woman|girl|female|lady|heroine)$/
+const PERSON_M = /^(?:man|boy|male|guy)$/
+
+/** words[j] 부터 읽는 사람(목적어)이 누구인가 — her partner · the man · him · 모르면 null */
+function personAt(words: string[], j: number): EyeOwner {
+  let k = j
+  while (k < words.length && DET_NEUTRAL.test(words[k])) k++
+  const w = words[k]
+  if (!w) return null
+  const next = words[k + 1] ?? ''
+  if (/^(?:me|you|us)$/.test(w) || OTHER_SUBJECT.test(w)) return 'other'
+  if (w === 'her' || w === 'herself') return OTHER_SUBJECT.test(next) ? 'other' : 'F'
+  if (w === 'his') return OTHER_SUBJECT.test(next) ? 'other' : 'M'
+  if (w === 'him' || w === 'himself') return 'M'
+  if (PERSON_F.test(w)) return 'F'
+  if (PERSON_M.test(w)) return 'M'
+  return null
+}
+
+/** 눈가리개를 씌우는 동작의 동사 — he puts a blindfold on her (이 동사의 주어는 쓰는 사람이 아니다) */
+const MASK_DO_VERB =
+  /^(?:put|puts|putting|tie|ties|tying|tied|place|places|placing|placed|wrap|wraps|wrapping|wrapped|fasten|fastens|fastening|fastened|apply|applies|applying|applied|secure|secures|securing|secured|strap|straps|strapping|strapped|bring|brings|hand|hands|give|gives|offer|offers)$/
+/** 쓰는 사람이 주어인 동사 — she wears a blindfold */
+const MASK_WEAR_VERB = /^(?:wear|wears|wearing|worn|wore|don|dons|donning|donned)$/
+const PUT_VERB = /^(?:put|puts|putting)$/
+/** 눈가리개 뒤에서 쓴 사람을 가리키는 전치사 — blindfold on him · blindfold over her eyes */
+const MASK_PREP = /^(?:on|onto|over|across|around|covering|against)$/
+const GET_VERB = /^(?:get|gets|getting|got)$/
+
+/**
+ * 눈가리개·수면 안대(words[i])를 쓴 사람이 누구인가 — 모르면 null (이때는 이 캐릭터에게도 걸린다).
+ * he blindfolded her · he puts a blindfold on her · his eyes are covered by a blindfold · she is blindfolded · her blindfold · blindfolded man
+ */
+function maskWearer(words: string[], i: number): EyeOwner {
+  const w = words[i]
+  // 동사·분사 — 목적어가 쓰는 사람이다 (blindfolds/blindfolded/blindfolding + 사람)
+  if (/^blindfold(?:s|ed|ing)$/.test(w)) {
+    const prev = words[i - 1] ?? ''
+    const passive =
+      w === 'blindfolded' &&
+      (BE_WORD.test(prev) || GET_VERB.test(prev) || SUBJECT_ADVERB.test(prev))
+    if (passive) return subjectOwner(words, i)
+    const obj = personAt(words, i + 1)
+    if (obj !== null) return obj
+    if (w === 'blindfolded') return subjectOwner(words, i)
+  }
+  // 명사 — 뒤따르는 전치사의 사람 (blindfold on her · over his eyes)
+  for (let j = i + 1; j <= Math.min(words.length - 1, i + 4); j++) {
+    if (!MASK_PREP.test(words[j])) continue
+    const p = personAt(words, j + 1)
+    if (p !== null) return p
+  }
+  // 앞에서 눈의 주인을 말했다 — his eyes are covered by a blindfold
+  for (let e = i - 1; e >= Math.max(0, i - 6); e--) {
+    if (words[e] !== 'eyes') continue
+    const o = eyeOwner(words, e)
+    if (o !== null) return o
+    break
+  }
+  // 소유격 — her blindfold · his black blindfold (쓰고 있는지는 알 수 없으나 쓴 사람은 주인)
+  for (let k = i - 1; k >= Math.max(0, i - 2); k--) {
+    const p = words[k]
+    if (p === 'her' || /^(?:woman|girl|female|lady)'s$/.test(p)) return 'F'
+    if (p === 'his' || /^(?:man|male|boy|guy)'s$/.test(p)) return 'M'
+    if (/^(?:another|other|someone|partner|viewer)'s$/.test(p)) return 'other'
+  }
+  // 쓰는 동사 — she wears a blindfold · she puts on a blindfold
+  for (let k = i - 1; k >= Math.max(0, i - 5); k--) {
+    const v = words[k]
+    if (MASK_WEAR_VERB.test(v) || (PUT_VERB.test(v) && words[k + 1] === 'on'))
+      return subjectOwner(words, k)
+    // 씌우는 동사의 주어는 쓰는 사람이 아니다 — 쓰는 사람을 모르니 거르지 않는다
+    if (MASK_DO_VERB.test(v)) return null
+  }
+  return null
+}
+
 /** 눈가리개·수면 안대가 눈을 덮었다고 말하는가 — 덮었으면 어느 물건인지 */
 function sayMaskCovers(words: string[], sex: NudeStripSex | null): MaskKind | null {
+  const elsewhere = WORN_ELSEWHERE.test(words.join(' '))
   for (let i = 0; i < words.length; i++) {
-    const w = words[i]
-    const blindfold = /^blindfold(?:s|ed)?$/.test(w)
-    const sleepMask = w === 'mask' && SLEEP_WORDS.test(words[i - 1] ?? '')
-    if (!blindfold && !sleepMask) continue
-    const from = Math.max(0, i - 3)
-    const around = [...words.slice(from, i), ...words.slice(i + 1, i + 4)]
-    if (around.some((x) => COVER_BLOCK.test(x) || NEGATION.test(x))) continue
-    if (WORN_ELSEWHERE.test(words.join(' '))) continue
-    // blindfolded 는 사람에게 붙는다 — she is blindfolded · her partner is blindfolded
-    if (w === 'blindfolded') {
-      const owner = subjectOwner(words, i)
-      if (owner !== null && !ownedBy(owner, sex)) continue
-    } else if (words[i - 1] === 'her' || words[i - 1] === 'his') {
-      // 「her blindfold」 — 쓰고 있는지는 알 수 없으나 쓴 사람은 주인
-      if (!ownedBy(words[i - 1] === 'her' ? 'F' : 'M', sex)) continue
-    }
-    return blindfold ? 'blindfold' : 'sleep'
+    const kind = maskKindAt(words, i)
+    if (!kind) continue
+    if (elsewhere || maskNotCovering(words, i, true)) continue
+    if (!ownedBy(maskWearer(words, i), sex)) continue
+    return kind
   }
   return null
 }
@@ -331,22 +512,25 @@ function sayCovered(text: string, sex: NudeStripSex | null): CoverHit | null {
 
 /**
  * 눈가리개·수면 안대를 들어 올렸거나 벗었다는 토막 — 한 글에라도 있으면 그 물건은 근거로 치지 않는다.
+ * 그 물건 낱말 앞뒤 3낱말만 읽는다 (조각의 다른 낱말은 보지 않는다 — blindfolded and tied up 은 푼 것이 아니다).
  * all = 눈가리개·수면 안대 둘 다 (blindfold lift · blindfold removed · sleep mask on head …)
  * sleep = 수면 안대만 (그냥 mask on head — 무슨 마스크인지 모르니 눈가리개까지 지우지 않는다)
  */
 function liftsMask(text: string): 'all' | 'sleep' | null {
   const words = wordsOf(text)
-  const hasBlindfold = words.some((w) => /^blindfold(?:s|ed)?$/.test(w))
-  const hasSleepMask = words.some((w, i) => w === 'mask' && SLEEP_WORDS.test(words[i - 1] ?? ''))
-  const hasMask = words.includes('mask')
-  if (!hasBlindfold && !hasSleepMask && !hasMask) return null
   const elsewhere = WORN_ELSEWHERE.test(words.join(' '))
-  if (hasBlindfold || hasSleepMask)
-    return elsewhere || words.some((w) => COVER_BLOCK.test(w) && !/^(?:one|eye)$/.test(w))
-      ? 'all'
-      : null
+  let hasMask = false
+  let lifted = false
+  let plainMask = false
+  for (let i = 0; i < words.length; i++) {
+    if (maskKindAt(words, i)) {
+      hasMask = true
+      if (maskNotCovering(words, i, false)) lifted = true
+    } else if (words[i] === 'mask') plainMask = true
+  }
+  if (hasMask) return elsewhere || lifted ? 'all' : null
   // 그냥 mask — 머리 위로 올린 마스크(mask on head)만 수면 안대를 올린 것으로 본다
-  return elsewhere ? 'sleep' : null
+  return plainMask && elsewhere ? 'sleep' : null
 }
 
 // ── 눈이 안 보임 — 근거 찾기 ─────────────────────────────
@@ -363,7 +547,7 @@ interface Hit {
 }
 
 /** 글 하나에서 첫 근거 — 실제로 보내는 글과 같게 읽는다 (주석·랜덤 선택지·와일드카드·빼달라는 음수·0 가중치·Text: 블록·따옴표 대사는 신호가 아니다) */
-function* hitsIn(text: string, sex: NudeStripSex | null): Generator<Hit> {
+function* hitsIn(text: string, sex: NudeStripSex | null, giver: boolean): Generator<Hit> {
   if (!text || !HIDDEN_HINT.test(text)) return
   const faces: string[] = []
   const live = text.replace(GT_LT, (m) => `${SQUEEZED}${faces.push(m) - 1}`)
@@ -372,7 +556,7 @@ function* hitsIn(text: string, sex: NudeStripSex | null): Generator<Hit> {
     const raw = clip(frag.raw.replace(SQUEEZED_BACK, (_, i: string) => faces[Number(i)]))
     if (CLOSED_FACES.has(frag.text) || isSqueezedFace(frag.text) || sayEyesClosed(frag.text, sex))
       yield { cause: 'closed', text: raw, mask: null }
-    else if (saySleeping(frag.text, sex)) yield { cause: 'asleep', text: raw, mask: null }
+    else if (saySleeping(frag.text, sex, giver)) yield { cause: 'asleep', text: raw, mask: null }
     else {
       const covered = sayCovered(frag.text, sex)
       if (covered) yield { cause: 'covered', text: raw, mask: covered.mask }
@@ -398,11 +582,13 @@ export interface EyeEvidence {
  * 보여 주는 근거는 넓은 범위의 글부터 처음 만난 것, narrowest 는 근거가 있는 가장 좁은 범위.
  * 복장은 눈 가림 물건(blindfold · 눈을 덮은 sleep mask)만 근거로 본다.
  * sex = 문장의 her/his 를 이 캐릭터 몸과 맞춰 볼 때의 성별 (null = 맞춰 보지 않음 — 후타).
+ * giver = 이 캐릭터가 하는쪽 (sleep molestation 처럼 받는 쪽의 태그는 하는쪽에게 근거가 아니다).
  */
 export function hiddenEyesEvidence(
   contexts: EyeContexts | readonly string[],
   sex: NudeStripSex | null,
-  outfit?: string
+  outfit?: string,
+  giver = false
 ): EyeEvidence | null {
   const groups = groupsOf(contexts)
   // 눈가리개를 들어 올렸다/벗었다는 글이 어디에라도 있으면 눈가리개·수면 안대는 근거로 치지 않는다
@@ -411,7 +597,7 @@ export function hiddenEyesEvidence(
   const maskLifted = (kind: MaskKind): boolean => {
     if (lifted === undefined) {
       lifted = { all: false, sleep: false }
-      const texts = [...SCOPES.flatMap((s) => [...(groups[s] ?? [])]), outfit ?? '']
+      const texts = [...SCOPES.flatMap((s) => [...textsOf(groups, s)]), outfit ?? '']
       for (const t of texts) {
         if (!t || !HIDDEN_HINT.test(t)) continue
         for (const f of liveFragments(t)) {
@@ -428,8 +614,8 @@ export function hiddenEyesEvidence(
   for (const scope of SCOPES) {
     // 범위마다 까닭별로 처음 만난 근거 하나씩 — 눈 감음이 잠듦 뒤에 적혀 있어도 눈 감음을 놓치지 않는다
     const seen = new Set<EyeCause>()
-    for (const text of groups[scope] ?? []) {
-      for (const hit of hitsIn(text, sex)) {
+    for (const text of textsOf(groups, scope)) {
+      for (const hit of hitsIn(text, sex, giver)) {
         if (seen.has(hit.cause) || (hit.mask && maskLifted(hit.mask))) continue
         seen.add(hit.cause)
         found.push({ scope, hit })
@@ -439,7 +625,7 @@ export function hiddenEyesEvidence(
   }
   // 복장 — 눈 가림 물건만. 이 캐릭터만의 글과 같은 범위
   if (outfit) {
-    for (const hit of hitsIn(outfit, sex)) {
+    for (const hit of hitsIn(outfit, sex, giver)) {
       if (hit.cause !== 'covered' || (hit.mask && maskLifted(hit.mask))) continue
       found.push({ scope: 'char', hit, outfit: true })
       break
@@ -515,15 +701,22 @@ function openEyesIn(texts: readonly string[], sex: NudeStripSex | null): string 
   return null
 }
 
-/** 이 캐릭터의 글에서 가장 좁은 범위의 눈 뜬 표현 */
+/** 이 캐릭터의 글에서 가장 좁은 범위의 눈 뜬 표현 — seat = 그 표현이 자리 태그에서 왔다 */
 export function openEyesExpression(
   contexts: EyeContexts | readonly string[],
   sex: NudeStripSex | null
-): { text: string; scope: EyeScope } | null {
+): { text: string; scope: EyeScope; seat?: boolean } | null {
   const groups = groupsOf(contexts)
-  let best: { text: string; scope: EyeScope } | null = null
+  let best: { text: string; scope: EyeScope; seat?: boolean } | null = null
   for (const scope of SCOPES) {
-    const text = openEyesIn(groups[scope] ?? [], sex)
+    if (scope === 'char') {
+      const own = openEyesIn(groups.char ?? [], sex)
+      const seated = openEyesIn(groups.seat ?? [], sex)
+      if (seated) best = { text: seated, scope, seat: true }
+      else if (own) best = { text: own, scope }
+      continue
+    }
+    const text = openEyesIn(textsOf(groups, scope), sex)
     if (text) best = { text, scope }
   }
   return best
@@ -596,6 +789,11 @@ const SYMBOL = new Set([
   'dashed eyes',
   'spiral eyes',
   'star shaped eyes',
+  // 단보루에 없는 표기지만 하트·소용돌이 눈을 이렇게 적는 사람이 있다 (swirl eyes 는 실제로 쓰인다)
+  'swirl eyes',
+  'swirling eyes',
+  'heart eyes',
+  'star eyes',
   '@ @',
   '+ +',
   'x x',
@@ -712,7 +910,7 @@ export interface EyeStrip {
  * enabled = 설정 「눈이 안 보이면 눈 태그 빼기」 — false 면 아무것도 읽지 않고 카드 글을 그대로, 메모 없이 돌려준다.
  * contexts = 이 캐릭터에게 걸린 장면 태그 (범위별 — sceneContextGroupsFor. 글 목록만 주면 씬 전체 글로 본다. 얼굴 인셋 자리도 몸 자리와 같다).
  * outfit = 이 캐릭터가 지금 입은 복장 글 (옷 벗기기가 끝난 뒤 실제로 보내는 글) — 눈 가림 물건만 근거가 된다.
- * faceSeat = 얼굴만 나오는 자리(인셋) — 「안 바꿈」 이유에서 자리 이름을 맞추는 데만 쓴다.
+ * faceSeat = 얼굴만 나오는 자리(인셋) — 「안 바꿈」 이유에서 눈 뜬 표현이 자리 태그에서 왔을 때 「인셋 자리」라고 말하는 데만 쓴다.
  * who = 메모에 실을 캐릭터 (characterPrompts 안의 순서·이름·카드 id).
  */
 export function stripEyesWhenClosed(input: {
@@ -721,6 +919,8 @@ export function stripEyesWhenClosed(input: {
   contexts: EyeContexts | readonly string[]
   outfit?: string
   sex: NudeStripSex | null
+  /** 이 캐릭터가 하는쪽인가 — sleep molestation 처럼 받는 쪽의 태그를 하는쪽에게 읽지 않는 데 쓴다 */
+  giver?: boolean
   faceSeat?: boolean
   who: { index: number; name: string; id?: number }
 }): EyeStrip {
@@ -728,7 +928,7 @@ export function stripEyesWhenClosed(input: {
   const none: EyeStrip = { text: card, notes: [] }
   if (!input.enabled || !card || !LOOK_HINT.test(card)) return none
   const groups = groupsOf(input.contexts)
-  const evidence = hiddenEyesEvidence(groups, input.sex, input.outfit)
+  const evidence = hiddenEyesEvidence(groups, input.sex, input.outfit, !!input.giver)
   if (!evidence) return none
   const { cause } = evidence
   const head = EYE_CAUSE_LABEL[cause]
@@ -739,7 +939,7 @@ export function stripEyesWhenClosed(input: {
   const yields = !!open && openRank > evidenceRank
   const together = !!open && openRank === evidenceRank
   const keepReason = open
-    ? `${head} — ${open.scope === 'char' && input.faceSeat ? '인셋 자리' : SCOPE_NAME[open.scope]}에 눈 뜬 표현(${open.text})이 있어 그대로 둠`
+    ? `${head} — ${open.seat ? (input.faceSeat ? '인셋 자리' : '자리 태그') : SCOPE_NAME[open.scope]}에 눈 뜬 표현(${open.text})이 있어 그대로 둠`
     : ''
   const alongside =
     together && open ? ` · 같은 범위에 눈 뜬 표현(${open.text})도 있으나 근거를 따름` : ''

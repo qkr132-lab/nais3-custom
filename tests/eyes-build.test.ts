@@ -955,3 +955,89 @@ describe('저장값 읽기 — eyes_closed_strip (저장값 없음 → 꺼짐, 1
     ])
   })
 })
+
+describe('검수 반영 — sleep molestation 은 받는 쪽만 · 인셋 자리 이름', () => {
+  beforeEach(() => setup({}))
+
+  it('씬 경로: sleep molestation 이 하는쪽 칸에 있어도 하는쪽 눈은 남고, 받는 쪽만 잠든 것으로 읽는다', () => {
+    // 하는쪽 칸 — 하는쪽은 깨어 있다 (거꾸로 하는쪽 눈 색이 빠지던 것)
+    const src = buildSceneRequest(sceneOf({ sourceTags: 'sleep molestation' }))
+    expect(prompts(src)).toEqual([GIRL_CARD, `${BOY_CARD}, sleep molestation`])
+    expect(src.bodyNotes).toBeUndefined()
+    // 같은 태그를 당하는쪽 칸·씬 글에 적으면 자는 쪽(받는 쪽)이 빠진다
+    const tgt = buildSceneRequest(sceneOf({ targetTags: 'sleep molestation' }))
+    expect(prompts(tgt)).toEqual([`${GIRL_CLOSED}, sleep molestation`, BOY_CARD])
+    expect(tgt.bodyNotes?.map((n) => n.cause)).toEqual(['asleep', 'asleep'])
+    const scn = buildSceneRequest(sceneOf({ prompt: 'bed, sleep molestation' }))
+    expect(prompts(scn)).toEqual([GIRL_CLOSED, BOY_CARD])
+  })
+
+  it('씬 경로: 이 씬에서만 얹는 캐릭터 태그의 sleep molestation 도 하는쪽 캐릭터에게는 근거가 아니다', () => {
+    useSceneExtrasStore.setState({
+      additionsEnabled: true,
+      additions: {
+        1: {
+          4: {
+            characterIds: [GIRL, BOY],
+            charRefIds: [],
+            vibeIds: [],
+            charTags: { [BOY]: 'sleep molestation' }
+          }
+        }
+      }
+    })
+    const r = buildSceneRequest(sceneOf())
+    expect(prompts(r)).toEqual([GIRL_CARD, `${BOY_CARD}, sleep molestation`])
+  })
+
+  it('메인 탭 경로: 하는쪽 카드의 상대 태그 sleep molestation 은 받는 쪽만 빼고, 메인 프롬프트의 것도 받는 쪽만', async () => {
+    useCharactersStore.setState({
+      items: [
+        card(GIRL, GIRL_CARD, 'target'),
+        card(BOY, BOY_CARD, 'source', { partnerTags: 'sleep molestation' })
+      ]
+    })
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: 'bed, sleep molestation' },
+      promptSplitEnabled: false
+    })
+    const r = await useGenerationStore.getState().buildMainRequest()
+    expect(prompts(r)).toEqual([`${GIRL_CLOSED}, sleep molestation`, BOY_CARD])
+  })
+
+  it('인셋 자리 이름: 눈 뜬 표현이 씬별 캐릭터 태그에서 왔으면 「이 캐릭터의 글」, 자리 태그에서 왔을 때만 「인셋 자리」', () => {
+    const slots = {
+      slots: [
+        { x: 0.3, y: 0.5 },
+        { x: 0.7, y: 0.5 },
+        { x: 0.7, y: 0.1 }
+      ],
+      slotChars: { 0: BOY, 1: GIRL, 2: GIRL },
+      slotRoles: { 0: 'source', 1: 'target', 2: 'target' } as const
+    }
+    const put = (extra: Record<string, unknown>): void =>
+      useSceneExtrasStore.setState({
+        additionsEnabled: true,
+        additions: {
+          1: { 4: { characterIds: [GIRL, BOY], charRefIds: [], vibeIds: [], ...slots, ...extra } }
+        } as never
+      })
+    // 눈 뜬 표현이 캐릭터 태그에서 왔다 — 인셋 자리도 몸 자리도 그 캐릭터의 글
+    put({ slotTags: { 2: 'close-up, portrait' }, charTags: { [GIRL]: 'looking at viewer' } })
+    const fromChar = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
+    const keptChar = (fromChar.bodyNotes ?? []).filter((n) => n.kind === 'kept')
+    expect(keptChar.length).toBeGreaterThan(0)
+    expect(
+      keptChar.every((n) => /이 캐릭터의 글에 눈 뜬 표현\(looking at viewer\)/.test(n.reason))
+    ).toBe(true)
+    expect(keptChar.some((n) => n.reason.includes('인셋 자리'))).toBe(false)
+    // 눈 뜬 표현이 인셋 자리 태그에서 왔다 — 그 자리만 「인셋 자리」
+    put({ slotTags: { 2: 'close-up, portrait, looking at viewer' } })
+    const fromSeat = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
+    const keptSeat = (fromSeat.bodyNotes ?? []).filter((n) => n.kind === 'kept')
+    expect(keptSeat.length).toBeGreaterThan(0)
+    expect(
+      keptSeat.every((n) => n.reason.includes('인셋 자리에 눈 뜬 표현(looking at viewer)'))
+    ).toBe(true)
+  })
+})

@@ -1,11 +1,11 @@
 import { useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { EYE_CAUSE_LABEL } from '@shared/eyes'
 import type { BodyNote } from '@shared/types'
 import {
   KIND_META,
   bodyCharBadge,
   bodyNoteLine,
+  eyeBadgeLabel,
   eyeHeading,
   groupBodyRounds,
   isEyeCountId,
@@ -171,7 +171,7 @@ export function FutaCharBadges({
         item(k, k === 'suspect' ? '후타 의심' : `후타 ${KIND_META[k].label}`, KIND_META[k].tone)
       )}
       {badge.pink && !badge.futa && item('pink', 'pink nipples', 'ok')}
-      {badge.eyes && item('eyes', EYE_CAUSE_LABEL[badge.eyeCause ?? 'closed'], 'ok')}
+      {badge.eyes && item('eyes', eyeBadgeLabel(badge.eyeCause), 'ok')}
     </span>
   )
 }
@@ -295,8 +295,10 @@ export function BodyBlock({
           ))}
           {eyesOnly ? (
             <p className="text-[11px] text-muted">
-              뺀 것은 보낼 때만이고 카드(캐릭터 탭)의 글은 그대로입니다. 설정의 「눈 감으면 눈 태그
-              빼기」를 끄면 이 기능이 없을 때와 똑같이 나갑니다.
+              {groups.some((g) => g.notes.some((n) => n.kind === 'removed'))
+                ? '뺀 것은 보낼 때만이고 카드(캐릭터 탭)의 글은 그대로입니다.'
+                : '눈 외형은 보낼 때도 그대로 나가고 카드(캐릭터 탭)의 글도 그대로입니다.'}{' '}
+              설정의 「눈이 안 보이면 눈 태그 빼기」를 끄면 이 기능이 없을 때와 똑같이 나갑니다.
             </p>
           ) : (
             <p className="text-[11px] text-muted">

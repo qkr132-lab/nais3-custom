@@ -511,9 +511,11 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     const eyes = stripEyesWhenClosed({
       enabled: eyesOn,
       card: dressed.card,
-      contexts: sceneGroups,
+      // 이 캐릭터만의 글 중 자리 태그는 따로 준다 — 「안 바꿈」 이유에서 인셋 자리를 맞추는 데만 쓰고 범위는 같다
+      contexts: { ...sceneGroups, char: [charTag, partnerTag], seat: [slotTag] },
       outfit: dressed.outfit,
       sex: reading.body.futa ? null : meta.sex,
+      giver: role === 'source',
       faceSeat,
       who: { index, name: c.name, id: c.id }
     })

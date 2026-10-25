@@ -121,6 +121,13 @@ export function eyeHeading(notes: readonly BodyNote[]): string {
   return causes.length === 1 ? EYE_CAUSE_LABEL[causes[0]] : '눈 안 보임'
 }
 
+/** 배지에 쓰는 눈 까닭 — 까닭이 섞여 있으면 mixed (「눈 안 보임」) */
+export type EyeBadgeCause = EyeCause | 'mixed'
+
+/** 배지·호버 머리글 — 까닭이 하나면 그 말(눈 감음·잠듦·눈 가림), 섞여 있으면 「눈 안 보임」 (eyeHeading 과 같은 규칙) */
+export const eyeBadgeLabel = (cause: EyeBadgeCause | null): string =>
+  cause === 'mixed' ? '눈 안 보임' : EYE_CAUSE_LABEL[cause ?? 'closed']
+
 /** 요약 조각 id 로 쓰는 눈 까닭 — eyes = 눈 감음 */
 export type EyeCountId = 'eyes' | 'eyesAsleep' | 'eyesCovered'
 const EYE_COUNT_CAUSE: Record<EyeCountId, EyeCause> = {
@@ -350,8 +357,8 @@ export interface BodyCharBadge {
   pink: boolean
   /** 눈이 안 보여서(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그를 뺐다 */
   eyes: boolean
-  /** 눈 외형을 뺀 까닭 — 배지 글(「눈 감음」「잠듦」「눈 가림」)이 이걸 따른다. 뺀 것이 없으면 null */
-  eyeCause: EyeCause | null
+  /** 눈 외형을 뺀 까닭 — 배지 글(「눈 감음」「잠듦」「눈 가림」)이 이걸 따르고 섞여 있으면 mixed. 뺀 것이 없으면 null */
+  eyeCause: EyeBadgeCause | null
   /** 눈여겨볼 종류 (충돌·후타 의심·못 읽음) */
   attention: BodyKind[]
   /** 배지 하나의 호버 글 — 그 배지가 가리키는 메모만 한 줄씩 */
@@ -370,17 +377,18 @@ export function bodyCharBadge(notes: readonly BodyNote[], futa = false): BodyCha
   )
   const lines = (list: readonly BodyNote[], head = '몸·후타'): string =>
     list.length ? [head, ...sorted(list).map(bodyNoteLine)].join('\n') : ''
-  const removedEye = notes.find(isEyeRemoved)
-  const eyeCause = removedEye ? eyeCauseOf(removedEye) : null
+  const removedCauses = [...new Set(notes.filter(isEyeRemoved).map(eyeCauseOf))]
+  const eyeCause: EyeBadgeCause | null =
+    removedCauses.length === 0 ? null : removedCauses.length === 1 ? removedCauses[0] : 'mixed'
   return {
     futa,
     pink: notes.some(isPinkNote),
-    eyes: !!removedEye,
+    eyes: eyeCause !== null,
     eyeCause,
     attention,
     titleOf: (id) =>
       id === 'eyes'
-        ? lines(notes.filter(isEyeNote), EYE_CAUSE_LABEL[eyeCause ?? 'closed'])
+        ? lines(notes.filter(isEyeNote), eyeBadgeLabel(eyeCause))
         : lines(
             id === 'futa'
               ? notes.filter(isFutaNote)

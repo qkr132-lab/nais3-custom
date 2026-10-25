@@ -5,6 +5,7 @@ import {
   KIND_META,
   WHERE_LABEL,
   bodyCharBadge,
+  eyeBadgeLabel,
   bodyCounts,
   bodyNoteLine,
   bodyNotesOfChar,
@@ -571,6 +572,18 @@ describe('눈 감음 메모 — 카드의 눈 외형 태그를 뺀 것', () => {
     expect(eyeHeading([asleep(1, 'B', 'blue eyes'), asleep(2, 'C', 'red eyes')])).toBe('잠듦')
     expect(eyeHeading([covered(2, 'C', 'red eyes')])).toBe('눈 가림')
     expect(eyeHeading([eye(0, 'A', 'blue eyes'), covered(2, 'C', 'red eyes')])).toBe('눈 안 보임')
+  })
+
+  it('한 카드에 눈 감음과 눈 가림이 섞여 있으면 배지·호버 머리글이 「눈 안 보임」이다 (eyeHeading 과 같은 규칙)', () => {
+    const mixed = [eye(0, 'A', 'blue eyes'), covered(0, 'A', 'slit pupils')]
+    const badge = bodyCharBadge(mixed)
+    expect(badge).toMatchObject({ eyes: true, eyeCause: 'mixed' })
+    expect(eyeBadgeLabel(badge.eyeCause)).toBe('눈 안 보임')
+    expect(badge.titleOf('eyes').split(String.fromCharCode(10))[0]).toBe('눈 안 보임')
+    // 하나뿐이면 그 말, 뺀 것이 없으면 null
+    expect(eyeBadgeLabel(bodyCharBadge([covered(0, 'A', 'red eyes')]).eyeCause)).toBe('눈 가림')
+    expect(eyeBadgeLabel(bodyCharBadge([eye(0, 'A', 'blue eyes')]).eyeCause)).toBe('눈 감음')
+    expect(bodyCharBadge([]).eyeCause).toBeNull()
   })
 
   it('인셋 자리에 눈 뜬 표현이 있어 둔 눈 외형은 「안 바꿈」이고 눈 감음 배지·카드 수에 들지 않는다', () => {
