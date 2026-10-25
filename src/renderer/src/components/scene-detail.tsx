@@ -21,6 +21,9 @@ import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { useExposeWorn } from '../lib/use-expose-worn'
+import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
+import { futaCardsOff } from '../lib/body-notes'
+import { BodyBlock } from './body-notes'
 import { ExposeBlock } from './expose-notes'
 import { ImageContextMenu } from './image-context-menu'
 import { Lightbox } from './lightbox'
@@ -62,6 +65,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const clothKinds = useOutfitsStore((s) => s.kinds)
   // 입은 옷 자동 젖힘 (커스텀) — 설정·복장 목록·장면 태그 목록이 바뀌어도 미리보기를 다시 계산
   const [exposeWorn] = useExposeWorn()
+  // 후타 자동 재조립 (커스텀) — 설정이 바뀌어도 미리보기를 다시 계산
+  const [futaReassembly] = useFutaReassembly()
+  const [futaViewFix] = useFutaViewFix()
   const outfitItems = useOutfitsStore((s) => s.items)
   const exposeActs = useOutfitsStore((s) => s.acts)
   useEffect(() => {
@@ -137,6 +143,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       nudeStripOverride,
       clothKinds,
       exposeWorn,
+      futaReassembly,
+      futaViewFix,
       outfitItems,
       exposeActs
     ]
@@ -145,6 +153,14 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const exposeRounds = tokenRounds.map(({ label, request: round }) => ({
     label,
     notes: round.exposeNotes ?? []
+  }))
+  // 회차마다 바꾸고 더한 몸·후타 메모 (없으면 블록을 그리지 않는다)
+  const bodyRounds = tokenRounds.map(({ label, request: round }) => ({
+    label,
+    notes: round.bodyNotes ?? [],
+    futa: round.futaPlan?.counts.futa,
+    // 재조립을 꺼 둔 채 후타 카드가 그려지면 껐다는 것을 알린다 (요청은 건드리지 않는다)
+    futaOff: futaReassembly ? undefined : futaCardsOff(round.characterPrompts)
   }))
   const tokenPreview = usePromptTokens('tokens:preview', {
     requests: tokenRounds.map(({ request: round }) => promptTokenRequest(round))
@@ -363,6 +379,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           />
           {/* 입은 옷 자동 젖힘 (커스텀) — 붙은 태그와 안 붙은 이유를 캐릭터·부위마다 보인다 */}
           {!isBackground && <ExposeBlock rounds={exposeRounds} enabled={exposeWorn} />}
+          {/* 몸·후타 자동 재조립 (커스텀) — 바꾼 것·더한 것·안 바꾼 것을 이전 → 이후로 보인다 (후타·알몸이 없으면 안 그린다) */}
+          {!isBackground && <BodyBlock rounds={bodyRounds} />}
         </div>
 
         <div className="mt-4 mb-2 flex items-center gap-2 text-[12px] text-muted">

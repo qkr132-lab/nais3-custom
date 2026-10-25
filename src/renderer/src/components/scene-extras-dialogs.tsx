@@ -34,6 +34,7 @@ import { toast } from '../stores/toast-store'
 import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { useExposeWorn } from '../lib/use-expose-worn'
+import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { ScenePlacementDialog } from './scene-placement-dialog'
@@ -675,22 +676,23 @@ function PositionPanel({
 
   const [boardOpen, setBoardOpen] = useState(false)
 
-  // 입은 옷 자동 젖힘 결과 — 배치 창 캐릭터 줄의 「자동 +N」. 씬을 알 때(씬별 추가)만, 창이 열려 있을 때만
+  // 입은 옷 자동 젖힘·몸·후타 결과 — 배치 창 캐릭터 줄의 「자동 +N」·「후타」. 씬을 알 때(씬별 추가)만, 창이 열려 있을 때만
   // 계산한다. 좌표는 결과에 영향이 없어 끌 때마다 다시 계산하지 않는다 (큐 반복이 여럿이면 첫 회차 기준)
   const [exposeWorn] = useExposeWorn()
+  const [futaReassembly] = useFutaReassembly()
+  const [futaViewFix] = useFutaViewFix()
   const outfitItems = useOutfitsStore((s) => s.items)
   const exposeActs = useOutfitsStore((s) => s.acts)
-  const exposeNotes = useMemo(
-    () =>
-      boardOpen && scene && exposeWorn
-        ? (previewSceneRequests(scene)[0]?.request.exposeNotes ?? [])
-        : undefined,
+  const previewRequest = useMemo(
+    () => (boardOpen && scene ? previewSceneRequests(scene)[0]?.request : undefined),
     // previewSceneRequests 는 구독 중인 스토어를 getState()로 읽는다 — 결과에 닿는 입력만 deps 로 둔다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       boardOpen,
       scene,
       exposeWorn,
+      futaReassembly,
+      futaViewFix,
       outfitItems,
       exposeActs,
       items,
@@ -706,6 +708,12 @@ function PositionPanel({
       outfits
     ]
   )
+  const exposeNotes = previewRequest && exposeWorn ? (previewRequest.exposeNotes ?? []) : undefined
+  // 후타 재조립이 꺼져 있어도 메모가 올 수 있다 (알몸에 붙는 pink nipples 는 설정이 없다) — 온 것은 그대로 보인다
+  const bodyNotes = previewRequest ? (previewRequest.bodyNotes ?? []) : undefined
+  const futaCharIds = previewRequest
+    ? (previewRequest.futaPlan?.chars ?? []).map((c) => c.id)
+    : undefined
 
   const setPos = (id: number, c: { x: number; y: number }): void =>
     onPatch({ positions: { ...(positions ?? {}), [id]: c } })
@@ -755,6 +763,8 @@ function PositionPanel({
         rolePositions={scene ? { source: scene.sourcePos, target: scene.targetPos } : undefined}
         scene={scene}
         exposeNotes={exposeNotes}
+        bodyNotes={bodyNotes}
+        futaCharIds={futaCharIds}
         onPatch={onPatch}
       />
       {useCoords !== false &&

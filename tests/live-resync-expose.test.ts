@@ -40,6 +40,16 @@ describe('생성 중 편집 자동 반영 — 입은 옷 자동 젖힘', () => {
     expect(resync).toHaveBeenCalledTimes(1)
   })
 
+  it('후타 재조립 설정과 시점·구도 설정을 바꾸면 다시 만든다', () => {
+    waitingQueue()
+    useOutfitsStore.setState({ futaReassembly: false })
+    vi.advanceTimersByTime(600)
+    expect(resync).toHaveBeenCalledTimes(1)
+    useOutfitsStore.setState({ futaViewFix: false })
+    vi.advanceTimersByTime(600)
+    expect(resync).toHaveBeenCalledTimes(2)
+  })
+
   it('복장을 고치면 다시 만든다', () => {
     waitingQueue()
     useOutfitsStore.setState({

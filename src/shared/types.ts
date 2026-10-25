@@ -70,6 +70,58 @@ export interface ExposeNote {
   evidence: string[]
   /** 한국어 한 줄 설명 */
   reason: string
+  /**
+   * 같은 부위에 알몸 선언이 있어 복장의 nsfw 조각이 켜지지 않았음 (status nude 일 때만) —
+   * 복장 선택 화면이 이 부위를 「저절로 켜짐」으로 보이지 않게 한다
+   */
+  gated?: boolean
+}
+
+/**
+ * 몸 기준 자동 재조립 메모 (커스텀) — 후타 재조립(바꿈·뺌·안 바꿈)과 몸에 맞춘 태그 더하기(no testicles·pink nipples)를
+ * 화면에 그대로 보이려고 요청에 동반한다. 치환 전후의 태그 차이는 반드시 여기에 있다 (몰래 바꾸기 금지).
+ * - replaced: 태그를 다른 태그로 바꿈 (before → after)
+ * - removed: 태그를 뺌 (before)
+ * - added: 태그를 더함 (after)
+ * - kept: 안전하게 바꿀 수 없어 그대로 둠 (before = 남은 글 조각)
+ * - unreadable: 와일드카드처럼 미리 읽을 수 없어 판단하지 못함
+ * - suspect: 후타 의심 (카드에 음경 태그만 있고 futanari 가 없음 — 바꾸지 않고 표시만)
+ * - conflict: 카드의 몸 태그끼리 맞지 않음 (1boy 와 futanari 가 같이 있음 — 바꾸지 않고 표시만)
+ */
+export interface BodyNote {
+  kind: 'replaced' | 'removed' | 'added' | 'kept' | 'unreadable' | 'suspect' | 'conflict'
+  /** 어느 글에서 일어났나: 메인 프롬프트 · 씬 프롬프트 · 하는쪽/당하는쪽 태그 칸 · 자리 태그 · 캐릭터 칸 */
+  where: 'main' | 'scene' | 'source' | 'target' | 'slot' | 'char'
+  /** characterPrompts 안의 순서 (캐릭터가 걸린 메모만) */
+  charIndex?: number
+  name?: string
+  /** 캐릭터 카드 id (캐릭터가 걸린 메모만 · 이름이 겹치는 카드를 가리려고) */
+  charId?: number
+  /** 바뀌기 전 태그(또는 글 조각) */
+  before?: string
+  /** 바뀐 뒤 태그 */
+  after?: string
+  /** 근거가 된 글 조각 */
+  evidence?: string
+  /** 한국어 한 줄 설명 */
+  reason: string
+}
+
+/**
+ * 후타 재조립 계획 (커스텀) — 직렬화 가능한 작은 값. 그려지는 몸 구성에서 정해지고, 씬 프롬프트를 실행 직전에
+ * 다시 합치는 refreshScenePrompts 가 같은 치환을 다시 적용하는 데 쓴다 (안 그러면 조립 때 한 치환이 원본 씬 글로 덮여 사라진다).
+ */
+export interface FutaPlan {
+  /** 그려지는 사람 수 — 후타 · 여 · 남 (얼굴 인셋 자리는 같은 인물이라 세지 않는다) */
+  counts: { futa: number; female: number; male: number }
+  /** 시점·구도(pov → from side, head out of frame·lower body·penis focus 빼기)까지 바꿈 */
+  viewFix: boolean
+  /** 후타 카드에 large penis 가 있어 씬 글의 large penis 를 뺌 */
+  dedupePenis: boolean
+  /** 후타 카드에 고환 유형 태그가 있어 씬 글의 고환 태그를 빼지 않음 (없으면 거짓) */
+  keepTesticles?: boolean
+  /** 후타로 읽힌 카드 — 화면이 어느 카드에 「후타」 표시를 달지 가리는 데 쓴다 (index = characterPrompts 안의 순서) */
+  chars?: { index: number; id: number; name: string }[]
 }
 
 /**
@@ -200,6 +252,10 @@ export interface GenerationRequest {
   sceneSequenceEntry?: SequenceEntry | null
   /** 입은 옷 자동 젖힘 메모 (커스텀) — 붙은 태그와 안 붙은 이유. 전송 payload 에는 들어가지 않고 화면 표시용 */
   exposeNotes?: ExposeNote[]
+  /** 몸 기준 재조립 메모 (커스텀) — 후타 재조립·no testicles·pink nipples 로 바꾸고 더한 것. 전송 payload 에는 들어가지 않고 화면 표시용 */
+  bodyNotes?: BodyNote[]
+  /** 후타 재조립 계획 (커스텀) — 씬·메인 요청. 실행 직전 refreshScenePrompts(씬)와 대기 항목 재구성(메인)이 같은 치환을 다시 적용한다. 후타가 안 그려지면 없다 */
+  futaPlan?: FutaPlan
 }
 
 export interface PromptParts {

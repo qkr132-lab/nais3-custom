@@ -103,6 +103,10 @@ export function OutfitPicker({
     const area = when === 'nsfw-lower' ? '아래가' : '가슴이'
     if (!sceneContexts) return `${area} 드러나는 장면이면 씬마다 저절로 켜짐`
     if (!autoOn) return '이 씬은 자동 젖힘을 꺼서 저절로 켜지지 않음'
+    // 드러내는 장면인데 알몸이라고 적혀 있어 막힌 부위 (생성도 이 조각을 켜지 않는다)
+    const area2: ExposeArea = when === 'nsfw-lower' ? 'lower' : 'chest'
+    if (!byDefault && exposeNotes?.some((n) => n.area === area2 && n.gated))
+      return `이 씬은 ${area} 이미 알몸으로 적혀 있어 저절로 켜지지 않음`
     return byDefault
       ? `이 씬은 ${area} 드러나는 장면이라 저절로 켜짐`
       : `이 씬은 ${area} 드러나는 장면이 아니라 저절로 켜지지 않음`

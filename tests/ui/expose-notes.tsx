@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { CharacterCard, ExposeNote, IpcInvokeMap, Scene } from '../../src/shared/types'
+import type {
+  BodyNote,
+  CharacterCard,
+  ExposeNote,
+  IpcInvokeMap,
+  Scene
+} from '../../src/shared/types'
 import type { Outfit, OutfitChoice } from '../../src/shared/outfit'
+import { BodyBlock } from '../../src/renderer/src/components/body-notes'
 import { ExposeBlock } from '../../src/renderer/src/components/expose-notes'
 import { MainExposeBlock } from '../../src/renderer/src/components/main-expose-block'
 import { OutfitMode } from '../../src/renderer/src/components/outfit-mode'
@@ -31,11 +38,18 @@ import './placement.css'
  *   ?mode=addition   실제 씬별 추가 창 → 넓게 배치 (배치 창 배지는 실제 계산 결과)
  *   ?mode=picker     실제 복장 선택 (카드에 직접 적은 옷 / 복장 있음)
  *   ?mode=outfit     실제 복장 탭 (카드 글에서 읽은 옷 구역)
- *   ?mode=settings   실제 설정 창 (생성 탭의 「입은 옷 자동 젖힘」 스위치)
+ *   ?mode=settings   실제 설정 창 (생성 탭의 「입은 옷 자동 젖힘」·「후타 자동 재조립」·「후타 시점·구도 정리」 스위치)
+ *   ?mode=body       접이식 「몸·후타」 블록에 종류 7가지를 전부 넣은 합성 메모
+ *   ?mode=main       메인 탭 블록 (실제 메인 요청 조립 · &futa=1 이면 후타 카드가 있어 「몸·후타」도 나온다)
  *   &enabled=0       설정 「입은 옷 자동 젖힘」 꺼짐
- *   &empty=1         (block) 메모 없음
- *   &rounds=2        (block) 큐 반복 2회차 — 서로 다른 결과
- *   &open=1          (block·detail) 블록을 펴 둔 채로
+ *   &futa=0          설정 「후타 자동 재조립」 꺼짐 (settings 에서 시점·구도 스위치가 잠기는지)
+ *   &fake=1          (main) 핵심 모듈 없이 메인 탭 배선만 보려고 buildMainRequest 결과에 합성 몸·후타 메모와 후타 2명 계획을 얹는다
+ *   &futacard=1      재조립 설정과 상관없이 합성 후타 카드(E)만 더한다 — &futa=0 과 함께면 「재조립 꺼짐」 한 줄이 나오는지 (detail)
+ *   &futa=1          합성 후타 카드(E)를 더한다 — detail·main 에서 실제 요청 조립이 「몸·후타」 메모를 만든다
+ *   &empty=1         (block·body) 메모 없음
+ *   &quiet=1         (body) 후타 1명이 그려지는데 바꾼 것이 없다 — 「후타 1명 · 바꾼 것 없음」 한 줄
+ *   &rounds=2        (block·body) 큐 반복 2회차 — 서로 다른 결과
+ *   &open=1          (block·body·detail) 블록을 펴 둔 채로
  *   &notes=0         (picker) 씬을 모르는 상태 (메모 없음)
  *   &card=1|3        (picker) 1 = 복장 없는 카드, 3 = 복장 있는 카드
  */
@@ -45,8 +59,10 @@ const mode = params.get('mode') ?? 'block'
 const enabled = params.get('enabled') !== '0'
 
 try {
-  if (params.get('open') === '1') localStorage.setItem('scene_expose_open', '1')
-  else if (params.has('open')) localStorage.removeItem('scene_expose_open')
+  for (const key of ['scene_expose_open', 'scene_body_open']) {
+    if (params.get('open') === '1') localStorage.setItem(key, '1')
+    else if (params.has('open')) localStorage.removeItem(key)
+  }
 } catch {
   // 저장소가 막힌 환경에서는 접힌 채로 시작한다
 }
@@ -86,6 +102,17 @@ const cards: CharacterCard[] = [
   }),
   card({ id: 4, name: '합성 카드 D', prompt: '1girl, adult, short hair, smile' })
 ]
+
+// &futa=1 — 합성 후타 카드. 실제 요청 조립(핵심 모듈)이 「몸·후타」 메모를 만드는지 detail·main 에서 본다
+if (params.get('futa') === '1' || params.get('futacard') === '1')
+  cards.push(
+    card({
+      id: 5,
+      name: '합성 카드 E',
+      prompt: '1girl, adult, futanari, large penis, long hair',
+      role: 'source'
+    })
+  )
 
 const outfits: Outfit[] = [
   {
@@ -239,6 +266,104 @@ function allStatusNotes(): ExposeNote[] {
 
 const notesRound2 = (): ExposeNote[] => allStatusNotes().slice(0, 4)
 
+const bodyNote = (n: Partial<BodyNote> & Pick<BodyNote, 'kind' | 'where'>): BodyNote => ({
+  reason: '',
+  ...n
+})
+
+/**
+ * 종류 7가지를 한 번씩 이상 보이는 합성 몸·후타 메모. 접힌 줄은
+ * 「후타 1명 · 바꿈 3 · 뺌 1 · 더함 1 · pink nipples 1 · 충돌 1 · 후타 의심 1 · 못 읽음 1 · 안 바꿈 2」가 된다
+ * (후타 명수는 후타 메모가 가리키는 캐릭터 — 합성 카드 A 한 명).
+ */
+const EXPECTED_BODY_SUMMARY =
+  '후타 1명 · 바꿈 3 · 뺌 1 · 더함 1 · pink nipples 1 · 충돌 1 · 후타 의심 1 · 못 읽음 1 · 안 바꿈 2'
+function allKindBodyNotes(): BodyNote[] {
+  const A = { charIndex: 0, name: '합성 카드 A' }
+  const B = { charIndex: 1, name: '합성 카드 B' }
+  const C = { charIndex: 2, name: '합성 카드 C' }
+  return [
+    bodyNote({
+      kind: 'replaced',
+      where: 'scene',
+      before: 'hetero',
+      after: 'futa with female',
+      reason: '남자 장면의 관계 태그를 후타 구성으로 바꿈'
+    }),
+    bodyNote({
+      kind: 'replaced',
+      where: 'scene',
+      before: '1girl, 1boy',
+      after: '2girls',
+      evidence: 'hetero',
+      reason: '후타는 girl 로 세어 인원수를 합침'
+    }),
+    bodyNote({
+      kind: 'replaced',
+      where: 'source',
+      ...A,
+      before: 'faceless male',
+      after: 'faceless female',
+      reason: '남자 묘사를 후타 구성으로 바꿈'
+    }),
+    bodyNote({
+      kind: 'removed',
+      where: 'scene',
+      before: 'testicles',
+      reason: '후타는 고환이 없어 뺌'
+    }),
+    bodyNote({
+      kind: 'added',
+      where: 'char',
+      ...A,
+      after: 'no testicles',
+      reason: '카드에 고환 유형 태그가 없어 더함'
+    }),
+    bodyNote({
+      kind: 'added',
+      where: 'char',
+      ...A,
+      after: 'pink nipples',
+      evidence: '사용자 실측',
+      reason: '알몸이고 가슴이 여성이라 더함'
+    }),
+    bodyNote({
+      kind: 'kept',
+      where: 'scene',
+      before: 'leaning against him',
+      reason: '문장 속 him 은 안전하게 바꿀 수 없어 그대로 둠'
+    }),
+    bodyNote({
+      kind: 'kept',
+      where: 'scene',
+      before: 'his hard cock',
+      reason: '문장 속 his 는 안전하게 바꿀 수 없어 그대로 둠'
+    }),
+    bodyNote({
+      kind: 'suspect',
+      where: 'char',
+      ...B,
+      evidence: 'penis',
+      reason: '여성 카드에 penis 만 있어 후타로 보지 않음'
+    }),
+    bodyNote({
+      kind: 'conflict',
+      where: 'char',
+      ...C,
+      evidence: '1boy, futanari',
+      reason: '같은 카드에 1boy 와 futanari 가 함께 있어 바꾸지 않음'
+    }),
+    bodyNote({
+      kind: 'unreadable',
+      where: 'char',
+      ...C,
+      before: '__body__',
+      reason: '와일드카드는 미리 읽을 수 없음'
+    })
+  ]
+}
+const bodyRound2 = (): BodyNote[] => allKindBodyNotes().slice(0, 2)
+
 window.nais = {
   invoke: async <C extends keyof IpcInvokeMap>(
     channel: C,
@@ -318,7 +443,13 @@ const scene = {
 } as unknown as Scene
 
 useCharactersStore.setState({ items: cards, folders: [], loaded: true })
-useOutfitsStore.setState({ items: outfits, loaded: true, exposeWorn: enabled })
+useOutfitsStore.setState({
+  items: outfits,
+  loaded: true,
+  exposeWorn: enabled,
+  futaReassembly: params.get('futa') !== '0',
+  futaViewFix: true
+})
 useCharRefsStore.setState({ items: [], folders: [], loaded: true })
 useVibesStore.setState({ items: [], folders: [], loaded: true })
 useGenerationStore.setState({
@@ -330,6 +461,17 @@ useGenerationStore.setState({
   },
   promptSplitEnabled: false
 })
+// &fake=1 — 실제 조립 결과에 합성 몸·후타 메모를 얹어, 메인 탭 블록이 요청의 bodyNotes·futaPlan 을 읽어 그리는지만 본다
+if (mode === 'main' && params.get('fake') === '1') {
+  const real = useGenerationStore.getState().buildMainRequest
+  useGenerationStore.setState({
+    buildMainRequest: async (...args: Parameters<typeof real>) => ({
+      ...(await real(...args)),
+      bodyNotes: allKindBodyNotes(),
+      futaPlan: { counts: { futa: 2, female: 1, male: 0 }, viewFix: true, dedupePenis: false }
+    })
+  })
+}
 useScenesStore.setState({
   scenes: [scene],
   activePresetId: 1,
@@ -364,6 +506,27 @@ function Block(): React.JSX.Element {
   )
 }
 
+function Body(): React.JSX.Element {
+  const empty = params.get('empty') === '1'
+  const quiet = params.get('quiet') === '1'
+  const two = params.get('rounds') === '2'
+  const first = empty || quiet ? [] : allKindBodyNotes()
+  // 후타 명수는 요청의 재조립 계획이 알려 준다 (메모로 짐작하지 않는다) — 후타 한 명이 그려지는 요청
+  const futa = empty ? undefined : 1
+  return (
+    <BodyBlock
+      rounds={
+        two
+          ? [
+              { label: '기본 설정', notes: first, futa },
+              { label: '조합 2', notes: bodyRound2(), futa }
+            ]
+          : [{ label: '기본 설정', notes: first, futa }]
+      }
+    />
+  )
+}
+
 function Placement(): React.JSX.Element {
   const [outfitMap, setOutfitMap] = useState<Record<number, OutfitChoice>>({})
   return (
@@ -376,6 +539,8 @@ function Placement(): React.JSX.Element {
       roles={{ 1: 'target', 2: 'source', 3: 'target' }}
       scene={{ prompt: scene.prompt, sourceTags: scene.sourceTags }}
       exposeNotes={enabled ? allStatusNotes() : undefined}
+      bodyNotes={allKindBodyNotes()}
+      futaCharIds={[1]}
       onPatch={(patch) => patch.outfits && setOutfitMap(patch.outfits)}
     />
   )
@@ -470,6 +635,7 @@ function Page(): React.JSX.Element {
     )
   if (mode === 'settings') return <Settings />
   if (mode === 'main') return <MainExposeBlock />
+  if (mode === 'body') return <Body />
   return <Block />
 }
 
@@ -579,6 +745,28 @@ async function runChecks(): Promise<Check[]> {
         summary
       )
     }
+    if (mode === 'detail' && params.get('futa') === '0' && params.get('futacard') === '1') {
+      // 재조립을 껐는데 후타 카드가 그려진다 — 후타를 못 알아본 것이 아니라 껐다는 한 줄
+      const body = document.querySelector<HTMLElement>('[data-testid="body-block"]')
+      const bodySummary = body?.querySelector('[data-testid="body-summary"]')?.textContent ?? ''
+      ok('재조립이 꺼져 있어도 후타 카드가 있으면 「몸·후타」 줄이 보인다', !!body)
+      ok(
+        '그 줄은 「재조립 꺼짐」을 말한다',
+        bodySummary.includes('후타 카드 1장 · 재조립 꺼짐'),
+        bodySummary
+      )
+    }
+    if (mode === 'detail' && params.get('futa') === '1') {
+      // 핵심 모듈이 후타 카드를 읽어 몸·후타 메모를 요청에 실었는지 — 실제 조립 결과를 DOM 으로만 본다
+      const body = document.querySelector<HTMLElement>('[data-testid="body-block"]')
+      const bodySummary = body?.querySelector('[data-testid="body-summary"]')?.textContent ?? ''
+      ok('후타 카드가 있는 씬에는 「몸·후타」 블록이 보인다', !!body)
+      ok(
+        '블록 요약은 비어 있지 않고 「후타」로 시작하거나 pink nipples 를 센다',
+        /^(후타|pink nipples)/.test(bodySummary),
+        bodySummary
+      )
+    }
     if (mode === 'detail') {
       ok('요약이 「꺼짐」이나 개수로 보인다', summary.length > 0, summary)
       if (enabled) {
@@ -596,6 +784,122 @@ async function runChecks(): Promise<Check[]> {
       }
     }
   }
+  if (mode === 'body') {
+    const block = document.querySelector<HTMLElement>('[data-testid="body-block"]')
+    const empty = params.get('empty') === '1'
+    if (empty) {
+      ok('후타도 메모도 없으면 「몸·후타」 블록을 그리지 않는다', !block)
+    } else if (params.get('quiet') === '1') {
+      const summary = block?.querySelector('[data-testid="body-summary"]')?.textContent ?? ''
+      ok(
+        '후타가 그려지는데 바꾼 것이 없으면 한 줄만 보인다',
+        !!block?.hasAttribute('data-body-empty')
+      )
+      ok('그 줄은 「후타 1명 · 바꾼 것 없음」이다', summary === '후타 1명 · 바꾼 것 없음', summary)
+      ok('펼치는 버튼은 없다', !block?.querySelector('button'))
+    } else {
+      ok('접이식 「몸·후타」 블록이 있다', !!block)
+      const summary = block?.querySelector('[data-testid="body-summary"]')?.textContent ?? ''
+      const toggle = block?.querySelector<HTMLElement>('button')
+      if (params.get('rounds') === '2') {
+        ok('회차 결과가 다르면 「회차마다 다름」', summary.includes('회차마다 다름'), summary)
+        if (toggle?.getAttribute('aria-expanded') !== 'true') {
+          toggle?.click()
+          await wait(100)
+        }
+        const labels = $$('[data-testid="body-block"] p').map((p) => p.textContent)
+        ok('회차별 이름이 보인다', labels.includes('기본 설정') && labels.includes('조합 2'))
+      } else {
+        ok(
+          '접힌 요약이 후타 명수·바꿈·뺌·더함·pink nipples·충돌·후타 의심·못 읽음·안 바꿈을 센다',
+          summary === EXPECTED_BODY_SUMMARY,
+          summary
+        )
+        const pieces = [
+          ...(block?.querySelectorAll<HTMLElement>('[data-testid="body-summary"] > span > span') ??
+            [])
+        ]
+        ok(
+          '바뀐 것과 눈여겨볼 것은 접어도 색이 있고 그대로 둔 것은 색이 없다',
+          pieces.length === 9 &&
+            pieces
+              .filter((e) =>
+                /^(바꿈|뺌|더함|pink|충돌|후타 의심|못 읽음)/.test(e.textContent ?? '')
+              )
+              .every((e) => e.className.includes('text-')) &&
+            pieces
+              .filter((e) => (e.textContent ?? '').startsWith('안 바꿈'))
+              .every((e) => e.className === ''),
+          String(pieces.length)
+        )
+        if (toggle?.getAttribute('aria-expanded') !== 'true') {
+          toggle?.click()
+          await wait(100)
+        }
+        const rows = $$('[data-body-row]')
+        const kinds = new Set(rows.map((r) => r.dataset.kind))
+        ok('열면 종류 7가지가 모두 한 줄 이상 보인다', kinds.size === 7, [...kinds].join(','))
+        const labels = new Set($$('[data-body-kind]').map((e) => e.textContent))
+        ok(
+          '종류 이름이 정해진 한국어다',
+          ['바꿈', '뺌', '더함', '안 바꿈', '못 읽음', '후타 의심', '충돌'].every((n) =>
+            labels.has(n)
+          ),
+          [...labels].join(',')
+        )
+        const replaced = $$('[data-body-row][data-kind="replaced"]')
+        ok(
+          '바꿈은 이전(취소선) → 이후 로 보인다',
+          replaced.length === 3 &&
+            replaced.every((r) => {
+              const codes = [...r.querySelectorAll('code')]
+              return (
+                codes.length === 2 &&
+                codes[0].className.includes('line-through') &&
+                !codes[1].className.includes('line-through') &&
+                (r.textContent ?? '').includes('→')
+              )
+            })
+        )
+        const added = $$('[data-body-row][data-kind="added"] code').map((c) => c.textContent)
+        ok(
+          '더한 태그에는 + 가 붙는다',
+          added.length === 2 &&
+            added.every((t) => t?.startsWith('+')) &&
+            added.includes('+pink nipples'),
+          added.join(',')
+        )
+        ok(
+          'pink nipples 는 근거 「사용자 실측」이 같이 보인다',
+          $$('[data-body-row][data-kind="added"]').some(
+            (r) =>
+              (r.textContent ?? '').includes('+pink nipples') &&
+              (r.textContent ?? '').includes('근거 사용자 실측')
+          )
+        )
+        ok(
+          '이유가 줄마다 보인다',
+          rows.every((r) => (r.textContent ?? '').replace(/\s/g, '').length > 10)
+        )
+        ok(
+          '위치(씬·캐릭터 이름·하는쪽 칸)가 줄에 보인다',
+          rows.some((r) => (r.textContent ?? '').startsWith('씬')) &&
+            rows.some((r) => (r.textContent ?? '').startsWith('합성 카드 A · 하는쪽 칸'))
+        )
+        ok(
+          '안내 글에 pink nipples 가 설정과 무관하다고 쓴다',
+          (block?.textContent ?? '').includes('pink nipples 는 이 설정과 무관합니다')
+        )
+        toggle?.click()
+        await wait(100)
+        ok(
+          '다시 누르면 접힌다',
+          toggle?.getAttribute('aria-expanded') === 'false' && $$('[data-body-row]').length === 0
+        )
+        toggle?.click()
+      }
+    }
+  }
   if (mode === 'main') {
     await wait(600)
     const block = document.querySelector<HTMLElement>(
@@ -605,6 +909,29 @@ async function runChecks(): Promise<Check[]> {
       '메인 탭에도 「자동 젖힘」 블록이 있다 (붙은 태그를 몰래 붙이지 않는다)',
       enabled ? !!block : !block
     )
+    if (params.get('fake') === '1') {
+      const body = document.querySelector<HTMLElement>(
+        '[data-testid="main-body"] [data-testid="body-block"]'
+      )
+      const bodySummary = body?.querySelector('[data-testid="body-summary"]')?.textContent ?? ''
+      ok('요청의 bodyNotes 가 메인 탭 「몸·후타」 블록으로 보인다', !!body)
+      ok(
+        '요청의 futaPlan 이 알려 준 후타 수(2명)를 요약 맨 앞에 쓴다',
+        bodySummary.startsWith('후타 2명 · 바꿈 3'),
+        bodySummary
+      )
+      ok(
+        '자동 젖힘 블록과 나란히 보인다',
+        !!document.querySelector('[data-testid="main-expose"] [data-testid="expose-block"]') ===
+          enabled
+      )
+    }
+    if (params.get('futa') === '1') {
+      const body = document.querySelector<HTMLElement>(
+        '[data-testid="main-body"] [data-testid="body-block"]'
+      )
+      ok('후타 카드가 켜져 있으면 메인 탭에도 「몸·후타」 블록이 있다', !!body)
+    }
     if (enabled) {
       const summary = block?.querySelector('[data-testid="expose-summary"]')?.textContent ?? ''
       ok('요약에 붙은 태그 수가 보인다', /붙음 \d+개/.test(summary), summary)
@@ -659,6 +986,49 @@ async function runChecks(): Promise<Check[]> {
         picker?.textContent?.slice(0, 80)
       )
     } else ok('꺼져 있으면 배지가 없다', badges.length === 0)
+    // 몸·후타 배지는 자동 젖힘과 따로 — 자동 젖힘이 꺼져 있어도 후타 메모가 오면 보인다
+    const bodyBadges = $$('[data-body-badge]')
+    const byId = (id: string): HTMLElement[] => bodyBadges.filter((b) => b.dataset.bodyBadge === id)
+    ok(
+      '후타로 읽힌 카드 줄에 「후타」 배지가 한 번 보인다',
+      byId('futa').length === 1 && byId('futa')[0].textContent === '후타'
+    )
+    ok(
+      '후타 의심 배지가 한 번 보인다',
+      byId('suspect').length === 1 && byId('suspect')[0].textContent === '후타 의심'
+    )
+    ok(
+      '충돌·못 읽음 배지는 「후타」를 붙여 자동 젖힘 배지와 헷갈리지 않게 한다',
+      byId('conflict')[0]?.textContent === '후타 충돌' &&
+        byId('unreadable')[0]?.textContent === '후타 못 읽음'
+    )
+    ok(
+      '후타 배지 호버 글에 그 캐릭터 메모가 있고 다른 캐릭터 메모는 없다',
+      !!byId('futa')[0]?.title.includes('+no testicles') &&
+        !byId('futa')[0]?.title.includes('와일드카드')
+    )
+    ok(
+      '후타 배지도 이름 칸(말줄임) 밖에 있다',
+      bodyBadges.length > 0 && bodyBadges.every((b) => !b.closest('.truncate'))
+    )
+    // 배지는 이름 아래 둘째 줄 — 이름 칸이 배지와 폭을 다투지 않는다
+    const nameOf = (badge: HTMLElement): HTMLElement | null | undefined =>
+      badge.closest('li, div')?.querySelector<HTMLElement>('.truncate')
+    ok(
+      '배지는 이름 아래 줄에 있어 이름이 배지 때문에 줄어들지 않는다',
+      bodyBadges.length > 0 &&
+        bodyBadges.every((b) => {
+          const name = nameOf(b)
+          return !!name && b.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 1
+        })
+    )
+    // 카드 A(후타로 읽힘)만 「후타」 배지 — 상대 카드에는 글을 바꾼 메모가 있어도 「후타」를 달지 않는다
+    ok(
+      '「후타」 배지는 계획이 후타라고 알려 준 카드에만 달린다',
+      byId('futa').length === 1 &&
+        !!byId('futa')[0].closest('li, div')?.textContent?.includes('합성 카드 A')
+    )
+    ok('카드 A 는 후타라 pink nipples 배지를 따로 달지 않는다', byId('pink').length === 0)
   }
   if (mode === 'addition') {
     const badges = $$('[data-expose-badge]')
@@ -711,6 +1081,29 @@ async function runChecks(): Promise<Check[]> {
     ok('설정 생성 탭에 「입은 옷 자동 젖힘」 줄이 있다', !!title)
     const sw = title?.closest('.py-2\\.5')?.querySelector<HTMLElement>('button[role="switch"]')
     ok('스위치가 설정값(기본 켬)을 따른다', sw?.getAttribute('aria-checked') === String(enabled))
+    const switchOf = (label: string): HTMLElement | null | undefined =>
+      $$('[role="dialog"] p')
+        .find((p) => p.textContent === label)
+        ?.closest('.py-2\\.5')
+        ?.querySelector<HTMLElement>('button[role="switch"]')
+    const reassembly = switchOf('후타 자동 재조립')
+    const viewFix = switchOf('후타 시점·구도 정리')
+    const futaOn = params.get('futa') !== '0'
+    ok(
+      '설정 생성 탭에 「후타 자동 재조립」 스위치가 있고 설정값(기본 켬)을 따른다',
+      reassembly?.getAttribute('aria-checked') === String(futaOn),
+      reassembly?.getAttribute('aria-checked') ?? '없음'
+    )
+    ok(
+      '「후타 시점·구도 정리」 스위치는 재조립이 켜져 있을 때만 누를 수 있다',
+      !!viewFix && viewFix.hasAttribute('disabled') === !futaOn
+    )
+    const hints = $$('[role="dialog"] p').map((p) => p.textContent ?? '')
+    ok(
+      '안내 글에 「당신」이 없고 pink nipples 가 설정과 무관하다고 쓴다',
+      hints.every((t) => !t.includes('당신')) &&
+        hints.some((t) => t.includes('pink nipples') && t.includes('이 설정과 무관'))
+    )
   }
   return out
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  BodyNote,
   ExposeNote,
   GenerationRequest,
   HistoryItem,
@@ -13,13 +14,30 @@ import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 import {
   appendPrompt,
+  autoRolePrefix,
   mergePromptParts,
   partnerTagsFor,
   withPartnerTags
 } from '@shared/scene-request'
 import { resolveOutfit, resolveOutfitNegative } from '@shared/outfit'
 import { triggerAreas } from '@shared/auto-expose'
-import { analyzeExposure, finishExposure, pieceInfo, receivesSceneText } from '@shared/expose-state'
+import {
+  analyzeExposure,
+  declaredNudeAreas,
+  finishExposure,
+  gateAuto,
+  pieceInfo,
+  receivesSceneText
+} from '@shared/expose-state'
+import { readBody } from '@shared/body'
+import {
+  bodyTagsFor,
+  flagNotes,
+  isNudeChar,
+  planFuta,
+  rewriteCharTexts,
+  rewriteRequestPrompt
+} from '@shared/futa'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
 import { characterSex, undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import { withTransparentBackground } from '@shared/transparent-background'
@@ -340,6 +358,37 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
   // 입은 옷 자동 젖힘 (커스텀) — 켜져 있으면 메인 프롬프트·상대 태그를 캐릭터별로 읽고(주인 몸 기준),
   // 꺼져 있으면 아래 옛 판정(triggerAreas)을 그대로 쓴다
   const sexes = enabled.map((c) => characterSex(c.role, c.prompt))
+  // 몸 (음경·음부·가슴) — 카드의 futanari 로 후타를 읽는다. 후타 재조립을 끄면 후타를 읽지 않는다
+  const futaOn = useOutfitsStore.getState().futaReassembly
+  const readings = enabled.map((c) => readBody(c.role, [c.prompt], futaOn))
+  const futaPlan = futaOn
+    ? planFuta(
+        readings.map((r, index) => ({
+          kind: r.body.futa
+            ? ('futa' as const)
+            : r.chestFemale
+              ? ('female' as const)
+              : ('male' as const),
+          largePenis: r.largePenis,
+          testicleType: r.testicleType,
+          index,
+          id: enabled[index].id,
+          name: enabled[index].name
+        })),
+        useOutfitsStore.getState().futaViewFix
+      )
+    : null
+  // 메인 프롬프트의 남자 장면 선언을 후타 구성에 맞게 — 젖힘 엔진은 바꾸기 전 원문을 읽는다
+  const futaMain = futaPlan
+    ? rewriteRequestPrompt(
+        futaPlan,
+        withTransparentBackground(
+          requestForPromptMode(baseRequest, store.getState().promptSplitEnabled),
+          transparentBackground
+        )
+      )
+    : null
+  const bodyNotes: BodyNote[] = futaMain ? [...futaMain.notes] : []
   const exposure = useOutfitsStore.getState().exposeWorn
     ? analyzeExposure({
         chars: enabled.map((c, index) => ({
@@ -347,6 +396,8 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
           id: c.id,
           name: c.name,
           sex: sexes[index],
+          // 후타만 몸을 넘긴다 — 그 밖의 캐릭터는 옛 방식(sex 일치)
+          ...(readings[index].body.futa ? { body: readings[index].body } : {}),
           role: c.role ?? null,
           faceSeat: false,
           autoOff: false,
@@ -371,14 +422,24 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
   const dress = (
     c: (typeof enabled)[number],
     index: number
-  ): { prompt: string; negative: string } => {
+  ): { prompt: string; negative: string; partner: string | null } => {
     const contexts = [
       ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
       partnerTagsFor(c.role, givers, c.id)
     ]
     // 아래·가슴이 드러나는 장면이면 nsfw 조각이 저절로 켜진다 (메인 탭엔 씬 선택이 없다)
     const exposed = exposure?.chars[index]
-    const auto = exposed ? exposed.auto : triggerAreas(contexts, exposeActs)
+    const resolved = resolveOutfit(c.outfitId, undefined, outfits)
+    // 같은 부위에 알몸 선언이 있으면 복장 nsfw 조각도 켜지 않는다 (카드 옷과 같은 결과 — 누드 조각은 예외)
+    const gated =
+      exposure && exposed
+        ? gateAuto(
+            exposed,
+            declaredNudeAreas(exposed, exposure, [c.prompt, partnerTagsFor(c.role, givers, c.id)]),
+            resolved?.outfit
+          )
+        : null
+    const auto = gated ?? (exposed ? exposed.auto : triggerAreas(contexts, exposeActs))
     // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
     const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf, auto)
     const dressed = undressForNude({
@@ -389,12 +450,48 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       enabled: stripOnNude,
       kindOf
     })
-    let prompt = appendPrompt(dressed.card, dressed.outfit)
+    // 후타 재조립 — 상대 태그도 후타 구성에 맞게. 젖힘 엔진은 바꾸기 전 원문을 읽는다 (아래 own 은 원문)
+    const partnerRaw = partnerTagsFor(c.role, givers, c.id)
+    const rw =
+      futaPlan && futaMain
+        ? rewriteCharTexts(
+            futaPlan,
+            { partner: partnerRaw },
+            {
+              index,
+              name: c.name,
+              id: c.id,
+              role: c.role ?? null,
+              hasGirl: readings[index].hasGirl,
+              futa: readings[index].body.futa
+            },
+            futaMain.state
+          )
+        : null
+    const partner = rw?.texts.partner ?? partnerRaw
+    // 몸에 맞춘 태그 — 후타에 no testicles, 알몸이고 가슴이 여성 몸이면 pink nipples (후타 포함). 더한 것은 bodyNotes 에 남는다
+    const body = bodyTagsFor({
+      reading: readings[index],
+      futaOn,
+      nude: isNudeChar(dressed.nude != null, [dressed.card, dressed.outfit, partner]),
+      texts: [dressed.card, dressed.outfit, partner],
+      index,
+      name: c.name,
+      id: c.id
+    })
+    bodyNotes.push(
+      ...(rw?.notes ?? []),
+      ...body.notes,
+      ...(futaOn ? flagNotes(readings[index], index, c.name, c.id) : [])
+    )
+    // 카드(몸) → 몸에 맞춘 태그 → 복장 → 입은 옷 자동 젖힘 → 상대 태그
+    let prompt = [body.tags.join(', '), dressed.outfit].reduce(appendPrompt, dressed.card)
     if (exposure && exposed) {
+      // 옷 벗기기로 벗긴 캐릭터는 알몸 선언으로 조각을 막지 않은 값(exposed.auto)으로 본다
       const piece = pieceInfo(
-        resolveOutfit(c.outfitId, undefined, outfits)?.outfit,
+        resolved?.outfit,
         undefined,
-        auto
+        dressed.nude != null ? exposed.auto : auto
       )
       const finished = finishExposure(exposed, exposure, {
         card: dressed.card,
@@ -407,12 +504,18 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       prompt = appendPrompt(prompt, finished.tags.join(', '))
       exposeNotes.push(...finished.notes)
     }
-    return { prompt, negative: dressed.outfitNegative }
+    return { prompt, negative: dressed.outfitNegative, partner: rw ? partner : null }
   }
   const characterPrompts = enabled.map((c, index) => {
     const worn = dress(c, index)
     return {
-      prompt: withPartnerTags(worn.prompt, c.role, givers, c.id),
+      // 후타 재조립으로 상대 태그를 바꿨으면 그것을, 아니면 예전 그대로
+      prompt:
+        worn.partner != null
+          ? c.role && worn.partner
+            ? appendPrompt(worn.prompt, autoRolePrefix(worn.partner, c.role))
+            : worn.prompt
+          : withPartnerTags(worn.prompt, c.role, givers, c.id),
       // 기본 복장의 네거티브도 붙는다 (커스텀)
       negativePrompt: appendPrompt(c.negativePrompt, worn.negative),
       center: c.center,
@@ -435,14 +538,21 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
         ]
       : undefined
   const finalRequest: GenerationRequest = {
-    ...withTransparentBackground(
-      requestForPromptMode(baseRequest, store.getState().promptSplitEnabled),
-      transparentBackground
-    ),
+    // 후타 재조립을 한 메인 프롬프트 (후타가 안 그려지면 예전 그대로)
+    ...(futaMain
+      ? futaMain.request
+      : withTransparentBackground(
+          requestForPromptMode(baseRequest, store.getState().promptSplitEnabled),
+          transparentBackground
+        )),
     characterPrompts,
     charRefIds,
     // 붙은 젖힘 태그와 안 붙은 이유 (입은 옷 자동 젖힘이 켜져 있을 때만)
     ...(exposure ? { exposeNotes } : {}),
+    // 후타 재조립·몸에 맞춘 태그의 메모 (바꾸거나 더한 게 없으면 요청이 예전과 같다)
+    ...(bodyNotes.length ? { bodyNotes } : {}),
+    // 후타 재조립 계획 — 대기 중인 메인 항목을 최신 메인 프롬프트로 다시 만들 때(resyncPendingScenes) 같은 치환을 다시 적용한다
+    ...(futaPlan ? { futaPlan } : {}),
     source: src
       ? {
           imageBase64: src.imageBase64,

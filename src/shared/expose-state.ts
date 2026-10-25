@@ -28,6 +28,8 @@ import {
   type Sex,
   type TextAnalysis
 } from './expose-evidence'
+import { bodyHolds, type CharBody } from './body'
+import { isNudePiece } from './nude-strip'
 import type { ExposeArea, ExposeNote, ExposeStatus } from './types'
 
 /**
@@ -66,6 +68,11 @@ export interface ExposeChar {
   name: string
   /** 남녀 — characterSex(역할 기준, 역할 없으면 카드의 남자 태그) */
   sex: Sex
+  /**
+   * 몸 (음경·음부·가슴) — 후타처럼 역할 기준 남녀와 몸이 다른 캐릭터에게만 넘기면 된다. 없으면 sex 에서 만든 옛 몸이다.
+   * 태그의 아래 증거(음경·음부)와 이 캐릭터 칸의 증거는 몸 보유자에게 가고, 문장의 he/she 는 역할의 성별(sex)을 따른다
+   */
+  body?: CharBody
   /** 행위 역할 (자리 역할 > 씬별 역할 > 카드 역할) */
   role: 'source' | 'target' | null
   /** 얼굴만 나오는 자리(inset·portrait·close-up) — 몸이 안 나온다 */
@@ -177,6 +184,20 @@ const effectiveRole = (c: ExposeChar): 'source' | 'target' =>
   c.role ?? (c.sex === 'male' ? 'source' : 'target')
 
 /**
+ * 이 증거의 주인(male = 음경 쪽, female = 음부·여 가슴 쪽)이 이 캐릭터의 몸인가.
+ * 몸을 모르는 캐릭터는 옛 방식(sex 일치)이다. 몸을 아는 캐릭터(후타)는
+ *  - 아래 증거 가운데 주인을 몸 낱말의 해부학 기본으로 정한 것(태그, 지칭어 없는 penis·pussy)을 음경/음부 보유 여부로,
+ *  - 이 캐릭터 자기 칸의 증거(own)를 몸으로 가린다.
+ * 지칭어(he/his/her)로 주인을 정한 문장과 가슴 증거는 역할의 성별을 따른다 — 후타 하는쪽은 글에서 「그」이고 가슴 이야기(her)는 상대의 것이다.
+ */
+function holds(c: ExposeChar, owner: Sex, ev: Evidence, own: boolean): boolean {
+  if (!c.body) return c.sex === owner
+  if (own || (ev.area === 'lower' && (ev.via === 'tag' || ev.anatomy)))
+    return bodyHolds(c.body, owner, ev.area)
+  return c.sex === owner
+}
+
+/**
  * 씬 글을 읽어 캐릭터별로 어느 부위를 드러내야 하는지 정한다.
  * 칸마다 증거를 뽑고(주인 포함), 주인 몸을 가진 캐릭터에게 배정한다:
  *  - 하는쪽의 상대 몸 행위는 상대 쪽으로 간다 (핑거링 → 여 아래) · 자기 몸 행위는 자기에게
@@ -247,18 +268,25 @@ export function analyzeExposure(input: {
         ambiguous = true
       } else {
         const owner = ev.owner
-        const sameSex = chars.filter((c) => c.sex === owner)
+        // 후타의 음경·고환 낱말은 지칭어가 여성형(her cock)이어도 음경 보유자의 것이다 — 몸을 아는 후타가 있으면 그 후타에게만 간다
+        const futaPenis =
+          ev.penisWord && ev.via === 'sentence' && owner === 'female'
+            ? chars.filter((c) => c.body?.futa && c.body.penis)
+            : []
+        const sameSex = futaPenis.length
+          ? futaPenis
+          : chars.filter((c) => holds(c, owner, ev, false))
         if (field.scope === 'char' && self) {
-          targets = self.sex === owner ? [self] : sameSex
+          targets = holds(self, owner, ev, true) ? [self] : sameSex
         } else if (field.scope === 'source' || field.scope === 'target') {
           const mine = sameSex.filter((c) => effectiveRole(c) === field.scope)
           targets = actor === owner && mine.length ? mine : sameSex
         } else {
           // 씬 전체 글 — 문장의 지칭어(her/his)로는 같은 성별 둘을 못 가른다 (태그 표는 그 성별 전원)
           targets = sameSex
-          if (ev.via === 'sentence' && distinct(owner) > 1) ambiguous = true
+          if (ev.via === 'sentence' && (futaPenis.length || distinct(owner)) > 1) ambiguous = true
         }
-        if (field.scope !== 'char' || !self || self.sex !== owner) {
+        if (field.scope !== 'char' || !self || !holds(self, owner, ev, true)) {
           // 얼굴 자리는 다른 칸의 증거를 받지 않는다 (자기 칸 것만)
           targets = targets.filter((c) => !c.faceSeat || c === self)
         }
@@ -448,6 +476,47 @@ export function pieceInfo(
   return { state, tags }
 }
 
+/**
+ * 이 캐릭터가 부위마다 알몸을 선언했는가 (nude · completely nude · naked … · topless · bottomless · 문장의 ass nude).
+ * texts = 카드와 이 캐릭터에게만 붙는 글 (복장 조각은 뺀다). 씬 전체 글은 받는 캐릭터만 본다.
+ */
+export function declaredNudeAreas(
+  ex: CharExposure,
+  scene: SceneExposure,
+  texts: string[]
+): Record<ExposeArea, boolean> {
+  const char = ex.char
+  const all = [...texts, ...(char.receivesScene ? scene.sceneTexts : [])]
+  const out: Record<ExposeArea, boolean> = { lower: false, chest: false }
+  for (const tag of all.flatMap(engineTagsOf)) {
+    if (!char.body?.futa && !tagFitsSex(tag, char.sex)) continue
+    for (const a of nudeAreasOf(tag)) out[a] = true
+  }
+  for (const area of AREAS)
+    if (ex.areas[area].opens.some((e) => /^(naked|topless|bottomless)$/.test(e.rule)))
+      out[area] = true
+  return out
+}
+
+/**
+ * nsfw 조각을 켤 부위 — 1단계가 정한 auto 에서, 같은 부위에 알몸 선언이 있는 곳을 뺀다 (카드에 직접 적은 옷은 알몸이면 젖히지 않는데
+ * 복장 조각만 켜지던 어긋남). 그 부위의 nsfw 조각이 누드 조각이면 예외라 그대로 켠다.
+ */
+export function gateAuto(
+  ex: CharExposure,
+  declared: Record<ExposeArea, boolean>,
+  outfit: Outfit | undefined
+): Required<SceneAreas> {
+  const auto = { ...ex.auto }
+  for (const area of AREAS) {
+    if (!auto[area] || !declared[area]) continue
+    const when = area === 'lower' ? 'nsfw-lower' : 'nsfw-chest'
+    const pieces = (outfit?.pieces ?? []).filter((p) => !p.on && p.when === when)
+    if (!pieces.some((p) => isNudePiece(p.tags))) auto[area] = false
+  }
+  return auto
+}
+
 // ── 2단계: 입은 옷에 맞춰 붙이기 ─────────────────────────────
 
 export interface WornState {
@@ -519,7 +588,7 @@ export function finishExposure(
     area: ExposeArea,
     status: ExposeStatus,
     reason: string,
-    extra: Partial<Pick<ExposeNote, 'tags' | 'garments' | 'evidence'>> = {}
+    extra: Partial<Pick<ExposeNote, 'tags' | 'garments' | 'evidence' | 'gated'>> = {}
   ): void => {
     notes.push({
       charIndex: char.index,
@@ -530,15 +599,17 @@ export function finishExposure(
       tags: extra.tags ?? [],
       garments: extra.garments ?? [],
       evidence: extra.evidence ?? [],
-      reason
+      reason,
+      ...(extra.gated ? { gated: true } : {})
     })
   }
 
   // 이 캐릭터의 글 — 카드·복장(옷 벗기기 뒤)과 직접 붙은 글, 씬 전체 글은 받는 캐릭터만
   const ownTexts = [...worn.own, ...(char.receivesScene ? scene.sceneTexts : [])]
   const allTexts = [worn.card, worn.outfit, ...ownTexts]
+  // 후타는 남녀 낱말(topless male · nude female)로 거르지 않는다 — 어느 쪽 이야기든 이 캐릭터의 몸일 수 있다
   const mineTags = (texts: string[]): string[] =>
-    texts.flatMap(engineTagsOf).filter((t) => tagFitsSex(t, char.sex))
+    texts.flatMap(engineTagsOf).filter((t) => char.body?.futa || tagFitsSex(t, char.sex))
   const present = new Set(mineTags(allTexts))
   const veto = vetoedTags(allTexts)
 
@@ -591,6 +662,25 @@ export function finishExposure(
       continue
     }
     const evidence = dec.evidence
+    // 0) 같은 부위에 알몸 선언이 있으면 복장의 nsfw 조각도 켜지지 않는다 (조각이 누드 조각이면 예외 — gateAuto) — 카드 옷과 같은 결과.
+    //    옷 벗기기로 벗긴 캐릭터는 아래 2)가 그 까닭을 말한다
+    const declared =
+      nude[area] ?? dec.opens.find((e) => /^(naked|topless|bottomless)$/.test(e.rule))?.src ?? null
+    if (declared && !worn.stripped && worn.piece.state[area] !== 'on') {
+      // 복장에 이 부위의 nsfw 조각이 있는데(켜지지 않은 상태) 알몸 선언 때문에 막혔다 — 화면에 그 사실을 같이 보인다
+      const gated = worn.piece.state[area] === 'off'
+      note(
+        area,
+        'nude',
+        `${nude[area] ? `${name}: ${nude[area]} 라 젖힐 옷이 없음` : `${name}: 이미 벗은 모습을 적었음`}${gated ? ' · 복장의 nsfw 조각도 켜지지 않음' : ''}`,
+        {
+          tags: nude[area] ? [nude[area] as string] : [],
+          evidence: nude[area] ? evidence : [declared],
+          gated
+        }
+      )
+      continue
+    }
     // 1) 이 복장의 nsfw 조각을 이 씬에서 껐다 (직접 끈 것)
     if (worn.piece.state[area] === 'off') {
       note(area, 'vetoed', `${name}: 복장의 nsfw 조각을 이 씬에서 껐음`, { evidence })

@@ -42,6 +42,16 @@ export interface Evidence {
   via: 'sentence' | 'tag'
   /** open 만 — 주인을 지칭어로 정한 게 아니라 칸의 행위자로 짐작했다 (하는쪽 칸의 「open clothes」는 누구 옷인지 모른다) */
   guess?: boolean
+  /**
+   * 주인을 지칭어(her/his/another's)가 아니라 몸 낱말의 해부학 기본(penis=남 · pussy=여)으로 정했다.
+   * 이런 증거는 역할의 성별이 아니라 그 몸(음경·음부)을 가진 캐릭터에게 가야 한다 — 후타의 몸 (expose-state.ts holds)
+   */
+  anatomy?: boolean
+  /**
+   * 증거를 만든 몸 낱말이 음경 쪽(penis · cock · balls …)이다. 지칭어가 여성형(her cock)이어도 음경 보유자의 것이라,
+   * 몸을 아는 후타가 있으면 후타에게 간다 (expose-state.ts)
+   */
+  penisWord?: boolean
 }
 
 /** 한 칸(글 하나)을 읽은 결과 */
@@ -295,7 +305,8 @@ const OVER_MARK = new RegExp(
     '\\bcameltoe\\b',
     '\\b(?:erection|tent) under\\b',
     '\\bouter side of\\b',
-    '\\berect nipples\\b',
+    // erect nipples 만으로는 옷 위가 아니다 (알몸 씬에도 흔한 태그) — 같은 토막에 옷 낱말이 함께 있을 때만 옷 위 표지로 본다
+    '\\berect nipples\\b.*\\b(?:clothes|clothing|shirt|dress|bra|swimsuit|bikini|leotard|fabric|cloth|underwear|panties|top)\\b',
     '\\bhand under (?:clothes|clothing|skirt|shirt|dress)\\b'
   ].join('|')
 )
@@ -509,12 +520,15 @@ function analyzeFragment(frag: Frag, scope: TextScope, carry: Carry): Analyzed {
   const lower = words.join(' ')
   const n = words.length
   const scopeActor = toCode(scope.actor)
+  // 지금 읽는 몸 낱말이 음경 쪽인가 — 부위 루프가 돌 때만 켠다
+  let penisWord = false
   const push = (
     owner: Code | null,
     area: ExposeArea,
     kind: EvidenceKind | 'mention',
     rule: string,
-    guess = false
+    guess = false,
+    anatomy = false
   ): void => {
     // mention 은 신호가 아니라 표 읽기로 넘길지 가르는 표시 — 아래에서 걸러낸다
     ev.push({
@@ -524,7 +538,9 @@ function analyzeFragment(frag: Frag, scope: TextScope, carry: Carry): Analyzed {
       src,
       rule,
       via: 'sentence',
-      ...(guess ? { guess: true } : {})
+      ...(guess ? { guess: true } : {}),
+      ...(anatomy ? { anatomy: true } : {}),
+      ...(penisWord ? { penisWord: true } : {})
     })
   }
 
@@ -748,17 +764,20 @@ function analyzeFragment(frag: Frag, scope: TextScope, carry: Carry): Analyzed {
   }
   let onlyMention = parts.length > 0
   for (const p of parts) {
+    penisWord = p.def === 'M' && p.area === 'lower'
     if (p.owner === 'V') continue
     const owner = resolveOwner(p)
+    // 지칭어 없이 몸 낱말의 해부학 기본으로 주인을 정했다 (another's penis 처럼 상대 소유이되 해부학이 정하는 경우 포함)
+    const anatomy = p.owner == null || (p.owner === 'other' && p.fixed)
     if (p.power === 'clothed') continue // cleavage — 옷 입은 가슴골
     if (offPart(p.i)) {
-      push(owner, p.area, 'off', 'part-offframe')
+      push(owner, p.area, 'off', 'part-offframe', false, anatomy)
       continue
     }
     // 옷 위·가림·부정
     const thr = through >= 0 && Math.abs(through - p.i) <= 7
     if (thr || stain) {
-      push(owner, p.area, 'over', thr ? 'through-clothes' : 'stain')
+      push(owner, p.area, 'over', thr ? 'through-clothes' : 'stain', false, anatomy)
       onlyMention = false
       continue
     }
@@ -767,24 +786,24 @@ function analyzeFragment(frag: Frag, scope: TextScope, carry: Carry): Analyzed {
     if (negNear || hidNear) {
       // 가린 이유가 옷이면 옷 위, 아니면 부정
       const byGarment = garments.some((g) => Math.abs(g.i - p.i) <= 5)
-      push(owner, p.area, byGarment ? 'over' : 'neg', negNear ? 'neg' : 'hidden')
+      push(owner, p.area, byGarment ? 'over' : 'neg', negNear ? 'neg' : 'hidden', false, anatomy)
       onlyMention = false
       continue
     }
     if (p.power === 'weak') {
       // 엉덩이·가슴팍은 센 행위일 때만 (삽입·핥기·벌림)
       if (pen || oral || show || /\b(?:bare|exposed|spread|out)\b/.test(lower)) {
-        push(owner, p.area, 'need', 'weak-part+strong-verb')
+        push(owner, p.area, 'need', 'weak-part+strong-verb', false, anatomy)
         onlyMention = false
       } else if (/on (his|the|another's) (face|mouth)/.test(lower)) {
-        push(owner, p.area, 'need', 'facesit')
+        push(owner, p.area, 'need', 'facesit', false, anatomy)
         onlyMention = false
       }
       continue
     }
     // 사정은 몸 위에 뿌리는 것 — 가슴/음부에 닿을 때만
     if (ejac && !(pen || oral || touch || show)) {
-      push(owner, p.area, 'need', 'cum-on-part')
+      push(owner, p.area, 'need', 'cum-on-part', false, anatomy)
       onlyMention = false
       continue
     }
@@ -797,26 +816,27 @@ function analyzeFragment(frag: Frag, scope: TextScope, carry: Carry): Analyzed {
       near.some((w) => OBJECT_NEAR.test(w)) &&
       !near.some((w) => TOUCHER.test(w))
     ) {
-      push(owner, p.area, 'mention', 'object-near')
+      push(owner, p.area, 'mention', 'object-near', false, anatomy)
     } else if (carry.cue && touch && !pen && !oral && !show) {
-      push(owner, p.area, 'amb', 'secret-cue+touch')
+      push(owner, p.area, 'amb', 'secret-cue+touch', false, anatomy)
       onlyMention = false
     } else if (pen || oral || show) {
-      push(owner, p.area, 'need', 'verb+part')
+      push(owner, p.area, 'need', 'verb+part', false, anatomy)
       onlyMention = false
     } else if (touch) {
-      push(owner, p.area, p.def === 'M' ? 'need' : 'weak', 'touch')
+      push(owner, p.area, p.def === 'M' ? 'need' : 'weak', 'touch', false, anatomy)
       onlyMention = false
     } else if (contactNear(p)) {
-      push(owner, p.area, p.def === 'M' ? 'need' : 'weak', 'contact')
+      push(owner, p.area, p.def === 'M' ? 'need' : 'weak', 'contact', false, anatomy)
       onlyMention = false
     } else if (p.def === 'M' && p.area === 'lower') {
-      push(owner, p.area, 'need', 'penis-mention')
+      push(owner, p.area, 'need', 'penis-mention', false, anatomy)
       onlyMention = false
     } else {
-      push(owner, p.area, 'mention', 'mention')
+      push(owner, p.area, 'mention', 'mention', false, anatomy)
     }
   }
+  penisWord = false
 
   // 3) 부위 이름 없이 행위만 있는 문장 (he fucks her · strokes him · masturbating)
   if (!parts.length && through < 0 && !stain) {

@@ -22,6 +22,7 @@ import type { BackupDbFile, BackupPreset } from '@shared/types'
 import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { useExposeWorn } from '../lib/use-expose-worn'
+import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
 import { THEME_PRESETS } from '../lib/theme-presets'
 import { useGenerationStore } from '../stores/generation-store'
 import { AccountsSection } from './accounts-section'
@@ -155,6 +156,9 @@ function GenerationSection(): React.JSX.Element {
   const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
   // 입은 옷 자동 젖힘 (커스텀, 기본 켜짐)
   const [exposeWorn, setExposeWorn] = useExposeWorn()
+  // 후타 자동 재조립 + 시점·구도 정리 (커스텀, 기본 켜짐)
+  const [futaReassembly, setFutaReassembly] = useFutaReassembly()
+  const [futaViewFix, setFutaViewFix] = useFutaViewFix()
   // 확인 창 전역 끄기 (커스텀)
   const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
   const confirmsOff = confirmsOffState
@@ -217,6 +221,27 @@ function GenerationSection(): React.JSX.Element {
           aria-label="입은 옷 자동 젖힘"
           checked={exposeWorn}
           onCheckedChange={setExposeWorn}
+        />
+      </Row>
+      <Row
+        label="후타 자동 재조립"
+        hint="카드에 futanari 가 있는 후타가 그려지면 남자 장면으로 적힌 태그(1boy·hetero·faceless male·male 구절·고환·he/his 문장)를 후타 구성에 맞게 바꿔 보냄 (후타는 girl 로 셈) · 고환 유형 태그가 없으면 no testicles 를 더함 · 바꾼 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 적어 둔 글은 그대로 · 끄면 이 기능이 없을 때와 똑같이 나감 (알몸 여성 캐릭터에 더하는 pink nipples 는 이 설정과 무관)"
+      >
+        <Switch
+          aria-label="후타 자동 재조립"
+          checked={futaReassembly}
+          onCheckedChange={setFutaReassembly}
+        />
+      </Row>
+      <Row
+        label="후타 시점·구도 정리"
+        hint="남자 시점 씬(남자 선언이나 음경 행위가 있음)에서 후타가 보이도록 pov·pov hands·pov crotch·disembodied hand 를 from side 로 바꾸고(다른 앵글 태그가 있으면 뺄 뿐) 하는쪽 칸의 head out of frame·lower body, 씬의 penis focus 를 뺌 · 후타 자동 재조립이 켜져 있을 때만 · 끄면 시점·구도는 글 그대로"
+      >
+        <Switch
+          aria-label="후타 시점·구도 정리"
+          checked={futaReassembly && futaViewFix}
+          disabled={!futaReassembly}
+          onCheckedChange={setFutaViewFix}
         />
       </Row>
       <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">

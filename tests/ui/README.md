@@ -119,5 +119,24 @@ request builder); `?mode=placement` is the real placement dialog with synthetic 
 `?mode=main` is the main-tab 「자동 젖힘」 block (`MainExposeBlock`), which re-runs the real main request assembly read-only;
 `?mode=picker&card=1|3` is the real outfit picker (`&notes=0` = scene unknown); `?mode=outfit` is the
 real outfit tab with the 「카드 글에서 읽은 옷」 section; `?mode=settings` is the real settings dialog
-opened on the 생성 tab. In the browser console `await exposeFixture.check()` walks the DOM of the
-current mode and returns a pass/fail list (no screenshots needed).
+opened on the 생성 tab (it also checks the two futa switches 「후타 자동 재조립」 and 「후타 시점·구도 정리」;
+`&futa=0` starts with the first one off so the second one must be disabled). In the browser console
+`await exposeFixture.check()` walks the DOM of the current mode and returns a pass/fail list (no
+screenshots needed).
+
+Body/futa reassembly (몸·후타): `?mode=body` draws the collapsible 「몸·후타」 block (`BodyBlock`) with synthetic
+`BodyNote`s that cover all 7 kinds (replaced, removed, added, kept, unreadable, suspect, conflict) and
+check the folded one-line summary (`&empty=1` draws nothing, `&quiet=1` is a futa that is drawn with nothing
+to change = the single line 「후타 1명 · 바꾼 것 없음」, `&rounds=2` two queue rounds, `&open=1`
+start expanded). The 「후타 N명」 count comes from the request's `futaPlan` (the harness passes it as `futa`),
+never from guessing at the notes. `?mode=placement` also passes synthetic `bodyNotes` and `futaCharIds`, so the
+placement dialog shows the 「후타」·「후타 의심」·「후타 충돌」·「후타 못 읽음」 badges on a second line under the card name
+(they work with the auto-exposure setting off, too); only the card the plan names gets 「후타」.
+`&futa=1` adds a fictional futa card (E) so `?mode=detail&futa=1` (real `SceneDetail`) and
+`?mode=main&futa=1` (real main-tab assembly) show that the core module really puts `bodyNotes` and the
+`futaPlan` on the request. `&futacard=1` adds the same card without touching the setting: with `&futa=0`
+the block must say 「후타 카드 1장 · 재조립 꺼짐」 (the switch is off, not the futa unread; the request itself
+is unchanged). `?mode=main&fake=1` needs no
+core output: it adds synthetic `bodyNotes` and a two-futa `futaPlan` to the real main request, to check
+that the main-tab block reads them (summary starts with 「후타 2명」, shown even with the auto-exposure
+setting off).

@@ -3,7 +3,15 @@ import {
   stripSimpleBackgrounds,
   type SceneBackground
 } from './background-tags'
-import type { CharacterPromptInput, CharRole, GenerationRequest, PromptParts } from './types'
+import type {
+  BodyNote,
+  CharacterPromptInput,
+  CharRole,
+  FutaPlan,
+  GenerationRequest,
+  PromptParts
+} from './types'
+import { rewriteSceneTexts } from './futa'
 import { appendPromptPiece, removeComments, splitTextTail } from './nai-presets'
 import {
   withCensorTags,
@@ -32,11 +40,31 @@ export function scenePositivePrompt(
   },
   parts?: PromptParts,
   /** 검열 태그 전 캐릭터 프롬프트. 주면 첫 캐릭터 끝에 검열 태그를 붙여 돌려준다 */
-  characters?: CharacterPromptInput[]
-): { prompt: string; promptParts?: PromptParts; characterPrompts?: CharacterPromptInput[] } {
+  characters?: CharacterPromptInput[],
+  /**
+   * 후타 재조립 계획 (커스텀). 주면 기본(메인) 프롬프트와 씬 프롬프트를 후타 구성에 맞게 바꿔 합치고 bodyNotes 를 돌려준다.
+   * 씬 카드(kind background)와 계획이 없는 호출은 예전과 똑같다
+   */
+  futa?: FutaPlan | null
+): {
+  prompt: string
+  promptParts?: PromptParts
+  characterPrompts?: CharacterPromptInput[]
+  bodyNotes?: BodyNote[]
+} {
   const background = normalizeBackground(scene.background)
   // A background card's prompt is the background itself, with no scene action tags.
   if (scene.kind === 'background') background.prompt = scene.prompt
+  // 후타 재조립 — 원본 글은 그대로 두고 이 요청에 실리는 사본만 바꾼다 (메인·씬 글을 함께 읽는다)
+  const rewritten =
+    futa && scene.kind !== 'background'
+      ? rewriteSceneTexts(futa, { base, parts, prompt: scene.prompt })
+      : null
+  if (rewritten) {
+    base = rewritten.base
+    parts = rewritten.parts
+    scene = { ...scene, prompt: rewritten.prompt }
+  }
   const actionPrompt = scene.kind === 'background' ? '' : scene.prompt
   const clean = (value: string): string =>
     background.prompt.trim() && background.replaceSimple ? stripSimpleBackgrounds(value) : value
@@ -51,17 +79,21 @@ export function scenePositivePrompt(
   const target = characters ? censorCharacterIndex(characters) : -1
   const tagged = (value: string): string =>
     target < 0 ? withCensorTags(value, kinds, weights) : withoutCensorDuplicates(value, kinds)
+  const notes = rewritten ? { bodyNotes: rewritten.notes } : null
   const withCharacters = <T extends { prompt: string; promptParts?: PromptParts }>(
     result: T
-  ): T & { characterPrompts?: CharacterPromptInput[] } =>
+  ): T & { characterPrompts?: CharacterPromptInput[]; bodyNotes?: BodyNote[] } =>
     characters
       ? {
           ...result,
+          ...notes,
           characterPrompts: characters.map((c, i) =>
             i === target ? { ...c, prompt: withCensorTags(c.prompt, kinds, weights) } : c
           )
         }
-      : result
+      : notes
+        ? { ...result, ...notes }
+        : result
   if (!parts) return withCharacters({ prompt: tagged(appendPrompt(clean(base), scenePrompt)) })
   const merged = mergeSceneIntoPromptParts(
     { base: clean(parts.base), additional: clean(parts.additional), detail: clean(parts.detail) },
@@ -406,17 +438,38 @@ export function refreshScenePrompts(
         ...(request.sceneBasePromptParts ?? request.promptParts),
         additional: request.sceneBaseAdditionalPrompt
       },
-      characters
+      characters,
+      request.futaPlan
     )
-    return { ...request, ...positive, ...baseCharacters, negativePrompt }
+    return { ...request, ...refreshedNotes(request, positive), ...baseCharacters, negativePrompt }
   }
 
-  const positive = scenePositivePrompt(request.sceneBasePrompt, latestScene, undefined, characters)
+  const positive = scenePositivePrompt(
+    request.sceneBasePrompt,
+    latestScene,
+    undefined,
+    characters,
+    request.futaPlan
+  )
   return {
     ...request,
-    ...positive,
+    ...refreshedNotes(request, positive),
     ...baseCharacters,
     negativePrompt,
     promptParts: request.promptParts
   }
+}
+
+/**
+ * 다시 합친 글 — 후타 재조립 계획이 있으면 메인·씬 글의 메모(bodyNotes)를 새 것으로 바꾼다.
+ * 캐릭터 칸의 메모는 조립 때 정해져 그대로 둔다. 계획이 없으면 요청의 메모를 건드리지 않는다.
+ */
+function refreshedNotes<T extends { bodyNotes?: BodyNote[] }>(
+  request: GenerationRequest,
+  positive: T
+): Omit<T, 'bodyNotes'> & { bodyNotes?: BodyNote[] } {
+  const { bodyNotes: fresh, ...rest } = positive
+  if (!request.futaPlan || !fresh) return rest
+  const kept = (request.bodyNotes ?? []).filter((n) => n.where !== 'main' && n.where !== 'scene')
+  return { ...rest, bodyNotes: [...fresh, ...kept] }
 }

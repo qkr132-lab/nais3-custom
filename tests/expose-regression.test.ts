@@ -77,6 +77,8 @@ const sceneOf = (s: SyntheticScene): Scene =>
 interface Drawn {
   prompts: Record<number, string[]>
   notes: ExposeNote[] | undefined
+  /** 몸 기준 메모(bodyNotes)가 더했다고 한 태그 — 알몸 여성의 pink nipples 처럼 젖힘과 다른 층에서 붙는 것 */
+  bodyAdded: string[]
 }
 
 /** 합성 씬 하나를 이 설정으로 그려 본다 — 카드 id → 그 카드의 프롬프트들(자리마다) */
@@ -130,7 +132,10 @@ function draw(s: SyntheticScene, exposeWorn: boolean): Drawn {
     if (!m) continue
     ;(prompts[Number(m[1])] ??= []).push(cp.prompt.replace(m[0], ''))
   }
-  return { prompts, notes: request.exposeNotes }
+  const bodyAdded = (request.bodyNotes ?? [])
+    .filter((n) => n.kind === 'added' && n.after)
+    .map((n) => n.after as string)
+  return { prompts, notes: request.exposeNotes, bodyAdded }
 }
 
 const statusOf = (
@@ -200,7 +205,7 @@ describe('합성 씬 회귀 — 부위별 판정과 붙은 태그', () => {
     for (const scene of SCENES) {
       for (const heroine of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
         const label = `${scene.name} / ${heroine}`
-        const { prompts, notes } = draw({ ...scene, heroine }, true)
+        const { prompts, notes, bodyAdded } = draw({ ...scene, heroine }, true)
         expect(notes, label).toBeDefined()
         for (const n of notes ?? []) expect(n.reason, label).toBeTruthy()
         for (const [idText, list] of Object.entries(prompts)) {
@@ -223,8 +228,9 @@ describe('합성 씬 회귀 — 부위별 판정과 붙은 태그', () => {
           )
           for (const prompt of list) {
             const tags = tagsOf(prompt)
-            // 몰래 붙이기 금지 — 원래 글에 없던 태그는 모두 notes 의 added 태그다
-            for (const t of tags) if (!given.has(t)) expect(added, `${label}: ${t}`).toContain(t)
+            // 몰래 붙이기 금지 — 원래 글에 없던 태그는 모두 notes 의 added 태그(젖힘) 또는 bodyNotes 의 added 태그(몸에 맞춘 태그)다
+            for (const t of tags)
+              if (!given.has(t)) expect([...added, ...bodyAdded], `${label}: ${t}`).toContain(t)
             // 같은 젖힘 태그가 두 번 붙지 않는다
             for (const t of added)
               expect(tags.filter((x) => x === t).length, `${label}: ${t}`).toBeLessThanOrEqual(1)

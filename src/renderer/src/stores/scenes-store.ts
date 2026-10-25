@@ -3,11 +3,35 @@ import type { CensorChanges } from '@shared/censor-tags'
 import { requestForPromptMode } from '@shared/prompt-state'
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
-import type { ExposeNote, GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
+import type {
+  BodyNote,
+  ExposeNote,
+  GenerationRequest,
+  Scene,
+  SceneImage,
+  ScenePreset
+} from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { resolveOutfit, resolveOutfitNegative } from '@shared/outfit'
 import { isFaceSeat, triggerAreas } from '@shared/auto-expose'
-import { analyzeExposure, finishExposure, pieceInfo, receivesSceneText } from '@shared/expose-state'
+import {
+  analyzeExposure,
+  declaredNudeAreas,
+  finishExposure,
+  gateAuto,
+  pieceInfo,
+  receivesSceneText
+} from '@shared/expose-state'
+import { readBody } from '@shared/body'
+import {
+  bodyTagsFor,
+  flagNotes,
+  isNudeChar,
+  planFuta,
+  rewriteCharTexts,
+  rewriteRequestPrompt,
+  rewriteSceneTexts
+} from '@shared/futa'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -266,6 +290,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   const nudeStripSetting = sceneNudeStripSetting(scene.presetId, scene.id)
   const globalStripOnNude = useOutfitsStore.getState().stripOnNude
   const kindOf = clothKindOf()
+  const futaOn = useOutfitsStore.getState().futaReassembly
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
   const sourceContexts = [
     scene.sourceTags ?? '',
@@ -319,9 +344,45 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       outfitChoice,
       faceSeat,
       // 남녀는 역할 기준(하는쪽=남캐, 당하는쪽=여캐), 역할이 없으면 카드의 남자 태그
-      sex: characterSex(role, c.prompt)
+      sex: characterSex(role, c.prompt),
+      // 몸 (음경·음부·가슴) — 카드(와 자리·씬별 캐릭터 태그)의 futanari 로 후타를 읽는다. 후타 재조립을 끄면 후타를 읽지 않는다
+      reading: readBody(role, [c.prompt, charTag, slotTag], futaOn)
     }
   })
+  // 후타 재조립 (커스텀) — 후타가 그려지면 씬 글의 남자 장면 선언을 후타 구성에 맞게 바꾼다. 얼굴 인셋 자리는 같은 인물이라 세지 않는다.
+  // 젖힘 엔진은 바꾸기 전 원문을 읽는다 (hetero 같은 태그는 젖힘 증거가 아니라서 어긋나지 않는다)
+  const futaPlan =
+    futaOn && scene.kind !== 'background'
+      ? planFuta(
+          metas.flatMap((m, index) =>
+            m.faceSeat
+              ? []
+              : [
+                  {
+                    kind: m.reading.body.futa
+                      ? ('futa' as const)
+                      : m.reading.chestFemale
+                        ? ('female' as const)
+                        : ('male' as const),
+                    largePenis: m.reading.largePenis,
+                    testicleType: m.reading.testicleType,
+                    index,
+                    id: m.c.id,
+                    name: m.c.name
+                  }
+                ]
+          ),
+          useOutfitsStore.getState().futaViewFix
+        )
+      : null
+  const futaScene = futaPlan
+    ? rewriteSceneTexts(futaPlan, {
+        base: base.prompt,
+        parts: base.promptParts,
+        prompt: scene.prompt
+      })
+    : null
+  const bodyNotes: BodyNote[] = futaScene ? [...futaScene.notes] : []
   // 입은 옷 자동 젖힘 (커스텀) — 설정이 꺼져 있으면 아래 옛 판정(triggerAreas)을 그대로 쓴다.
   // 켜져 있으면 씬 글(태그·문장)을 캐릭터별로 읽어 어느 부위를 드러낼지 정하고, 붙인 태그와 안 붙인 이유를 exposeNotes 로 남긴다
   const exposeOn = useOutfitsStore.getState().exposeWorn
@@ -332,6 +393,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
           id: m.c.id,
           name: m.c.name,
           sex: m.sex,
+          // 후타만 몸을 넘긴다 — 그 밖의 캐릭터는 옛 방식(sex 일치)
+          ...(m.reading.body.futa ? { body: m.reading.body } : {}),
           role: m.role ?? null,
           faceSeat: m.faceSeat,
           autoOff: m.outfitChoice?.auto === false,
@@ -355,8 +418,17 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     : null
   const exposeNotes: ExposeNote[] = []
   const built = metas.map((meta, index) => {
-    const { c, slotIndex, slotTag, charTag, role, partnerTag, outfitChoice, faceSeat } = meta
+    const { c, slotIndex, slotTag, charTag, role, partnerTag, outfitChoice, faceSeat, reading } =
+      meta
     const seated = slotIndex != null
+    /**
+     * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
+     * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
+     * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
+     * 표정·포즈 같은 일반 태그는 MUTUAL_TAGS에 없어 그대로 남는다.
+     */
+    const withRole = (tags: string): string =>
+      role && tags.trim() ? autoRolePrefix(tags, role) : tags
     const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
     // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
     // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
@@ -376,14 +448,32 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     const exposed = exposure?.chars[index]
     // 입은 옷 자동 젖힘이 켜져 있으면 캐릭터별로 읽은 결과(주인 몸 기준), 꺼져 있으면 옛 판정.
     // 당하는쪽은 하는쪽이 당하는쪽 몸에 하는 행위(하는쪽 태그·하는쪽 자리 태그)로도 드러난다
-    const auto = exposed
-      ? exposed.auto
-      : triggerAreas(
-          exposeContexts,
-          exposeActs,
-          outfitChoice,
-          role === 'target' && !faceSeat ? sourceContexts : []
-        )
+    const resolved = resolveOutfit(c.outfitId, outfitChoice, outfits)
+    // 같은 부위에 알몸 선언(nude · ass nude · bottomless …)이 있으면 복장 nsfw 조각도 켜지 않는다 (카드 옷과 같은 결과 — 누드 조각은 예외)
+    const gated =
+      exposure && exposed
+        ? gateAuto(
+            exposed,
+            declaredNudeAreas(exposed, exposure, [
+              c.prompt,
+              withRole(charTag),
+              withRole(slotTag),
+              withRole(partnerTag),
+              roleTagsFor(role, scene)
+            ]),
+            resolved?.outfit
+          )
+        : null
+    const auto = gated
+      ? gated
+      : exposed
+        ? exposed.auto
+        : triggerAreas(
+            exposeContexts,
+            exposeActs,
+            outfitChoice,
+            role === 'target' && !faceSeat ? sourceContexts : []
+          )
     // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
     // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
     // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
@@ -393,7 +483,6 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // 역할이 없는 캐릭터만 카드의 남자 태그(1boy 등)로 가린다
     const strip = nudeStripFor(nudeStripSetting, globalStripOnNude, characterSex(role, c.prompt))
     const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, strip.enabled, kindOf, auto)
-    const resolved = resolveOutfit(c.outfitId, outfitChoice, outfits)
     const dressed = undressForNude({
       card: c.prompt,
       outfit: worn,
@@ -406,19 +495,75 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       kindOf
     })
     const outfitTag = dressed.outfit
-    /**
-     * 자리·씬 태그에 sex 같은 상호작용 태그를 적으면 그 자리의 역할로 접두사를 붙인다 (커스텀).
-     * 씬의 행위 태그는 씬에 하나뿐이라 "같은 당하는쪽이라도 자리마다 다른 행위"를 하려면
-     * 자리 태그에 적어야 하는데, 여기까지 자동으로 붙지 않으면 target#을 손으로 적어야 했다.
-     * 표정·포즈 같은 일반 태그는 MUTUAL_TAGS에 없어 그대로 남는다.
-     */
-    const withRole = (tags: string): string =>
-      role && tags.trim() ? autoRolePrefix(tags, role) : tags
+    // 후타 재조립 (커스텀) — 이 캐릭터에게 붙는 글(하는쪽/당하는쪽 칸·자리·캐릭터·상대 태그)도 후타 구성에 맞게 바꾼다.
+    // 젖힘 엔진은 바꾸기 전 원문을 읽는다 (아래 own 은 원문)
+    const rw =
+      futaPlan && futaScene
+        ? rewriteCharTexts(
+            futaPlan,
+            {
+              ...(role === 'source' ? { source: scene.sourceTags ?? '' } : {}),
+              ...(role === 'target' ? { target: scene.targetTags ?? '' } : {}),
+              slot: slotTag,
+              char: charTag,
+              partner: partnerTag
+            },
+            {
+              index,
+              name: c.name,
+              id: c.id,
+              role: role ?? null,
+              hasGirl: reading.hasGirl,
+              futa: reading.body.futa
+            },
+            futaScene.state
+          )
+        : null
+    const charTagOut = rw?.texts.char ?? charTag
+    const slotTagOut = rw?.texts.slot ?? slotTag
+    const partnerTagOut = rw?.texts.partner ?? partnerTag
+    const roleTagsOut = roleTagsFor(
+      role,
+      rw
+        ? {
+            sourceTags: rw.texts.source ?? scene.sourceTags,
+            targetTags: rw.texts.target ?? scene.targetTags
+          }
+        : scene
+    )
+    const ownOut = [
+      withRole(charTagOut),
+      withRole(slotTagOut),
+      withRole(partnerTagOut),
+      roleTagsOut
+    ]
+    // 몸에 맞춘 태그 — 후타에 no testicles, 알몸이고 가슴이 여성 몸이면 pink nipples (후타 하는쪽 포함). 더한 것은 bodyNotes 에 남는다
+    const bodyTags = faceSeat
+      ? null
+      : bodyTagsFor({
+          reading,
+          futaOn,
+          nude: isNudeChar(dressed.nude != null, [dressed.card, dressed.outfit, ...ownOut]),
+          texts: [dressed.card, dressed.outfit, ...ownOut],
+          index,
+          name: c.name,
+          id: c.id
+        })
+    bodyNotes.push(
+      ...(rw?.notes ?? []),
+      ...(bodyTags?.notes ?? []),
+      ...(futaOn && !faceSeat ? flagNotes(reading, index, c.name, c.id) : [])
+    )
     // 입은 옷 자동 젖힘 (커스텀) — 옷 벗기기가 끝난 카드·복장 글을 읽어, 입은 옷에 맞는 젖힘 태그를 붙이거나
     // 안 붙인 이유를 남긴다. 알몸이면 붙이지 않는다. 붙은 태그는 반드시 exposeNotes 에 있다
     let autoTag = ''
     if (exposure && exposed) {
-      const piece = pieceInfo(resolved?.outfit, resolved?.choice, auto)
+      // 옷 벗기기로 벗긴 캐릭터는 알몸 선언으로 조각을 막지 않은 값(exposed.auto)으로 본다 — 알몸이 된 까닭은 아래에서 말한다
+      const piece = pieceInfo(
+        resolved?.outfit,
+        resolved?.choice,
+        dressed.nude != null ? exposed.auto : auto
+      )
       const finished = finishExposure(exposed, exposure, {
         card: dressed.card,
         outfit: dressed.outfit,
@@ -435,14 +580,15 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     if (rp) rolePosApplied = true
     const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
     return {
-      // 카드(몸) → 복장 → 입은 옷 자동 젖힘 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+      // 카드(몸) → 몸에 맞춘 태그 → 복장 → 입은 옷 자동 젖힘 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
       prompt: [
+        bodyTags?.tags.join(', ') ?? '',
         outfitTag,
         autoTag,
-        withRole(charTag),
-        withRole(slotTag),
-        withRole(partnerTag),
-        roleTagsFor(role, scene)
+        withRole(charTagOut),
+        withRole(slotTagOut),
+        withRole(partnerTagOut),
+        roleTagsOut
       ].reduce(appendPrompt, dressed.card),
       // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
       negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
@@ -514,7 +660,13 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
 
   // 분할 사용 시 씬 프롬프트는 가변 뒤·디테일 앞 (전체 끝에 붙이면 디테일에 묻힘 — 커스텀 수정)
   // 검열 태그는 첫 캐릭터 끝에 붙는다 (캐릭터가 없으면 기본 프롬프트 끝)
-  const positive = scenePositivePrompt(base.prompt, scene, base.promptParts, characterPrompts)
+  // 후타 재조립을 한 메인·씬 글을 합친다 (실행 직전 refreshScenePrompts 가 futaPlan 으로 같은 치환을 다시 적용한다)
+  const positive = scenePositivePrompt(
+    futaScene ? futaScene.base : base.prompt,
+    futaScene ? { ...scene, prompt: futaScene.prompt } : scene,
+    futaScene ? futaScene.parts : base.promptParts,
+    characterPrompts
+  )
   const result: GenerationRequest = {
     ...base,
     ...positive,
@@ -532,6 +684,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     sceneId: scene.id,
     // 붙은 젖힘 태그와 안 붙은 이유 (입은 옷 자동 젖힘이 켜져 있을 때만 — 꺼져 있으면 요청이 예전과 같다)
     ...(exposure ? { exposeNotes } : {}),
+    // 후타 재조립·몸에 맞춘 태그의 메모와 계획 (바꾸거나 더한 게 없으면 요청이 예전과 같다)
+    ...(bodyNotes.length ? { bodyNotes } : {}),
+    ...(futaPlan ? { futaPlan } : {}),
     // 큐 실행 시 최신 씬 태그를 다시 붙일 수 있도록 기본 부분을 별도로 보존한다.
     sceneBasePrompt: base.prompt,
     sceneBasePromptParts: base.promptParts,
@@ -1322,13 +1477,32 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       if (item.request.sceneId == null) {
         const gen = useGenerationStore.getState()
         const current = requestForPromptMode(gen.request, gen.promptSplitEnabled)
+        // 후타 재조립 계획이 실린 메인 항목은 최신 메인 프롬프트에도 같은 치환을 다시 적용하고, 메인 글의 메모를 새로 한다.
+        // 지금 설정을 따른다 — 재조립을 껐으면 치환 없이 최신 메인 글 그대로(계획도 뗀다), 시점·구도만 껐다 켰으면 계획에 반영한다.
+        // (캐릭터 칸 글은 대기열에 넣을 때 정해진 채로 남는다 — 메모도 그대로 둔다)
+        const stored = item.request.futaPlan
+        const outfitsState = useOutfitsStore.getState()
+        const plan =
+          stored && outfitsState.futaReassembly
+            ? { ...stored, viewFix: outfitsState.futaViewFix }
+            : null
+        const futaMain = plan ? rewriteRequestPrompt(plan, current) : null
+        const text = futaMain?.request ?? current
+        const restRequest: GenerationRequest = { ...item.request }
+        const oldNotes = restRequest.bodyNotes
+        delete restRequest.futaPlan
+        delete restRequest.bodyNotes
+        const charNotes = (oldNotes ?? []).filter((n) => n.where !== 'main' && n.where !== 'scene')
+        const notes = [...(futaMain?.notes ?? []), ...charNotes]
         updates.push({
           id: item.id,
           request: {
-            ...item.request,
-            prompt: current.prompt,
-            promptParts: current.promptParts,
-            negativePrompt: current.negativePrompt
+            ...restRequest,
+            prompt: text.prompt,
+            promptParts: text.promptParts,
+            negativePrompt: current.negativePrompt,
+            ...(notes.length ? { bodyNotes: notes } : {}),
+            ...(plan ? { futaPlan: plan } : {})
           }
         })
         continue

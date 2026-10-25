@@ -357,7 +357,8 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       useCharactersStore.setState({ items: [card(1, 'blue eyes, skirt', true)] })
       useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
       const r = request('bed, vaginal')
-      expect(r.characterPrompts[0].prompt).toBe('blue eyes, nude, completely nude')
+      // 알몸이 된 여성 캐릭터에는 pink nipples 가 붙는다 (고정 규칙 · bodyNotes 에 남는다)
+      expect(r.characterPrompts[0].prompt).toBe('blue eyes, nude, completely nude, pink nipples')
       expect(r.exposeNotes).toContainEqual(
         expect.objectContaining({ area: 'lower', status: 'nude' })
       )
@@ -439,7 +440,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
         }
       })
       expect(request('bath, nude').characterPrompts[0].prompt).toBe(
-        'blue eyes, nude, completely nude'
+        'blue eyes, nude, completely nude, pink nipples'
       )
       // 카드 기본과 다른 복장을 직접 골랐으면 그대로 입는다 (누드 씬에 일부러 고른 옷)
       const other: Outfit = {
@@ -471,7 +472,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     // 전체 끔 — 이 씬만 켜면 기본 복장이 빠진다
     expect(charPrompt('bath, nude')).toBe('blue eyes, pleated skirt, white panties')
     useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
-    expect(charPrompt('bath, nude')).toBe('blue eyes, nude, completely nude')
+    expect(charPrompt('bath, nude')).toBe('blue eyes, nude, completely nude, pink nipples')
     // 다른 씬은 그대로 전체 설정
     expect(
       buildSceneRequest({ ...scene, id: 5, prompt: 'bath, nude', censorKinds: [] })
@@ -483,7 +484,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(charPrompt('bath, nude')).toBe('blue eyes, pleated skirt, white panties')
     // 전체 설정 따름으로 되돌리면 켜짐
     useSceneExtrasStore.setState({ nudeStrips: { 1: {} } })
-    expect(charPrompt('bath, nude')).toBe('blue eyes, nude, completely nude')
+    expect(charPrompt('bath, nude')).toBe('blue eyes, nude, completely nude, pink nipples')
   })
 
   it('씬에서 옷 벗기기를 켜면 누드 태그가 없어도 벗기고 캐릭터 태그에 누드를 붙인다', () => {
@@ -496,7 +497,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       'blue eyes, school swimsuit, pleated skirt, white panties'
     )
     useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
-    expect(charPrompt('onsen, bathing')).toBe('blue eyes, nude, completely nude')
+    expect(charPrompt('onsen, bathing')).toBe('blue eyes, nude, completely nude, pink nipples')
     // 이 씬만 끄면 누드 태그가 있어도 안 벗긴다
     useOutfitsStore.setState({ stripOnNude: true })
     useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: false } } })

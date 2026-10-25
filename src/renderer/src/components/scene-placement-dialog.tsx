@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { Check, Maximize2, Minimize2, Plus, RotateCcw, User } from 'lucide-react'
-import type { CharPositions, CharRole, CharRoles, CharacterCard, ExposeNote } from '@shared/types'
+import type {
+  BodyNote,
+  CharPositions,
+  CharRole,
+  CharRoles,
+  CharacterCard,
+  ExposeNote
+} from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { partnerTagsFor, sceneContextsFor, seatSlots } from '@shared/scene-request'
 import { isFaceSeat } from '@shared/auto-expose'
@@ -13,7 +20,9 @@ import { distributed } from '../lib/placement-geometry'
 import { PromptEditor } from './prompt-editor'
 import { OutfitPicker } from './outfit-picker'
 import { ExposeCharBadges } from './expose-notes'
+import { FutaCharBadges } from './body-notes'
 import { notesOfChar } from '../lib/expose-notes'
+import { bodyNotesOfChar } from '../lib/body-notes'
 import type { OutfitChoice } from '@shared/outfit'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -91,6 +100,8 @@ export function ScenePlacementDialog({
   rolePositions,
   scene,
   exposeNotes,
+  bodyNotes,
+  futaCharIds,
   onPatch
 }: {
   open: boolean
@@ -134,6 +145,13 @@ export function ScenePlacementDialog({
    * 없으면 씬을 모르거나(큐 항목) 아직 계산 전이다.
    */
   exposeNotes?: ExposeNote[]
+  /**
+   * 이 씬의 몸·후타 재조립 결과 (요청에 실린 메모) — 캐릭터 줄에 「후타」·「후타 의심」 배지로 보인다.
+   * 없으면 씬을 모르거나(큐 항목) 아직 계산 전이다.
+   */
+  bodyNotes?: BodyNote[]
+  /** 후타로 읽힌 카드 id (요청의 futaPlan.chars) — 「후타」 배지는 이 카드에만 단다 */
+  futaCharIds?: number[]
   onPatch: (patch: {
     characterIds?: number[]
     positions?: CharPositions
@@ -872,25 +890,38 @@ export function ScenePlacementDialog({
                         <span className="grid size-5 shrink-0 place-items-center rounded-full bg-paper font-mono text-[10px] text-muted">
                           {i + 1}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-[11.5px]">
-                          {charLabel(c, i)}
-                          {isFromLibrary(c.id) && (
-                            <span
-                              className="ml-1 text-[10px] text-faint"
-                              title="캐릭터 창에서 켜져 있어 이 씬에도 함께 나갑니다"
-                            >
-                              캐릭터 창
-                            </span>
-                          )}
-                          {charTags?.[c.id]?.trim() && (
-                            <span className="ml-1 text-[10px] text-accent" title={charTags[c.id]}>
-                              +태그
-                            </span>
-                          )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[11.5px]">
+                            {charLabel(c, i)}
+                            {isFromLibrary(c.id) && (
+                              <span
+                                className="ml-1 text-[10px] text-faint"
+                                title="캐릭터 창에서 켜져 있어 이 씬에도 함께 나갑니다"
+                              >
+                                캐릭터 창
+                              </span>
+                            )}
+                            {charTags?.[c.id]?.trim() && (
+                              <span className="ml-1 text-[10px] text-accent" title={charTags[c.id]}>
+                                +태그
+                              </span>
+                            )}
+                          </span>
+                          {/* 입은 옷 자동 젖힘·몸·후타 배지 — 이름 아래 둘째 줄에 두어 이름이 가려지지 않고(배지가 늘면 줄바꿈),
+                              경고가 먼저 잘리지 않는다. 호버하면 부위별·메모별 이유. 배지가 없으면 줄 자체가 없다 */}
+                          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 empty:hidden">
+                            {exposeNotes && (
+                              <ExposeCharBadges notes={notesOfChar(exposeNotes, c.id)} />
+                            )}
+                            {/* 몸·후타 — 후타로 읽힌 카드(계획)와 후타가 의심되는 카드. 메모는 카드 id 로 찾는다 */}
+                            {bodyNotes && (
+                              <FutaCharBadges
+                                notes={bodyNotesOfChar(bodyNotes, c, exposeNotes)}
+                                futa={futaCharIds?.includes(c.id) ?? false}
+                              />
+                            )}
+                          </span>
                         </span>
-                        {/* 입은 옷 자동 젖힘 — 붙은 태그 수와 눈여겨볼 상태, 호버하면 부위별 이유.
-                            이름 칸 밖에 두어 이름이 길어도 경고가 먼저 잘리지 않는다 */}
-                        {exposeNotes && <ExposeCharBadges notes={notesOfChar(exposeNotes, c.id)} />}
                         {seats.length > 0 ? (
                           <span
                             className={cn(

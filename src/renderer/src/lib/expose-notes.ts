@@ -351,8 +351,9 @@ export function autoAreasFromNotes(
   autoOn: boolean
 ): { lower: boolean; chest: boolean } {
   if (!autoOn) return { lower: false, chest: false }
+  // 알몸 선언 때문에 복장의 nsfw 조각이 켜지지 않은 부위(gated)는 저절로 켜지는 부위가 아니다
   const needed = (area: NoteArea): boolean =>
-    notes.some((n) => n.area === area && NEEDED_STATUS.has(n.status))
+    notes.some((n) => n.area === area && NEEDED_STATUS.has(n.status) && !n.gated)
   return { lower: needed('lower'), chest: needed('chest') }
 }
 
