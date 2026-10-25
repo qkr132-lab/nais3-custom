@@ -185,7 +185,7 @@ describe('씬 경로 — 후타(하는쪽) + 여(당하는쪽)', () => {
     expect(refreshed.prompt).toBe(r.prompt)
     expect(refreshed.characterPrompts).toEqual(r.characterPrompts)
     expect(refreshed.bodyNotes).toEqual(r.bodyNotes)
-    // 직렬화해서 다시 읽어도(큐·클라우드 전송) 같다
+    // 직렬화해서 다시 읽어도(큐 전송) 같다
     const wire = JSON.parse(JSON.stringify(r)) as GenerationRequest
     expect(refreshScenePrompts(wire, scene).prompt).toBe(r.prompt)
     // 씬 글을 고치면 고친 글에 적용된다

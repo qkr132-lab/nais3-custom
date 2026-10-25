@@ -17,7 +17,7 @@ import type { BodyNote } from './types'
  * 빼달라는 음수 가중치(-1::blue eyes::)·와일드카드·주석은 그대로 둔다 (nude-strip 의 filterTags 와 같은 규칙 — futa.ts 의 mapTags).
  * 뺀 것은 전부 BodyNote(kind removed, topic eyes)로 돌려줘 화면에 보인다 — 몰래 빼지 않는다.
  * 설정 「눈 감으면 눈 태그 빼기」(eyes_closed_strip, 기본 꺼짐)가 꺼져 있으면 카드 글을 읽지 않고 그대로 돌려준다 (이 기능이 없던 때와 같다).
- * DB·IPC 없는 순수 계산이다 (렌더러·폰이 같은 코드를 쓴다).
+ * DB·IPC 없는 순수 계산이다.
  */
 
 // ── 감은 눈 읽기 ─────────────────────────────────────────

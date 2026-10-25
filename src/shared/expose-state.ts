@@ -46,7 +46,7 @@ import type { ExposeArea, ExposeNote, ExposeStatus } from './types'
  * 두 단계다.
  *   1) analyzeExposure — 씬 글을 읽어 캐릭터별 「드러내야 하는 부위」를 정한다. nsfw 조각을 켤지도 여기서 정한다.
  *   2) finishExposure  — 옷 벗기기가 끝난 카드·복장 글을 받아, 입은 옷에 맞는 젖힘 태그를 붙이거나 이유를 남긴다.
- * DB·IPC 없는 순수 계산이다 (렌더러·폰이 같은 코드를 쓴다).
+ * DB·IPC 없는 순수 계산이다.
  */
 
 const AREAS = ['lower', 'chest'] as const

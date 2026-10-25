@@ -23,7 +23,7 @@ import type { BodyNote, FutaPlan, PromptParts } from './types'
  *  - 남자가 없다 (후타+여, 후타+후타, 후타 혼자): 남자 선언을 모두 정리하고 관계 태그를 맞춘다
  *      후타+여 = 2girls + futa with female · 후타+후타 = 2girls + futa with futa · 후타 혼자 = 1girl
  *  - 남자가 있다 (후타+남): 남자 선언은 맞으니 그대로 두고 hetero 만 futa with male 로 바꾼다
- * DB·IPC 없는 순수 계산이다 (렌더러·폰·클라우드가 같은 코드를 쓴다).
+ * DB·IPC 없는 순수 계산이다.
  */
 
 // ── 계획 ────────────────────────────────────────────────

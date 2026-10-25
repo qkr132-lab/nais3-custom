@@ -10,7 +10,7 @@ import type { ExposeArea } from './types'
  * 역할 기준인 characterSex(하는쪽=남캐, 당하는쪽=여캐)는 그대로 둔다 — 옷 벗기기 「남캐만/여캐만」이 거기에 기대고 있다.
  * 몸은 따로 읽는다: 음경·음부·가슴. 후타는 카드의 futanari 한 낱말로 정하고(가슴은 여성, 음경 있음),
  * 후타가 아니면 characterSex 에서 만든 옛 몸을 그대로 쓴다 (남=음경+남 가슴, 여=음부+여 가슴).
- * DB·IPC 없는 순수 계산이다 (렌더러·폰이 같은 코드를 쓴다).
+ * DB·IPC 없는 순수 계산이다.
  */
 
 export interface CharBody {
