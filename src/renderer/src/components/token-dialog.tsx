@@ -250,7 +250,7 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row
         label="알몸일 때 pink nipples"
-        hint="알몸이고 가슴이 여성 몸인 캐릭터(후타 포함)에 pink nipples 를 더함 · 카드에 유두 색 태그가 있거나 pink nipples 를 음수 가중치로 막아 두면 더하지 않음 · 더한 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
+        hint="알몸이고 가슴이 여성 몸인 캐릭터(후타 포함)에 pink nipples 를 더함 · 카드·복장·씬 태그에 유두 색 태그가 있거나 pink nipples 를 음수 가중치로 막아 두면 더하지 않음 · 더한 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
       >
         <Switch
           aria-label="알몸일 때 pink nipples"
@@ -779,6 +779,8 @@ function BackupButtons(): React.JSX.Element {
           void useVibesStore.getState().load()
           void useCharRefsStore.getState().load()
           void usePromptPresetsStore.getState().load()
+          // 복장 스토어 — 입은 옷 자동 젖힘·눈 감음·pink nipples 같은 복장 설정도 백업에 들어 있어, 안 다시 읽으면 앱을 다시 켜기 전까지 옛 값으로 동작한다
+          void useOutfitsStore.getState().load()
           void useScenesStore.getState().loadPresets()
           // 씬별 캐릭터 추가·큐 반복 — 안 다시 읽으면 다음 편집 때 복원한 내용을 예전 값으로 덮어쓴다
           void useSceneExtrasStore.getState().reload()

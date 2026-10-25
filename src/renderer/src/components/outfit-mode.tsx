@@ -167,9 +167,7 @@ function CardWearSection(): React.JSX.Element | null {
         />
         <span className="font-medium text-muted">카드 글에서 읽은 옷</span>
         <span className="font-mono text-[11px] text-faint">{rows.length}장</span>
-        {!exposeWorn && (
-          <span className="text-[11px] text-amber-700 dark:text-amber-400">설정에서 꺼짐</span>
-        )}
+        {!exposeWorn && <span className="text-[11px] text-muted">설정에서 꺼짐</span>}
       </button>
       {open && (
         <div className="border-t border-line px-2.5 py-2">
