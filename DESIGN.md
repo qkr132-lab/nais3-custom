@@ -64,9 +64,11 @@ row identity check. Escape dismisses only the suggestion layer. Ctrl+Space opens
 search/history; user-confirmed insertion retains native undo and an undo toast.
 
 ## Censor tags and unified suggestions
-Censor option rows contain only a checkbox. Tags are added without weights or
-suppression tags, so there are no strength controls; keep the footer visible
-while the settings body scrolls.
+Censor option rows contain a checkbox and, once a part is applied, a per-part weight
+control (minus / number / plus / reset; default 1.0, range 0.1 to 5). A part left at
+1.0 is added without a weight; any other value wraps only that part's tag as
+`1.3::...::`. Suppression tags and the old default weight (2.0) are not used; keep
+the footer visible while the settings body scrolls.
 Tag suggestions use a single list: relevance first, then recent/frequent history,
 deduplicated by canonical tag. Remove the search/recent/frequent tab navigation.
 
