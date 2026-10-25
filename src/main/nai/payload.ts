@@ -286,6 +286,15 @@ export function buildGenerateImagePayload(
             tag_hint_uc_preset: req.ucPreset
           }
         : {}),
+      // 투명 배경 (커스텀) — 웹과 같게 V5 는 straight_alpha 를 늘 보낸다 (웹 설정 「Alpha Mode」 기본값 Straight).
+      // 빠지면 서버가 premultiplied 로 돌려줘, 투명 그림의 가장자리 반투명 픽셀이 검게 물든다(테두리 검은 띠).
+      // 토글을 켠 요청은 웹처럼 tag_hint_transparent_background 도 싣는다 (태그는 렌더러가 붙인다)
+      ...(caps.transparency
+        ? {
+            straight_alpha: true,
+            ...(req.transparentBackground === true ? { tag_hint_transparent_background: true } : {})
+          }
+        : {}),
       deliberate_euler_ancestral_bug: false,
       prefer_brownian: true,
       image_format: opts.imageFormat ?? 'png',

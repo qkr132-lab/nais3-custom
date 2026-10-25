@@ -118,13 +118,25 @@ describe('V5 payload', () => {
     expect(params({ ...v5Request, model: 'nai-diffusion-4-5-full' }).tag_hint_qt).toBeUndefined()
   })
 
-  it('Transparent BG remains a prompt-only toggle at the payload boundary', () => {
+  it('투명 배경: V5 는 웹처럼 straight_alpha 를 늘 보내고, 토글을 켜면 tag_hint 도 싣는다 (태그는 렌더러 몫)', () => {
     expect(params(v5Request).params_version).toBe(4)
+    // 토글을 꺼도 straight_alpha 는 실린다 — 글에 직접 쓴 transparent background 도 가장자리가 검게 물들지 않게
+    expect(params(v5Request).straight_alpha).toBe(true)
+    expect(params(v5Request)).not.toHaveProperty('tag_hint_transparent_background')
     const payload = buildGenerateImagePayload({ ...v5Request, transparentBackground: true })
+    // 전송 경계에서 프롬프트를 고치지 않는다 (렌더러·실행 직전 재조립이 태그를 붙인다)
     expect(payload.input).toBe('1girl, silver hair, very aesthetic, masterpiece, no text')
-    expect(payload.parameters).not.toHaveProperty('straight_alpha')
-    expect(payload.parameters).not.toHaveProperty('tag_hint_transparent_background')
+    expect(payload.parameters.straight_alpha).toBe(true)
+    expect(payload.parameters.tag_hint_transparent_background).toBe(true)
     expect(buildGenerateImagePayload(v5Request).model).toBe('nai-diffusion-5-full')
+    // V4.5 는 투명 배경이 없어 둘 다 싣지 않는다 (웹 패리티)
+    const v45 = params({
+      ...v5Request,
+      model: 'nai-diffusion-4-5-full',
+      transparentBackground: true
+    })
+    expect(v45).not.toHaveProperty('straight_alpha')
+    expect(v45).not.toHaveProperty('tag_hint_transparent_background')
   })
   it('캐릭터 좌표는 연속값을 반올림 없이 그대로 보낸다 (V5 자유 배치)', () => {
     const req: GenerationRequest = {
