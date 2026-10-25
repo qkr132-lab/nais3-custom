@@ -9,6 +9,7 @@
  * 앱이 씬을 보고 옷을 정하지 않는다 — 직접 고른 것만 따른다. 아무것도 안 고른 씬은
  * 카드의 기본 복장(없으면 카드 태그 그대로)으로 나간다.
  * 하나만 예외: nsfw 아래·가슴 조각은 그 부위가 드러나는 장면(씬 태그로 판단)이면 저절로 켜진다.
+ * (입은 옷 자동 젖힘은 이 파일 밖 — expose-state.ts. 조각이 같은 부위를 맡으면 거기는 건드리지 않는다)
  *   ☐ 젖히기(아래) = nsfw 아래 → sex·vaginal 같은 씬에서만 켜짐
  *
  * DB·파일 입출력 없이 순수 로직만 둔다 (테스트 가능하게).
@@ -71,7 +72,7 @@ export interface OutfitChoice {
   on?: string[]
   /** 이 씬에서 기본으로 켜져 있지만 끈 조각 (저절로 켜진 nsfw 조각을 끈 것도) */
   off?: string[]
-  /** false면 이 씬에서 nsfw 조각 자동 켜기를 끈다 (기본은 켜짐) */
+  /** false면 이 씬에서 nsfw 조각 자동 켜기를 끈다 — 입은 옷 자동 젖힘(expose-state)도 같이 꺼진다 (기본은 켜짐) */
   auto?: boolean
 }
 
@@ -97,7 +98,12 @@ export function outfitTags(
   auto?: SceneAreas
 ): string {
   return activePieces(outfit, choice, auto)
-    .map((p) => p.tags.trim().replace(/^,+|,+$/g, '').trim())
+    .map((p) =>
+      p.tags
+        .trim()
+        .replace(/^,+|,+$/g, '')
+        .trim()
+    )
     .filter(Boolean)
     .join(', ')
 }
@@ -193,7 +199,7 @@ export function splitPromptTokens(prompt: string): string[] {
     if (buf.trim()) out.push(buf.trim())
     buf = ''
   }
-  for (let i = 0; i < prompt.length; ) {
+  for (let i = 0; i < prompt.length;) {
     if (!inWeight) {
       const m = /^-?\d*\.?\d+::/.exec(prompt.slice(i))
       if (m && !/[\w.]$/.test(buf)) {

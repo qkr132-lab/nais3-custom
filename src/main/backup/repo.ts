@@ -73,9 +73,10 @@ const SETTINGS_KEYS = [
   'date_folders',
   'save_metadata',
   'scene_extras',
-  // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기 (커스텀)
+  // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기, 입은 옷 자동 젖힘 (커스텀)
   'outfit_expose_acts',
-  'nude_strip_clothes'
+  'nude_strip_clothes',
+  'expose_worn_clothes'
 ] as const
 
 type Row = Record<string, unknown>
@@ -152,7 +153,9 @@ export function exportAll(includeSecrets = false): Record<string, unknown> {
         // r2/client.ts와 동일 포맷 — 복호화해 평문 JSON으로
         const buf = Buffer.from(r2, 'base64')
         secrets.r2Auth = JSON.parse(
-          safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf-8')
+          safeStorage.isEncryptionAvailable()
+            ? safeStorage.decryptString(buf)
+            : buf.toString('utf-8')
         )
       } catch {
         // 복호화 실패 시 제외
@@ -160,7 +163,8 @@ export function exportAll(includeSecrets = false): Record<string, unknown> {
     }
     if (Object.keys(secrets).length > 0) {
       out.secrets = secrets
-      out._secretsWarning = '⚠️ 이 파일에는 NAI 토큰/클라우드플레어 인증이 평문으로 들어있습니다. 공유하지 마세요.'
+      out._secretsWarning =
+        '⚠️ 이 파일에는 NAI 토큰/클라우드플레어 인증이 평문으로 들어있습니다. 공유하지 마세요.'
     }
   }
   return out

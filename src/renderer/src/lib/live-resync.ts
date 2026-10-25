@@ -71,9 +71,16 @@ export function initLiveResync(): void {
     )
       schedule()
   })
-  // 옷 벗기기 전체 설정 — 「전체 설정 따름」인 씬의 대기 항목에 반영
+  // 옷 벗기기 전체 설정 — 「전체 설정 따름」인 씬의 대기 항목에 반영.
+  // 입은 옷 자동 젖힘 설정과 복장 편집·장면 행위 목록 편집도 같다 (젖힘 태그는 복장 조각과 장면 목록에서 정해진다)
   useOutfitsStore.subscribe((s, p) => {
-    if (s.stripOnNude !== p.stripOnNude) schedule()
+    if (
+      s.stripOnNude !== p.stripOnNude ||
+      s.exposeWorn !== p.exposeWorn ||
+      s.items !== p.items ||
+      s.acts !== p.acts
+    )
+      schedule()
   })
   // 바이브 / 캐릭레퍼 (enabled·강도·타입 등)
   useVibesStore.subscribe((s, p) => {

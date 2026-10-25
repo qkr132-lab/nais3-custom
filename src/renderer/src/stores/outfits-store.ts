@@ -10,6 +10,7 @@ import { promptTags } from '@shared/nude-strip'
 
 const ACTS_KEY = 'outfit_expose_acts'
 const STRIP_KEY = 'nude_strip_clothes'
+const EXPOSE_WORN_KEY = 'expose_worn_clothes'
 
 /** 저장 모양 — 어느 판의 기본 목록까지 더했는지(v)를 같이 적는다 */
 const actsJson = (acts: ExposeActs): string =>
@@ -28,6 +29,12 @@ interface OutfitsState {
   /** 누드면 옷 벗기기 — 장면에 nude가 있으면 복장을 빼고 카드의 옷 태그를 걷어낸다 (설정, 기본 켬) */
   stripOnNude: boolean
   setStripOnNude: (v: boolean) => void
+  /**
+   * 입은 옷 자동 젖힘 — 씬 태그가 아래·가슴을 드러내는 장면이면 카드에 적은 옷과 복장 조각에 맞는 젖힘 태그를 붙인다 (설정, 기본 켬).
+   * 붙은 태그와 안 붙은 이유는 요청의 exposeNotes 로 화면에 보인다. 끄면 이 기능이 없던 때와 글자 단위로 같다
+   */
+  exposeWorn: boolean
+  setExposeWorn: (v: boolean) => void
   /** 태그 → 옷/알몸/몸/모름. 분류 자료가 메인에 있어 생성 직전에 모자란 것만 물어 채운다 */
   kinds: Record<string, TagKind>
   ensureKinds: (prompts: string[]) => Promise<void>
@@ -43,13 +50,15 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
   loaded: false,
   acts: DEFAULT_EXPOSE_ACTS,
   stripOnNude: true,
+  exposeWorn: true,
   kinds: {},
 
   load: async () => {
-    const [{ items }, { value }, strip] = await Promise.all([
+    const [{ items }, { value }, strip, expose] = await Promise.all([
       window.nais.invoke('outfits:list', undefined),
       window.nais.invoke('settings:get', { key: ACTS_KEY }),
-      window.nais.invoke('settings:get', { key: STRIP_KEY })
+      window.nais.invoke('settings:get', { key: STRIP_KEY }),
+      window.nais.invoke('settings:get', { key: EXPOSE_WORN_KEY })
     ])
     let acts = DEFAULT_EXPOSE_ACTS
     try {
@@ -65,7 +74,13 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
     } catch {
       // 깨진 설정은 기본 목록으로
     }
-    set({ items, acts, stripOnNude: strip.value !== '0', loaded: true })
+    set({
+      items,
+      acts,
+      stripOnNude: strip.value !== '0',
+      exposeWorn: expose.value !== '0',
+      loaded: true
+    })
   },
 
   setActs: (acts) => {
@@ -76,6 +91,14 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
   setStripOnNude: (stripOnNude) => {
     set({ stripOnNude })
     void window.nais.invoke('settings:set', { key: STRIP_KEY, value: stripOnNude ? '1' : '0' })
+  },
+
+  setExposeWorn: (exposeWorn) => {
+    set({ exposeWorn })
+    void window.nais.invoke('settings:set', {
+      key: EXPOSE_WORN_KEY,
+      value: exposeWorn ? '1' : '0'
+    })
   },
 
   ensureKinds: async (prompts) => {

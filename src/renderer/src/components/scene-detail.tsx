@@ -20,6 +20,8 @@ import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
+import { useExposeWorn } from '../lib/use-expose-worn'
+import { ExposeBlock } from './expose-notes'
 import { ImageContextMenu } from './image-context-menu'
 import { Lightbox } from './lightbox'
 import { NudeStripMenu } from './nude-strip-menu'
@@ -58,6 +60,10 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
   const stripOnNude = nudeStripOn(nudeStripOverride, globalStripOnNude)
   const clothKinds = useOutfitsStore((s) => s.kinds)
+  // 입은 옷 자동 젖힘 (커스텀) — 설정·복장 목록·장면 태그 목록이 바뀌어도 미리보기를 다시 계산
+  const [exposeWorn] = useExposeWorn()
+  const outfitItems = useOutfitsStore((s) => s.items)
+  const exposeActs = useOutfitsStore((s) => s.acts)
   useEffect(() => {
     if (stripOnNude) void useOutfitsStore.getState().ensureKinds(charItems.map((c) => c.prompt))
   }, [stripOnNude, charItems])
@@ -129,9 +135,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       additions,
       stripOnNude,
       nudeStripOverride,
-      clothKinds
+      clothKinds,
+      exposeWorn,
+      outfitItems,
+      exposeActs
     ]
   )
+  // 회차마다 붙은 젖힘 태그와 안 붙은 이유 (요청에 실려 온 메모)
+  const exposeRounds = tokenRounds.map(({ label, request: round }) => ({
+    label,
+    notes: round.exposeNotes ?? []
+  }))
   const tokenPreview = usePromptTokens('tokens:preview', {
     requests: tokenRounds.map(({ request: round }) => promptTokenRequest(round))
   })
@@ -347,6 +361,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             tokensTitle={tokenTitle('negative')}
             className="h-20 max-h-96 min-h-16 resize-y"
           />
+          {/* 입은 옷 자동 젖힘 (커스텀) — 붙은 태그와 안 붙은 이유를 캐릭터·부위마다 보인다 */}
+          {!isBackground && <ExposeBlock rounds={exposeRounds} enabled={exposeWorn} />}
         </div>
 
         <div className="mt-4 mb-2 flex items-center gap-2 text-[12px] text-muted">

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Maximize2, Minimize2, Plus, RotateCcw, User } from 'lucide-react'
-import type { CharPositions, CharRole, CharRoles, CharacterCard } from '@shared/types'
+import type { CharPositions, CharRole, CharRoles, CharacterCard, ExposeNote } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
 import { partnerTagsFor, sceneContextsFor, seatSlots } from '@shared/scene-request'
 import { isFaceSeat } from '@shared/auto-expose'
@@ -12,6 +12,8 @@ import { PlacementCanvas } from './placement-canvas'
 import { distributed } from '../lib/placement-geometry'
 import { PromptEditor } from './prompt-editor'
 import { OutfitPicker } from './outfit-picker'
+import { ExposeCharBadges } from './expose-notes'
+import { notesOfChar } from '../lib/expose-notes'
 import type { OutfitChoice } from '@shared/outfit'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -88,6 +90,7 @@ export function ScenePlacementDialog({
   sceneSize,
   rolePositions,
   scene,
+  exposeNotes,
   onPatch
 }: {
   open: boolean
@@ -126,6 +129,11 @@ export function ScenePlacementDialog({
   }
   /** 이 씬의 태그 — 복장의 nsfw 조각이 켜질지 보여줄 때 쓴다. 없으면 큐 항목 (씬을 모름) */
   scene?: { prompt: string; sourceTags?: string; targetTags?: string }
+  /**
+   * 이 씬의 입은 옷 자동 젖힘 결과 (요청에 실린 메모) — 캐릭터 줄에 「자동 +N」으로 보인다.
+   * 없으면 씬을 모르거나(큐 항목) 아직 계산 전이다.
+   */
+  exposeNotes?: ExposeNote[]
   onPatch: (patch: {
     characterIds?: number[]
     positions?: CharPositions
@@ -693,6 +701,7 @@ export function ScenePlacementDialog({
                     choice={outfits?.[selectedChar.id]}
                     sceneContexts={sceneContextsOf(selectedChar.id)}
                     partnerContexts={partnerContextsOf(selectedChar.id)}
+                    exposeNotes={exposeNotes && notesOfChar(exposeNotes, selectedChar.id)}
                     onChange={(c) => setOutfit(selectedChar.id, c)}
                   />
                 </div>
@@ -879,6 +888,9 @@ export function ScenePlacementDialog({
                             </span>
                           )}
                         </span>
+                        {/* 입은 옷 자동 젖힘 — 붙은 태그 수와 눈여겨볼 상태, 호버하면 부위별 이유.
+                            이름 칸 밖에 두어 이름이 길어도 경고가 먼저 잘리지 않는다 */}
+                        {exposeNotes && <ExposeCharBadges notes={notesOfChar(exposeNotes, c.id)} />}
                         {seats.length > 0 ? (
                           <span
                             className={cn(

@@ -3,10 +3,11 @@ import type { CensorChanges } from '@shared/censor-tags'
 import { requestForPromptMode } from '@shared/prompt-state'
 import { create } from 'zustand'
 import { recordNav } from '../lib/nav-history'
-import type { GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
+import type { ExposeNote, GenerationRequest, Scene, SceneImage, ScenePreset } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
-import { resolveOutfitNegative } from '@shared/outfit'
+import { resolveOutfit, resolveOutfitNegative } from '@shared/outfit'
 import { isFaceSeat, triggerAreas } from '@shared/auto-expose'
+import { analyzeExposure, finishExposure, pieceInfo, receivesSceneText } from '@shared/expose-state'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -22,7 +23,13 @@ import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './chara
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
-import { characterSex, nudeStripFor, undressForNude, wornOutfitTags } from '@shared/nude-strip'
+import {
+  characterSex,
+  nudeStripFor,
+  undressForNude,
+  wornOutfitTags,
+  type NudeStripSetting
+} from '@shared/nude-strip'
 import {
   anyNudeStrip,
   enabledEntries,
@@ -167,6 +174,14 @@ interface ScenesState {
 /** 씬 프롬프트를 기본 프롬프트 뒤에 이어붙임 (콤마 정리) */
 export { appendPrompt } from '@shared/scene-request'
 
+/** 씬의 「옷 벗기기」 메뉴 이름 — 알몸이 된 까닭을 화면에 그 이름으로 보인다 */
+const stripLabel = (setting: NudeStripSetting | undefined): string =>
+  setting === 'male'
+    ? '옷 벗기기 남캐만'
+    : setting === 'female'
+      ? '옷 벗기기 여캐만'
+      : '옷 벗기기 둘 다'
+
 /**
  * 씬 → 생성 요청. 사이드바의 모든 것(기본/네거 프롬프트·캐릭터·조각·바이브·레퍼런스·
  * 파라미터)을 그대로 쓰고, 씬 프롬프트는 기본/네거 프롬프트 "뒤에 이어붙인다".
@@ -280,21 +295,72 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       })
     ).values()
   ]
-  const built = drawn.map(({ char: c, slotIndex }) => {
+  // 자리 하나마다 정해지는 값 — 입은 옷 자동 젖힘이 씬 글을 한 번에 읽으려면 반복문 앞에서 알아야 한다
+  const metas = drawn.map(({ char: c, slotIndex }) => {
     const seated = slotIndex != null
-    const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
     // 자리 태그 (커스텀) — 그 자리에 앉은 캐릭터 뒤에 붙는다. 위치 적용 여부와 무관하게
     // 얹는 건 역할 태그와 같은 취급 — 자리는 좌표만이 아니라 "그 자리의 연기"이기도 하다
     const slotTag = seated ? (layout?.slotTags?.[slotIndex] ?? '') : ''
     // 이 씬(또는 이 큐 항목)에서만 이 캐릭터에 얹는 태그 — 카드는 건드리지 않는다
     const charTag = add?.charTags?.[c.id] ?? entry?.charTags?.[c.id] ?? ''
-    // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
-    // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
-    const addPos = seated ? undefined : add?.positions?.[c.id]
     const role = placementRole(c, slotIndex)
     // 상대가 이 캐릭터에게 걸어둔 태그 — 하는쪽 카드마다 "상대는 이런 표정"을 적어두는 용도
     const partnerTag = partnerTagsFor(role, givers, c.id)
     const outfitChoice = add?.outfits?.[c.id] ?? entry?.outfits?.[c.id]
+    // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 조각을 켜지 않고 자리 태그로만 켜던 것
+    const faceSeat = seated && isFaceSeat(slotTag)
+    return {
+      c,
+      slotIndex,
+      slotTag,
+      charTag,
+      role,
+      partnerTag,
+      outfitChoice,
+      faceSeat,
+      // 남녀는 역할 기준(하는쪽=남캐, 당하는쪽=여캐), 역할이 없으면 카드의 남자 태그
+      sex: characterSex(role, c.prompt)
+    }
+  })
+  // 입은 옷 자동 젖힘 (커스텀) — 설정이 꺼져 있으면 아래 옛 판정(triggerAreas)을 그대로 쓴다.
+  // 켜져 있으면 씬 글(태그·문장)을 캐릭터별로 읽어 어느 부위를 드러낼지 정하고, 붙인 태그와 안 붙인 이유를 exposeNotes 로 남긴다
+  const exposeOn = useOutfitsStore.getState().exposeWorn
+  const exposure = exposeOn
+    ? analyzeExposure({
+        chars: metas.map((m, index) => ({
+          index,
+          id: m.c.id,
+          name: m.c.name,
+          sex: m.sex,
+          role: m.role ?? null,
+          faceSeat: m.faceSeat,
+          autoOff: m.outfitChoice?.auto === false,
+          receivesScene: receivesSceneText(m.role, m.sex, anyRole)
+        })),
+        fields: [
+          { text: base.prompt, scope: 'scene' },
+          { text: scene.prompt, scope: 'scene' },
+          { text: scene.sourceTags ?? '', scope: 'source' },
+          { text: scene.targetTags ?? '', scope: 'target' },
+          ...metas.flatMap((m, index) =>
+            [m.charTag, m.slotTag, m.partnerTag].map((text) => ({
+              text,
+              scope: 'char' as const,
+              index
+            }))
+          )
+        ],
+        acts: exposeActs
+      })
+    : null
+  const exposeNotes: ExposeNote[] = []
+  const built = metas.map((meta, index) => {
+    const { c, slotIndex, slotTag, charTag, role, partnerTag, outfitChoice, faceSeat } = meta
+    const seated = slotIndex != null
+    const slotPos = seated ? layout?.slots?.[slotIndex] : undefined
+    // 앉은 캐릭터는 자리 좌표가 곧 배치다. 캐릭터별 좌표는 자리에 앉지 않은 쪽에만 쓴다
+    // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
+    const addPos = seated ? undefined : add?.positions?.[c.id]
     // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
     const sceneContexts = sceneContextsFor({
       role,
@@ -306,15 +372,18 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
     // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
     // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 켜지 않고 자리 태그로만
-    const faceSeat = seated && isFaceSeat(slotTag)
     const exposeContexts = faceSeat ? [slotTag] : sceneContexts
+    const exposed = exposure?.chars[index]
+    // 입은 옷 자동 젖힘이 켜져 있으면 캐릭터별로 읽은 결과(주인 몸 기준), 꺼져 있으면 옛 판정.
     // 당하는쪽은 하는쪽이 당하는쪽 몸에 하는 행위(하는쪽 태그·하는쪽 자리 태그)로도 드러난다
-    const auto = triggerAreas(
-      exposeContexts,
-      exposeActs,
-      outfitChoice,
-      role === 'target' && !faceSeat ? sourceContexts : []
-    )
+    const auto = exposed
+      ? exposed.auto
+      : triggerAreas(
+          exposeContexts,
+          exposeActs,
+          outfitChoice,
+          role === 'target' && !faceSeat ? sourceContexts : []
+        )
     // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
     // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
     // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
@@ -324,11 +393,14 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // 역할이 없는 캐릭터만 카드의 남자 태그(1boy 등)로 가린다
     const strip = nudeStripFor(nudeStripSetting, globalStripOnNude, characterSex(role, c.prompt))
     const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, strip.enabled, kindOf, auto)
+    const resolved = resolveOutfit(c.outfitId, outfitChoice, outfits)
     const dressed = undressForNude({
       card: c.prompt,
       outfit: worn,
       outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
-      explicitOutfit: !!outfitChoice,
+      // 씬에서 카드 기본 복장과 다른 복장을 골랐을 때만 직접 고른 복장이다 — 자동 켜기 스위치나 조각 하나만
+      // 눌러도 기록이 생기는데, 그것까지 직접 고른 복장으로 보면 누드 씬에서 옷이 안 벗겨진다
+      explicitOutfit: !!resolved?.choice && resolved.outfit.id !== c.outfitId,
       contexts: [...sceneContexts, worn, ...(strip.force ? ['completely nude'] : [])],
       enabled: strip.enabled,
       kindOf
@@ -342,14 +414,31 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
      */
     const withRole = (tags: string): string =>
       role && tags.trim() ? autoRolePrefix(tags, role) : tags
+    // 입은 옷 자동 젖힘 (커스텀) — 옷 벗기기가 끝난 카드·복장 글을 읽어, 입은 옷에 맞는 젖힘 태그를 붙이거나
+    // 안 붙인 이유를 남긴다. 알몸이면 붙이지 않는다. 붙은 태그는 반드시 exposeNotes 에 있다
+    let autoTag = ''
+    if (exposure && exposed) {
+      const piece = pieceInfo(resolved?.outfit, resolved?.choice, auto)
+      const finished = finishExposure(exposed, exposure, {
+        card: dressed.card,
+        outfit: dressed.outfit,
+        own: [withRole(charTag), withRole(slotTag), withRole(partnerTag), roleTagsFor(role, scene)],
+        stripped: dressed.nude != null,
+        strippedBy: strip.force ? stripLabel(nudeStripSetting) : `${dressed.nude} 태그`,
+        piece
+      })
+      autoTag = finished.tags.join(', ')
+      exposeNotes.push(...finished.notes)
+    }
     if (slotPos) slotApplied = true
     const rp = addPos == null && slotPos == null ? rolePos(c.id) : undefined
     if (rp) rolePosApplied = true
     const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
     return {
-      // 카드(몸) → 복장 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+      // 카드(몸) → 복장 → 입은 옷 자동 젖힘 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
       prompt: [
         outfitTag,
+        autoTag,
         withRole(charTag),
         withRole(slotTag),
         withRole(partnerTag),
@@ -441,6 +530,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     vibeIds,
     charRefIds,
     sceneId: scene.id,
+    // 붙은 젖힘 태그와 안 붙은 이유 (입은 옷 자동 젖힘이 켜져 있을 때만 — 꺼져 있으면 요청이 예전과 같다)
+    ...(exposure ? { exposeNotes } : {}),
     // 큐 실행 시 최신 씬 태그를 다시 붙일 수 있도록 기본 부분을 별도로 보존한다.
     sceneBasePrompt: base.prompt,
     sceneBasePromptParts: base.promptParts,

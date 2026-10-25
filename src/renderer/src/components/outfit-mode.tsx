@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Copy, Plus, Shirt, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronRight, Copy, Plus, Shirt, Trash2, X } from 'lucide-react'
 import { cyclePiece, newPieceId, outfitTags, type Outfit, type OutfitPiece } from '@shared/outfit'
 import { isNudePiece } from '@shared/nude-strip'
 import {
@@ -8,8 +8,11 @@ import {
   exposePreview,
   type ExposeActs
 } from '@shared/auto-expose'
+import { readCardWear } from '../lib/expose-notes'
+import { useExposeWorn } from '../lib/use-expose-worn'
 import { cn } from '../lib/utils'
 import { askConfirm } from '../stores/dialog-store'
+import { useCharactersStore } from '../stores/characters-store'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { PromptEditor } from './prompt-editor'
 import { Button } from './ui/button'
@@ -118,12 +121,104 @@ export function OutfitMode(): React.JSX.Element {
         {selected ? (
           <OutfitEditor key={selected.id} outfit={selected} onDeleted={() => setSelectedId(null)} />
         ) : (
-          <div className="grid flex-1 place-items-center text-[12.5px] text-faint">
+          <div className="grid min-h-24 flex-1 place-items-center text-[12.5px] text-faint">
             왼쪽에서 복장을 고르세요
           </div>
         )}
+        <CardWearSection />
       </div>
     </div>
+  )
+}
+
+/**
+ * 카드에 직접 적은 옷 — 복장으로 떼어내지 않아도 카드 글의 옷 이름을 읽어, 씬에서 아래·가슴이
+ * 드러나면 맞는 젖힘 태그가 저절로 붙는다. 카드 글은 바뀌지 않고 씬마다 계산해 붙인다.
+ * 여기서는 카드마다 어떻게 읽혔는지와 붙을 수 있는 후보를 보여 준다 (씬 상세의 「자동 젖힘」이 실제 결과).
+ */
+function CardWearSection(): React.JSX.Element | null {
+  const cards = useCharactersStore((s) => s.items)
+  const outfits = useOutfitsStore((s) => s.items)
+  const [exposeWorn] = useExposeWorn()
+  const [open, setOpen] = useState(false)
+  const rows = useMemo(
+    () =>
+      cards.flatMap((card) => {
+        const wear = readCardWear(card.prompt)
+        return wear.garments.length ? [{ card, ...wear }] : []
+      }),
+    [cards]
+  )
+  if (!rows.length) return null
+  return (
+    <section
+      data-testid="card-wear"
+      className="mt-4 max-w-[860px] shrink-0 rounded-lg border border-line"
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[12px]"
+        onClick={() => setOpen(!open)}
+      >
+        <ChevronRight
+          size={13}
+          className={cn('shrink-0 transition-transform', open && 'rotate-90')}
+        />
+        <span className="font-medium text-muted">카드 글에서 읽은 옷</span>
+        <span className="font-mono text-[11px] text-faint">{rows.length}장</span>
+        {!exposeWorn && (
+          <span className="text-[11px] text-amber-700 dark:text-amber-400">설정에서 꺼짐</span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-line px-2.5 py-2">
+          <p className="mb-2 text-[11px] text-muted">
+            {exposeWorn
+              ? '복장 없이 카드에 직접 적은 옷도 읽습니다. 씬 태그에 아래·가슴이 드러나는 행위가 있으면 아래 목록의 젖힘 태그가 저절로 붙고, 카드 글은 그대로입니다.'
+              : '지금은 설정의 「입은 옷 자동 젖힘」이 꺼져 있어 아무것도 붙지 않습니다. 켜면 복장 없이 카드에 직접 적은 옷도 읽어, 씬 태그에 아래·가슴이 드러나는 행위가 있을 때 아래 목록의 젖힘 태그가 저절로 붙습니다 (카드 글은 그대로).'}{' '}
+            막으려면 카드에 -1::skirt lift:: 처럼 음수 가중치로 적으세요. 실제로 붙은 것은 씬 상세의
+            「자동 젖힘」에서 봅니다.
+          </p>
+          <ul className="flex max-h-[320px] flex-col gap-1 overflow-auto">
+            {rows.map(({ card, garments, lower, chest }) => {
+              const outfit = outfits.find((o) => o.id === card.outfitId)
+              return (
+                <li
+                  key={card.id}
+                  data-card-wear={card.id}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11.5px]"
+                >
+                  <span className="max-w-40 truncate font-medium">
+                    {card.name.trim() || `카드 ${card.id}`}
+                  </span>
+                  {outfit && (
+                    <span className="text-[10.5px] text-faint" title="이 카드의 기본 복장">
+                      복장 {outfit.name}
+                    </span>
+                  )}
+                  <span className="text-muted">
+                    <span className="text-ink">읽은 옷</span> {garments.join(', ')}
+                  </span>
+                  {lower.length > 0 && (
+                    <span className="text-muted">
+                      <span className="text-ink">아래 몸</span>{' '}
+                      <code className="font-mono text-[11px]">{lower.join(', ')}</code>
+                    </span>
+                  )}
+                  {chest.length > 0 && (
+                    <span className="text-muted">
+                      <span className="text-ink">가슴</span>{' '}
+                      <code className="font-mono text-[11px]">{chest.join(', ')}</code>
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -205,7 +300,12 @@ function OutfitEditor({
           placeholder="복장 이름"
         />
         <div className="flex-1" />
-        <Button size="sm" variant="ghost" className="gap-1" onClick={() => void duplicate(outfit.id)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="gap-1"
+          onClick={() => void duplicate(outfit.id)}
+        >
           <Copy size={13} /> 복제
         </Button>
         <Button

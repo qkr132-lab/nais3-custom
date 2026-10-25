@@ -31,7 +31,9 @@ import {
 import type { CharRole } from '@shared/types'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
-import { useScenesStore } from '../stores/scenes-store'
+import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
+import { useOutfitsStore } from '../stores/outfits-store'
+import { useExposeWorn } from '../lib/use-expose-worn'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { ScenePlacementDialog } from './scene-placement-dialog'
@@ -673,6 +675,38 @@ function PositionPanel({
 
   const [boardOpen, setBoardOpen] = useState(false)
 
+  // 입은 옷 자동 젖힘 결과 — 배치 창 캐릭터 줄의 「자동 +N」. 씬을 알 때(씬별 추가)만, 창이 열려 있을 때만
+  // 계산한다. 좌표는 결과에 영향이 없어 끌 때마다 다시 계산하지 않는다 (큐 반복이 여럿이면 첫 회차 기준)
+  const [exposeWorn] = useExposeWorn()
+  const outfitItems = useOutfitsStore((s) => s.items)
+  const exposeActs = useOutfitsStore((s) => s.acts)
+  const exposeNotes = useMemo(
+    () =>
+      boardOpen && scene && exposeWorn
+        ? (previewSceneRequests(scene)[0]?.request.exposeNotes ?? [])
+        : undefined,
+    // previewSceneRequests 는 구독 중인 스토어를 getState()로 읽는다 — 결과에 닿는 입력만 deps 로 둔다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      boardOpen,
+      scene,
+      exposeWorn,
+      outfitItems,
+      exposeActs,
+      items,
+      characterIds,
+      baseCharacterIds,
+      roles,
+      slotOf,
+      slotChars,
+      slotRoles,
+      slotTags,
+      charTags,
+      partnerTags,
+      outfits
+    ]
+  )
+
   const setPos = (id: number, c: { x: number; y: number }): void =>
     onPatch({ positions: { ...(positions ?? {}), [id]: c } })
   const resetPos = (id: number): void => {
@@ -720,6 +754,7 @@ function PositionPanel({
         sceneSize={scene ? { width: scene.width, height: scene.height } : undefined}
         rolePositions={scene ? { source: scene.sourcePos, target: scene.targetPos } : undefined}
         scene={scene}
+        exposeNotes={exposeNotes}
         onPatch={onPatch}
       />
       {useCoords !== false &&

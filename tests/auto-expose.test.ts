@@ -6,6 +6,7 @@ import {
   exposeCandidates,
   exposePreview,
   neededAreas,
+  readGarments,
   triggerAreas,
   withDefaultActs
 } from '../src/shared/auto-expose'
@@ -25,7 +26,10 @@ describe('nsfw 조각이 켜지는 장면', () => {
       chest: false
     })
     expect(triggerAreas(['paizuri'], acts)).toEqual({ lower: false, chest: true })
-    expect(triggerAreas(['vaginal', 'breast grab'], acts)).toEqual({ lower: true, chest: true })
+    expect(triggerAreas(['vaginal', "grabbing another's breast"], acts)).toEqual({
+      lower: true,
+      chest: true
+    })
   })
 
   it('드러낼 필요 없는 행위면 어느 쪽도 아니다', () => {
@@ -119,7 +123,7 @@ describe('nsfw 조각이 켜지는 장면', () => {
       chest: true
     })
     expect(
-      autoExpose.triggerAreas(['lying'], acts, undefined, ["grabbing another's breasts, vaginal"])
+      autoExpose.triggerAreas(['lying'], acts, undefined, ["grabbing another's breast, vaginal"])
     ).toEqual({ lower: true, chest: true })
     // 하는쪽이 자위하거나 제 몸을 보이거나 얼굴에 앉는 것은 상대를 드러내지 않는다
     expect(
@@ -146,7 +150,37 @@ describe('nsfw 조각이 켜지는 장면', () => {
     expect(withDefaultActs(acts)).toEqual(acts)
   })
 
-  it('더는 젖히는 태그를 몰래 붙이지 않는다', () => {
+  it('행위 목록의 죽은 태그(단보루에 없는 것)를 빼고 실제 태그를 더했다', () => {
+    for (const dead of [
+      'creampie',
+      'anal creampie',
+      'sex from above',
+      'facesitting',
+      'after sex',
+      'after vaginal',
+      'after anal'
+    ])
+      expect(acts.lower).not.toContain(dead)
+    for (const dead of [
+      'nipple sucking',
+      'breast grab',
+      "grabbing another's breasts",
+      'breast slap'
+    ])
+      expect(acts.chest).not.toContain(dead)
+    expect(acts.lower).toEqual(
+      expect.arrayContaining([
+        'deep penetration',
+        'internal cumshot',
+        'female ejaculation',
+        'groping'
+      ])
+    )
+    expect(acts.chest).toContain("grabbing another's breast")
+  })
+
+  it('젖히는 태그는 조건 맞는 태그를 따로 붙이는 함수가 없고, 붙는 것은 expose-state 가 메모와 함께 낸다', () => {
+    // 이 모듈은 어느 부위가 드러나는지·어떤 태그가 후보인지만 안다 — 붙이는 일은 notes 와 함께 expose-state 가 한다
     expect('autoExposeTags' in autoExpose).toBe(false)
   })
 })
@@ -166,8 +200,8 @@ describe('이 옷을 젖히는 태그', () => {
     })
   })
 
-  it('바지 입은 캐릭터에 skirt lift가 붙지 않는다', () => {
-    expect(exposePreview('black pants, white shirt').lower).toEqual(['pants pull'])
+  it('바지 입은 캐릭터에 skirt lift가 붙지 않는다 (바지는 내리기와 앞섶 열기를 병기)', () => {
+    expect(exposePreview('black pants, white shirt').lower).toEqual(['pants pull', 'open fly'])
   })
 
   it('셔츠만 알면 아래는 비워 둔다 (모르는 걸 추측하지 않음)', () => {
@@ -178,10 +212,92 @@ describe('이 옷을 젖히는 태그', () => {
     expect(exposePreview('white shirt, -2::skirt::').lower).toEqual([])
   })
 
-  it('문장에 옷 이름이 나와도 문장만으로는 옷을 입었다고 보지 않는다', () => {
+  it('문장 속 옷 이름도 토막 안 낱말 단위로 읽는다 (5단어 제한 폐지)', () => {
     expect(
-      detectGarments('The two cups of the black bikini top are joined in the middle.')
-    ).toEqual([])
+      detectGarments('The two cups of the black bikini top are joined in the middle.').map(
+        (g) => g.nouns[0]
+      )
+    ).toEqual(['bikini top'])
+    expect(detectGarments('white and black maid dress').map((g) => g.nouns[0])).toEqual(['dress'])
+  })
+
+  it('입은 옷이 아닌 말은 옷으로 읽지 않는다', () => {
+    const names = (text: string): string[] => detectGarments(text).map((g) => g.nouns[0])
+    // dress shirt 는 셔츠, dress shoes 는 신발
+    expect(names('dress shirt')).toEqual(['shirt'])
+    expect(names('dress shoes')).toEqual([])
+    // no X · without X · unworn X
+    expect(names('no panties, no bra')).toEqual([])
+    expect(names('she is not wearing a dress')).toEqual([])
+    expect(names('unworn bikini top')).toEqual([])
+    // 태닝 자국 · 머리/어깨/허리에 걸친 것 · 컵/가랑이가 트인 옷
+    expect(names('bikini tan')).toEqual([])
+    expect(names('panties on head')).toEqual([])
+    expect(names('jacket on shoulders, jacket around waist')).toEqual([])
+    expect(names('cupless bra, crotchless panties')).toEqual([])
+    // 허리에 묶은 윗옷은 안 입은 것, 허리에 걸친 치마는 입은 것 · off shoulder 는 벗었다는 뜻이 아니다
+    expect(names('skirt around her waist')).toEqual(['skirt'])
+    expect(names('sweater around waist')).toEqual([])
+    expect(names('off shoulder dress')).toEqual(['dress'])
+    expect(names('she took off her jacket')).toEqual([])
+    // naked apron 은 그 한 벌만 입은 것
+    expect(readGarments('naked apron')).toEqual([
+      expect.objectContaining({ alone: true, fragment: 'naked apron' })
+    ])
+    // 빼달라는 음수 가중치
+    expect(names('white shirt, -2::skirt::')).toEqual(['shirt'])
+  })
+
+  it('옷 표를 넓혔다 — t-shirt · tank top · microskirt · evening gown · yukata · loincloth', () => {
+    expect(exposePreview('t-shirt').chest).toEqual(['shirt lift'])
+    expect(exposePreview('white tank top').chest).toEqual(['shirt lift'])
+    expect(exposePreview('tube top').chest).toEqual(['breasts out'])
+    expect(exposePreview('red microskirt').lower).toEqual(['skirt lift'])
+    expect(exposePreview('evening gown')).toEqual({ lower: ['dress lift'], chest: ['dress pull'] })
+    expect(exposePreview('yukata')).toEqual({ lower: ['kimono lift'], chest: ['open kimono'] })
+    expect(exposePreview('loincloth').lower).toEqual(['clothing aside'])
+    expect(exposePreview('black vest').chest).toEqual(['open vest'])
+    expect(exposePreview('white robe').lower).toEqual(['open robe'])
+    expect(exposePreview('pantyhose').lower).toEqual(['pantyhose pull', 'torn pantyhose'])
+    // 전용 젖힘 태그가 없는 옷은 읽지 않는다
+    expect(exposePreview('black armor, red cape, corset')).toEqual({ lower: [], chest: [] })
+  })
+
+  it('겹쳐 입으면 겉에서 속으로, 부위당 최대 3개', () => {
+    // 겹마다 대표 태그 하나 — 가장 안쪽 속옷의 젖힘이 병기 태그(torn pantyhose)에 밀려 빠지지 않는다
+    expect(exposePreview('jacket, shirt, bra, skirt, pantyhose, panties')).toEqual({
+      lower: ['skirt lift', 'pantyhose pull', 'panties aside'],
+      chest: ['open jacket', 'shirt lift', 'bra lift']
+    })
+    // 겹이 상한을 넘으면 같은 겹 순서(겉옷끼리)는 하나만 남기고 가장 안쪽 겹을 지킨다
+    expect(exposePreview('jacket, hoodie, shirt, bra').chest).toEqual([
+      'open jacket',
+      'shirt lift',
+      'bra lift'
+    ])
+    expect(exposePreview('coat, jacket, sweater, shirt, bra').chest).toEqual([
+      'open coat',
+      'sweater lift',
+      'bra lift'
+    ])
+    // 자리가 남으면 병기 태그는 그 겹 바로 뒤에
+    expect(exposePreview('pants, panties').lower).toEqual([
+      'pants pull',
+      'open fly',
+      'panties aside'
+    ])
+    expect(exposePreview('pants, pantyhose, panties').lower).toEqual([
+      'pants pull',
+      'pantyhose pull',
+      'panties aside'
+    ])
+    expect(exposePreview('dress, pantyhose, panties').lower).toEqual([
+      'dress lift',
+      'pantyhose pull',
+      'panties aside'
+    ])
+    // 입력 순서가 달라도 겹 순서
+    expect(exposePreview('panties, skirt').lower).toEqual(['skirt lift', 'panties aside'])
   })
 })
 

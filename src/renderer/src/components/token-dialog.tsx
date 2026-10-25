@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { BackupDbFile, BackupPreset } from '@shared/types'
 import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
+import { useExposeWorn } from '../lib/use-expose-worn'
 import { THEME_PRESETS } from '../lib/theme-presets'
 import { useGenerationStore } from '../stores/generation-store'
 import { AccountsSection } from './accounts-section'
@@ -152,6 +153,8 @@ function GenerationSection(): React.JSX.Element {
   // 누드면 옷 벗기기 (커스텀, 기본 켜짐)
   const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
   const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
+  // 입은 옷 자동 젖힘 (커스텀, 기본 켜짐)
+  const [exposeWorn, setExposeWorn] = useExposeWorn()
   // 확인 창 전역 끄기 (커스텀)
   const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
   const confirmsOff = confirmsOffState
@@ -205,6 +208,16 @@ function GenerationSection(): React.JSX.Element {
         hint="장면에 nude·completely nude·naked towel 등이 있으면 그 캐릭터의 복장을 빼고 카드의 옷 태그를 걷어냄 · 씬 상세의 「옷 벗기기」 버튼이나 편집 모드 일괄로 씬마다 둘 다·남캐만·여캐만을 고르면 누드 태그가 없어도 그 씬은 알몸 (남캐 = 하는쪽, 여캐 = 당하는쪽)"
       >
         <Switch checked={stripOnNude} onCheckedChange={setStripOnNude} />
+      </Row>
+      <Row
+        label="입은 옷 자동 젖힘"
+        hint="씬 태그에 아래·가슴이 드러나는 행위가 있으면 입은 옷(카드에 적은 옷과 복장 조각)에 맞는 젖힘 태그를 저절로 붙임 · 붙은 태그와 안 붙은 이유는 씬 상세의 「자동 젖힘」에서 확인 · 끄면 이 기능이 없을 때와 똑같이 나감"
+      >
+        <Switch
+          aria-label="입은 옷 자동 젖힘"
+          checked={exposeWorn}
+          onCheckedChange={setExposeWorn}
+        />
       </Row>
       <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">
         <Switch

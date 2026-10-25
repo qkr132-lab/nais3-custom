@@ -20,6 +20,58 @@ export interface CharacterPromptInput {
   thumbnail?: string
 }
 
+/** 입은 옷 자동 젖힘이 다루는 몸 부위 — 아래(사타구니·엉덩이) / 가슴 */
+export type ExposeArea = 'lower' | 'chest'
+
+/**
+ * 입은 옷 자동 젖힘 결정 (커스텀) — 캐릭터 한 명 x 부위 하나마다 하나가 정해진다.
+ * - added: 젖힘 태그를 붙였음 (ExposeNote.tags)
+ * - already: 그 부위가 이미 젖혀진 글(clothing aside·breasts out·open …)이 있어 안 붙임
+ * - piece: 복장의 nsfw 조각이 그 부위를 맡아 안 붙임
+ * - nude: 알몸(옷 벗기기·nude·topless·bottomless)이라 안 붙임
+ * - over-clothes: 옷 위에서 하는 접촉(stain·through clothes …)이라 안 붙임
+ * - off-frame: 그 부위가 화면 밖(out of frame·얼굴만 나오는 자리)이라 안 붙임
+ * - negated: 부정문(not shown·no sex)이라 안 붙임
+ * - after: 사후 어구(after sex)라 약한 신호를 무시
+ * - no-garment: 그 부위를 가린 옷을 못 읽음 (ExposeNote.tags = 제안만, 붙이지 않음)
+ * - unknown: 누구 몸인지·무슨 뜻인지 모호해 판단 못 함 (켜지도 닫지도 않음)
+ * - conflict: 옷 벗기기(알몸)인데 같은 캐릭터에 착의 단서가 있음 — 자동으로 풀지 않고 표시만
+ * - vetoed: 사용자가 막음 (음수 가중치 -1::skirt lift:: · 씬에서 자동 젖힘 끔 · 조각을 끔)
+ * - not-needed: 이 부위를 드러낼 근거가 없음
+ */
+export type ExposeStatus =
+  | 'added'
+  | 'already'
+  | 'piece'
+  | 'nude'
+  | 'over-clothes'
+  | 'off-frame'
+  | 'negated'
+  | 'after'
+  | 'no-garment'
+  | 'unknown'
+  | 'conflict'
+  | 'vetoed'
+  | 'not-needed'
+
+/** 요청에 동반되는 자동 젖힘 메모 — 붙은 태그와 안 붙은 이유를 화면에 그대로 보이려고 (몰래 붙이지 않는다) */
+export interface ExposeNote {
+  /** characterPrompts 안의 순서 */
+  charIndex: number
+  charId: number | null
+  name: string
+  area: ExposeArea
+  status: ExposeStatus
+  /** added = 실제로 붙은 태그 · already/piece = 그 부위를 이미 맡은 태그 · vetoed = 막힌 태그 · no-garment = 제안(붙이지 않음) */
+  tags: string[]
+  /** 읽은 옷 이름 (skirt, panties …) */
+  garments: string[]
+  /** 근거가 된 글 조각 (원문 80자까지) */
+  evidence: string[]
+  /** 한국어 한 줄 설명 */
+  reason: string
+}
+
 /**
  * UC 프리셋 인덱스 (NAI 웹 실캡처 확정): 0=Heavy, 1=Light, 3=Human Focus, 4=None. 2는 미사용.
  * 실제 병합되는 텍스트는 main/nai/payload.ts의 UC_PRESETS_V45_FULL 참조.
@@ -146,6 +198,8 @@ export interface GenerationRequest {
   charRefIds?: number[]
   /** 이 요청을 만든 큐 반복 항목 스냅샷 (커스텀) — 대기 항목 재구성 시 동일 조합으로 복원. null=일반 */
   sceneSequenceEntry?: SequenceEntry | null
+  /** 입은 옷 자동 젖힘 메모 (커스텀) — 붙은 태그와 안 붙은 이유. 전송 payload 에는 들어가지 않고 화면 표시용 */
+  exposeNotes?: ExposeNote[]
 }
 
 export interface PromptParts {

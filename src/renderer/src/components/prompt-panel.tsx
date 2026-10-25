@@ -31,6 +31,7 @@ import { totalReserved, useScenesStore } from '../stores/scenes-store'
 import { PromptEditor } from './prompt-editor'
 import { PromptPresetBar } from './prompt-preset-bar'
 import { CharacterOverlay } from './character-overlay'
+import { MainExposeBlock } from './main-expose-block'
 import { FragmentOverlay } from './fragment-overlay'
 import { ParamsDialog } from './params-dialog'
 import { RefOverlay } from './ref-overlay'
@@ -371,6 +372,9 @@ export function PromptPanel(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* 입은 옷 자동 젖힘 (커스텀) — 메인 프롬프트로 생성할 때 붙는 젖힘 태그와 안 붙은 이유 (씬 모드는 씬 상세에서 본다) */}
+      {!isScene && <MainExposeBlock />}
 
       {/* 도구 행: 캐릭터 / 조각 / 바이브 / 레퍼런스 */}
       <div className="grid grid-cols-4 gap-1.5">

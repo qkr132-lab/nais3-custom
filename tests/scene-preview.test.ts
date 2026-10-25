@@ -297,6 +297,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       items: [school],
       acts: DEFAULT_EXPOSE_ACTS,
       stripOnNude: false,
+      exposeWorn: true,
       kinds: {}
     })
     useCharactersStore.setState({ items: [{ ...card(1, 'blue eyes', true), outfitId: 9 }] })
@@ -311,9 +312,152 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 
-  it('no longer appends expose tags on its own', () => {
-    useOutfitsStore.setState({ items: [{ ...school, pieces: [school.pieces[0]] }] })
-    expect(charPrompt('bed, vaginal, paizuri')).toBe('blue eyes, pleated skirt, white panties')
+  describe('입은 옷 자동 젖힘 — 붙은 태그는 notes 에 반드시 있다', () => {
+    const noPieces = (): void =>
+      useOutfitsStore.setState({ items: [{ ...school, pieces: [school.pieces[0]] }] })
+    const request = (prompt: string): ReturnType<typeof buildSceneRequest> =>
+      buildSceneRequest({ ...scene, prompt, censorKinds: [] })
+
+    it('조각이 없어도 입은 옷(복장)을 읽어 붙이고, 붙은 태그와 이유를 요청에 싣는다', () => {
+      noPieces()
+      const r = request('bed, vaginal, paizuri')
+      expect(r.characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties, skirt lift, panties aside'
+      )
+      expect(r.exposeNotes?.filter((n) => n.status === 'added')).toEqual([
+        expect.objectContaining({
+          charIndex: 0,
+          charId: 1,
+          area: 'lower',
+          tags: ['skirt lift', 'panties aside'],
+          garments: ['skirt', 'panties']
+        })
+      ])
+      // 가슴은 가린 옷(셔츠·브라)을 못 읽어 안 붙고, 그 사실이 메모로 남는다
+      expect(r.exposeNotes).toContainEqual(
+        expect.objectContaining({ area: 'chest', status: 'no-garment' })
+      )
+    })
+
+    it('카드에 직접 적은 옷도 붙는다 (복장 없이)', () => {
+      useOutfitsStore.setState({ items: [] })
+      useCharactersStore.setState({
+        items: [card(1, 'blue eyes, white shirt, denim shorts, white bra', true)]
+      })
+      const r = request('bed, vaginal, nipple stimulation')
+      expect(r.characterPrompts[0].prompt).toBe(
+        'blue eyes, white shirt, denim shorts, white bra, shorts pull, shirt lift, bra lift'
+      )
+      const added = r.exposeNotes?.filter((n) => n.status === 'added') ?? []
+      expect(added.flatMap((n) => n.tags)).toEqual(['shorts pull', 'shirt lift', 'bra lift'])
+    })
+
+    it('붙인 태그는 알몸이면 붙지 않는다 (옷 벗기기가 먼저)', () => {
+      useOutfitsStore.setState({ items: [], kinds: { skirt: 'cloth' } })
+      useCharactersStore.setState({ items: [card(1, 'blue eyes, skirt', true)] })
+      useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
+      const r = request('bed, vaginal')
+      expect(r.characterPrompts[0].prompt).toBe('blue eyes, nude, completely nude')
+      expect(r.exposeNotes).toContainEqual(
+        expect.objectContaining({ area: 'lower', status: 'nude' })
+      )
+    })
+
+    it('설정을 끄면 출력이 이 기능이 없던 때와 같고 메모도 실리지 않는다', () => {
+      noPieces()
+      useOutfitsStore.setState({ exposeWorn: false })
+      const r = request('bed, vaginal, paizuri')
+      expect(r.characterPrompts[0].prompt).toBe('blue eyes, pleated skirt, white panties')
+      expect('exposeNotes' in r).toBe(false)
+      // 조각이 있는 복장은 옛날 그대로 켜진다
+      useOutfitsStore.setState({ items: [school] })
+      expect(request('bed, vaginal').characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties, skirt lift, panties aside'
+      )
+      // 옛 판정은 문장과 부정을 못 읽는다 (presenting food 가 presenting 으로 읽힘)
+      expect(request('presenting food').characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties, skirt lift, panties aside'
+      )
+    })
+
+    it('켜면 요리 장면(presenting food)이나 사후 어구(after sex)에 오탐하지 않는다', () => {
+      expect(request('cooking, presenting food').characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties'
+      )
+      expect(request('after sex, nipples').characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties'
+      )
+    })
+
+    it('씬에서 자동 켜기를 끄면 입은 옷 젖힘도 같이 꺼진다', () => {
+      noPieces()
+      useSceneExtrasStore.setState({
+        additionsEnabled: true,
+        additions: {
+          1: {
+            4: {
+              characterIds: [],
+              charRefIds: [],
+              vibeIds: [],
+              outfits: { 1: { outfitId: 9, auto: false } }
+            }
+          }
+        }
+      })
+      const r = request('bed, vaginal')
+      expect(r.characterPrompts[0].prompt).toBe('blue eyes, pleated skirt, white panties')
+      expect(r.exposeNotes).toContainEqual(
+        expect.objectContaining({ area: 'lower', status: 'vetoed' })
+      )
+    })
+
+    it('복장의 nsfw 조각이 있으면 그 부위는 조각이 맡고 자동층은 겹쳐 붙이지 않는다', () => {
+      const r = request('bed, vaginal')
+      expect(r.characterPrompts[0].prompt).toBe(
+        'blue eyes, pleated skirt, white panties, skirt lift, panties aside'
+      )
+      expect(r.exposeNotes).toContainEqual(
+        expect.objectContaining({ area: 'lower', status: 'piece' })
+      )
+      expect(r.exposeNotes?.some((n) => n.status === 'added')).toBe(false)
+    })
+
+    it('카드 기본 복장의 스위치만 눌러도(복장 기록이 생겨도) 누드 씬에서 복장이 벗겨진다', () => {
+      // 자동 켜기 스위치를 눌러 {outfitId: 카드 기본, auto: false} 기록만 생긴 경우 — 직접 고른 복장이 아니다
+      useOutfitsStore.setState({ stripOnNude: true, exposeWorn: false })
+      useSceneExtrasStore.setState({
+        additionsEnabled: true,
+        additions: {
+          1: {
+            4: {
+              characterIds: [],
+              charRefIds: [],
+              vibeIds: [],
+              outfits: { 1: { outfitId: 9, auto: false } }
+            }
+          }
+        }
+      })
+      expect(request('bath, nude').characterPrompts[0].prompt).toBe(
+        'blue eyes, nude, completely nude'
+      )
+      // 카드 기본과 다른 복장을 직접 골랐으면 그대로 입는다 (누드 씬에 일부러 고른 옷)
+      const other: Outfit = {
+        id: 10,
+        name: '스타킹',
+        negative: '',
+        pieces: [{ id: 'x', name: '스', tags: 'thighhighs', on: true }]
+      }
+      useOutfitsStore.setState({ items: [school, other] })
+      useSceneExtrasStore.setState({
+        additions: {
+          1: {
+            4: { characterIds: [], charRefIds: [], vibeIds: [], outfits: { 1: { outfitId: 10 } } }
+          }
+        }
+      })
+      expect(request('bath, nude').characterPrompts[0].prompt).toContain('thighhighs')
+    })
   })
 
   it('lets the scene choice override the trigger, and auto=false turns the triggers off', () => {
@@ -672,9 +816,24 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     })
     const [target, source] = buildSceneRequest({
       ...scene,
-      prompt: 'bed, vaginal'
+      prompt: 'bed, cunnilingus'
     }).characterPrompts
     expect(target.prompt).toContain('skirt lift, panties aside')
     expect(source.prompt).not.toContain('skirt lift')
+  })
+
+  it('삽입은 하는쪽(남캐) 아래도 연다 — 몸 기준으로 주인을 정한다', () => {
+    useCharactersStore.setState({
+      items: [
+        { ...card(1, 'blue eyes', true), outfitId: 9, role: 'target' },
+        { ...card(2, 'green eyes', true), outfitId: 9, role: 'source' }
+      ]
+    })
+    const [target, source] = buildSceneRequest({
+      ...scene,
+      prompt: 'bed, vaginal'
+    }).characterPrompts
+    expect(target.prompt).toContain('skirt lift, panties aside')
+    expect(source.prompt).toContain('skirt lift, panties aside')
   })
 })

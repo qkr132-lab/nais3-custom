@@ -107,3 +107,17 @@ its bubble, scene find (`Ctrl+Shift+F`, Enter / Shift+Enter, Esc), Home/End/Page
 position per preset (`scene_grid_scroll`), and the one-line name list view (`scene_grid_view`) with
 drag reorder, multi-select drag, Shift painting and the context menu. `window.sceneGridFixture` exposes
 the recorded IPC calls, reorders and store state for checks from the browser console.
+
+Worn-clothes auto exposure (입은 옷 자동 젖힘): open `/expose-notes.html` (`?mode=block` default).
+It renders the actual components with fictional cards, fictional scene text and an in-memory fake
+`window.nais`, so no network, file, database or NAI call is made and no personal data is involved.
+`?mode=block` draws the collapsible 「자동 젖힘」 block with synthetic notes that cover all 13 statuses
+(`&enabled=0` setting off, `&empty=1` no notes, `&rounds=2` two queue rounds with different results,
+`&open=1` start expanded); `?mode=detail` is the real `SceneDetail` (notes come from the real
+request builder); `?mode=placement` is the real placement dialog with synthetic notes (「자동 +N」 badges and hover);
+`?mode=addition` is the real per-scene addition dialog opened on 「넓게 배치」, so the badges there come from the real request builder;
+`?mode=main` is the main-tab 「자동 젖힘」 block (`MainExposeBlock`), which re-runs the real main request assembly read-only;
+`?mode=picker&card=1|3` is the real outfit picker (`&notes=0` = scene unknown); `?mode=outfit` is the
+real outfit tab with the 「카드 글에서 읽은 옷」 section; `?mode=settings` is the real settings dialog
+opened on the 생성 tab. In the browser console `await exposeFixture.check()` walks the DOM of the
+current mode and returns a pass/fail list (no screenshots needed).

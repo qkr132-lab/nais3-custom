@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  ExposeNote,
   GenerationRequest,
   HistoryItem,
   OpusUsage,
@@ -16,10 +17,11 @@ import {
   partnerTagsFor,
   withPartnerTags
 } from '@shared/scene-request'
-import { resolveOutfitNegative } from '@shared/outfit'
+import { resolveOutfit, resolveOutfitNegative } from '@shared/outfit'
 import { triggerAreas } from '@shared/auto-expose'
+import { analyzeExposure, finishExposure, pieceInfo, receivesSceneText } from '@shared/expose-state'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
-import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
+import { characterSex, undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import { withTransparentBackground } from '@shared/transparent-background'
 import {
   patchPromptRequest,
@@ -111,6 +113,12 @@ interface GenerationState {
   patchPromptParts: (patch: Partial<PromptParts>) => void
   hydrate: () => Promise<void>
   generate: () => Promise<void>
+  /**
+   * 메인 탭 생성 요청 한 건 조립 (커스텀) — 시드 포함, 배치 수와 무관.
+   * 스토어·저장 설정을 바꾸지 않는 순수 조립이라, 메인 탭의 자동 젖힘 메모를 미리 계산할 때도 쓴다.
+   * ignoreSource 를 주면 PC에 불러 둔 i2i 소스를 무시한다.
+   */
+  buildMainRequest: (options?: { ignoreSource?: boolean }) => Promise<GenerationRequest>
   cancelAll: () => Promise<void>
   refreshHistory: () => Promise<void>
   view: (filePath: string | null) => void
@@ -235,102 +243,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
 
   generate: async () => {
-    const { request, seedLocked, batchCount, transparentBackground } = get()
-    const seed = seedLocked && request.seed >= 0 ? request.seed : randomSeed()
-    const baseRequest = withoutTransientSource({ ...request, seed })
-    // 캐릭터는 라이브러리의 enabled 카드에서 구성 (리스트 순서 = v4 use_order 순서)
-    // 상대 태그 (커스텀) — 카드 역할 기준으로 반대 역할 카드가 적어둔 태그를 받는다
-    const enabled = enabledCharacters()
-    const givers = enabled.map((c) => ({ id: c.id, role: c.role, partnerTags: c.partnerTags }))
-    // 복장 (커스텀) — 메인 탭은 씬 선택이 없으니 카드의 기본 복장
-    const outfits = outfitMap()
-    const exposeActs = useOutfitsStore.getState().acts
-    const { stripOnNude } = useOutfitsStore.getState()
-    if (stripOnNude) await useOutfitsStore.getState().ensureKinds(enabled.map((c) => c.prompt))
-    const kindOf = clothKindOf()
-    const anyRole = enabled.some((c) => !!c.role)
-    /**
-     * 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게.
-     * nsfw 조각 켜기 → 누드면 옷 벗기기 순 (커스텀)
-     */
-    const dress = (c: (typeof enabled)[number]): { prompt: string; negative: string } => {
-      const contexts = [
-        ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
-        partnerTagsFor(c.role, givers, c.id)
-      ]
-      // 아래·가슴이 드러나는 장면이면 nsfw 조각이 저절로 켜진다 (메인 탭엔 씬 선택이 없다)
-      const auto = triggerAreas(contexts, exposeActs)
-      // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
-      const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf, auto)
-      const dressed = undressForNude({
-        card: c.prompt,
-        outfit: worn,
-        outfitNegative: resolveOutfitNegative(c.outfitId, undefined, outfits),
-        contexts: [...contexts, worn],
-        enabled: stripOnNude,
-        kindOf
-      })
-      return {
-        prompt: appendPrompt(dressed.card, dressed.outfit),
-        negative: dressed.outfitNegative
-      }
-    }
-    const characterPrompts = enabled.map((c) => {
-      const worn = dress(c)
-      return {
-        prompt: withPartnerTags(worn.prompt, c.role, givers, c.id),
-        // 기본 복장의 네거티브도 붙는다 (커스텀)
-        negativePrompt: appendPrompt(c.negativePrompt, worn.negative),
-        center: c.center,
-        enabled: true as const
-      }
-    })
-    const src = get().source
-    // 캐릭터에 연결된 캐릭레퍼 자동 포함 (커스텀) — 있으면 enabled 레퍼런스와 합집합으로 오버라이드
-    const linked = linkedCharRefIds()
-    const charRefIds =
-      linked.length > 0
-        ? [
-            ...new Set([
-              ...useCharRefsStore
-                .getState()
-                .items.filter((c) => c.enabled)
-                .map((c) => c.id),
-              ...linked
-            ])
-          ]
-        : undefined
-    const finalRequest = {
-      ...withTransparentBackground(
-        requestForPromptMode(baseRequest, get().promptSplitEnabled),
-        transparentBackground
-      ),
-      characterPrompts,
-      charRefIds,
-      source: src
-        ? {
-            imageBase64: src.imageBase64,
-            maskBase64: src.maskBase64,
-            // i2i 기본 strength/noise (파라미터 다이얼로그에서 조정 예정)
-            strength: request.i2iStrength ?? 0.7,
-            noise: request.i2iNoise ?? 0
-          }
-        : undefined,
-      // i2i는 소스 이미지 해상도를 따른다
-      ...(src ? { width: src.width, height: src.height } : {})
-    }
-    if (!seedLocked) set({ request: baseRequest })
-
-    void window.nais.invoke('settings:set', {
-      key: 'main_params',
-      value: JSON.stringify(baseRequest)
-    })
-    set({ previewPng: null, progress: null, viewingFilePath: null })
-    await window.nais.invoke('queue:enqueue', {
-      request: finalRequest,
-      count: batchCount
-    })
+    // 배치 수는 버튼을 누른 순간의 값 — 요청을 조립하는 동안 바뀌어도 영향 없게
+    const { batchCount } = get()
+    await enqueueMain(batchCount)
   },
+  buildMainRequest: async (options) => (await assembleMainRequest(options)).finalRequest,
 
   cancelAll: async () => {
     const queue = get().queue
@@ -392,6 +309,170 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
   cancelInpaint: () => set({ inpaintTarget: null })
 }))
+
+/**
+ * 메인 탭 생성 요청 조립 (커스텀) — generate()와 메인 탭의 자동 젖힘 메모(buildMainRequest)가 함께 쓴다.
+ * baseRequest = 저장·화면 반영용(시드 포함, i2i 소스 제외), finalRequest = 큐에 넣는 완성 요청
+ * (캐릭터·복장·상대 태그·캐릭레퍼·i2i 소스 반영). 스토어·저장 설정은 바꾸지 않는다.
+ * 읽는 시점과 순서는 예전 generate() 본문 그대로다.
+ * ignoreSource: PC에 불러 둔 i2i 소스를 읽지 않는다(소스도, 소스 해상도로 덮는 것도 없다).
+ */
+async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promise<{
+  baseRequest: GenerationRequest
+  finalRequest: GenerationRequest
+  seedLocked: boolean
+}> {
+  const store = useGenerationStore
+  const { request, seedLocked, transparentBackground } = store.getState()
+  const seed = seedLocked && request.seed >= 0 ? request.seed : randomSeed()
+  const baseRequest = withoutTransientSource({ ...request, seed })
+  // 캐릭터는 라이브러리의 enabled 카드에서 구성 (리스트 순서 = v4 use_order 순서)
+  // 상대 태그 (커스텀) — 카드 역할 기준으로 반대 역할 카드가 적어둔 태그를 받는다
+  const enabled = enabledCharacters()
+  const givers = enabled.map((c) => ({ id: c.id, role: c.role, partnerTags: c.partnerTags }))
+  // 복장 (커스텀) — 메인 탭은 씬 선택이 없으니 카드의 기본 복장
+  const outfits = outfitMap()
+  const exposeActs = useOutfitsStore.getState().acts
+  const { stripOnNude } = useOutfitsStore.getState()
+  if (stripOnNude) await useOutfitsStore.getState().ensureKinds(enabled.map((c) => c.prompt))
+  const kindOf = clothKindOf()
+  const anyRole = enabled.some((c) => !!c.role)
+  // 입은 옷 자동 젖힘 (커스텀) — 켜져 있으면 메인 프롬프트·상대 태그를 캐릭터별로 읽고(주인 몸 기준),
+  // 꺼져 있으면 아래 옛 판정(triggerAreas)을 그대로 쓴다
+  const sexes = enabled.map((c) => characterSex(c.role, c.prompt))
+  const exposure = useOutfitsStore.getState().exposeWorn
+    ? analyzeExposure({
+        chars: enabled.map((c, index) => ({
+          index,
+          id: c.id,
+          name: c.name,
+          sex: sexes[index],
+          role: c.role ?? null,
+          faceSeat: false,
+          autoOff: false,
+          receivesScene: receivesSceneText(c.role, sexes[index], anyRole)
+        })),
+        fields: [
+          { text: baseRequest.prompt, scope: 'scene' },
+          ...enabled.map((c, index) => ({
+            text: partnerTagsFor(c.role, givers, c.id),
+            scope: 'char' as const,
+            index
+          }))
+        ],
+        acts: exposeActs
+      })
+    : null
+  const exposeNotes: ExposeNote[] = []
+  /**
+   * 메인 프롬프트의 장면 태그는 당하는쪽(역할 없으면 전원)에게.
+   * nsfw 조각 켜기 → 누드면 옷 벗기기 → 입은 옷 자동 젖힘 순 (커스텀)
+   */
+  const dress = (
+    c: (typeof enabled)[number],
+    index: number
+  ): { prompt: string; negative: string } => {
+    const contexts = [
+      ...(c.role === 'target' || !anyRole ? [baseRequest.prompt] : []),
+      partnerTagsFor(c.role, givers, c.id)
+    ]
+    // 아래·가슴이 드러나는 장면이면 nsfw 조각이 저절로 켜진다 (메인 탭엔 씬 선택이 없다)
+    const exposed = exposure?.chars[index]
+    const auto = exposed ? exposed.auto : triggerAreas(contexts, exposeActs)
+    // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
+    const worn = wornOutfitTags(c.outfitId, undefined, outfits, stripOnNude, kindOf, auto)
+    const dressed = undressForNude({
+      card: c.prompt,
+      outfit: worn,
+      outfitNegative: resolveOutfitNegative(c.outfitId, undefined, outfits),
+      contexts: [...contexts, worn],
+      enabled: stripOnNude,
+      kindOf
+    })
+    let prompt = appendPrompt(dressed.card, dressed.outfit)
+    if (exposure && exposed) {
+      const piece = pieceInfo(
+        resolveOutfit(c.outfitId, undefined, outfits)?.outfit,
+        undefined,
+        auto
+      )
+      const finished = finishExposure(exposed, exposure, {
+        card: dressed.card,
+        outfit: dressed.outfit,
+        own: [partnerTagsFor(c.role, givers, c.id)],
+        stripped: dressed.nude != null,
+        strippedBy: dressed.nude ? `${dressed.nude} 태그` : undefined,
+        piece
+      })
+      prompt = appendPrompt(prompt, finished.tags.join(', '))
+      exposeNotes.push(...finished.notes)
+    }
+    return { prompt, negative: dressed.outfitNegative }
+  }
+  const characterPrompts = enabled.map((c, index) => {
+    const worn = dress(c, index)
+    return {
+      prompt: withPartnerTags(worn.prompt, c.role, givers, c.id),
+      // 기본 복장의 네거티브도 붙는다 (커스텀)
+      negativePrompt: appendPrompt(c.negativePrompt, worn.negative),
+      center: c.center,
+      enabled: true as const
+    }
+  })
+  const src = options?.ignoreSource ? null : store.getState().source
+  // 캐릭터에 연결된 캐릭레퍼 자동 포함 (커스텀) — 있으면 enabled 레퍼런스와 합집합으로 오버라이드
+  const linked = linkedCharRefIds()
+  const charRefIds =
+    linked.length > 0
+      ? [
+          ...new Set([
+            ...useCharRefsStore
+              .getState()
+              .items.filter((c) => c.enabled)
+              .map((c) => c.id),
+            ...linked
+          ])
+        ]
+      : undefined
+  const finalRequest: GenerationRequest = {
+    ...withTransparentBackground(
+      requestForPromptMode(baseRequest, store.getState().promptSplitEnabled),
+      transparentBackground
+    ),
+    characterPrompts,
+    charRefIds,
+    // 붙은 젖힘 태그와 안 붙은 이유 (입은 옷 자동 젖힘이 켜져 있을 때만)
+    ...(exposure ? { exposeNotes } : {}),
+    source: src
+      ? {
+          imageBase64: src.imageBase64,
+          maskBase64: src.maskBase64,
+          // i2i 기본 strength/noise (파라미터 다이얼로그에서 조정 예정)
+          strength: request.i2iStrength ?? 0.7,
+          noise: request.i2iNoise ?? 0
+        }
+      : undefined,
+    // i2i는 소스 이미지 해상도를 따른다
+    ...(src ? { width: src.width, height: src.height } : {})
+  }
+  return { baseRequest, finalRequest, seedLocked }
+}
+
+/** 메인 탭 생성 요청을 count장 큐에 넣는다 (커스텀) — 시드 정책·저장은 예전 generate()와 같다. */
+async function enqueueMain(count: number): Promise<void> {
+  const { baseRequest, finalRequest, seedLocked } = await assembleMainRequest()
+  if (!seedLocked) useGenerationStore.setState({ request: baseRequest })
+
+  void window.nais.invoke('settings:set', {
+    key: 'main_params',
+    value: JSON.stringify(baseRequest)
+  })
+  useGenerationStore.setState({ previewPng: null, progress: null, viewingFilePath: null })
+  await window.nais.invoke('queue:enqueue', {
+    request: finalRequest,
+    count
+  })
+}
 
 /** 히스토리/파일에서 i2i 소스 설정 (마스크 없이). filePath 또는 base64+크기 */
 export async function setI2iSource(filePath: string): Promise<void> {
