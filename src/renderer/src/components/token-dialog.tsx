@@ -23,6 +23,7 @@ import nais3Logo from '../assets/nais3-logo.svg'
 import { cn } from '../lib/utils'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
+import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
 import { THEME_PRESETS } from '../lib/theme-presets'
 import { useGenerationStore } from '../stores/generation-store'
 import { AccountsSection } from './accounts-section'
@@ -154,11 +155,14 @@ function GenerationSection(): React.JSX.Element {
   // 누드면 옷 벗기기 (커스텀, 기본 켜짐)
   const stripOnNude = useOutfitsStore((s) => s.stripOnNude)
   const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
-  // 입은 옷 자동 젖힘 (커스텀, 기본 켜짐)
+  // 입은 옷 자동 젖힘 (커스텀, 기본 꺼짐)
   const [exposeWorn, setExposeWorn] = useExposeWorn()
   // 후타 자동 재조립 + 시점·구도 정리 (커스텀, 재조립은 기본 꺼짐)
   const [futaReassembly, setFutaReassembly] = useFutaReassembly()
   const [futaViewFix, setFutaViewFix] = useFutaViewFix()
+  // 알몸일 때 pink nipples · 눈 감으면 눈 태그 빼기 (커스텀, 둘 다 기본 꺼짐)
+  const [nudePinkNipples, setNudePinkNipples] = useNudePinkNipples()
+  const [eyesClosedStrip, setEyesClosedStrip] = useEyesClosedStrip()
   // 확인 창 전역 끄기 (커스텀)
   const [confirmsOffState, setConfirmsOffState] = useState(getConfirmsDisabled())
   const confirmsOff = confirmsOffState
@@ -215,7 +219,7 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row
         label="입은 옷 자동 젖힘"
-        hint="씬 태그에 아래·가슴이 드러나는 행위가 있으면 입은 옷(카드에 적은 옷과 복장 조각)에 맞는 젖힘 태그를 저절로 붙임 · 붙은 태그와 안 붙은 이유는 씬 상세의 「자동 젖힘」에서 확인 · 끄면 이 기능이 없을 때와 똑같이 나감"
+        hint="씬 태그에 아래·가슴이 드러나는 행위가 있으면 입은 옷(카드에 적은 옷과 복장 조각)에 맞는 젖힘 태그를 붙임 · 붙은 태그와 안 붙은 이유는 씬 상세의 「자동 젖힘」에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
       >
         <Switch
           aria-label="입은 옷 자동 젖힘"
@@ -225,7 +229,7 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row
         label="후타 자동 재조립"
-        hint="카드에 futanari 가 있는 후타가 그려지면 남자 장면으로 적힌 태그(1boy·hetero·faceless male·male 구절·고환·he/his 문장)를 후타 구성에 맞게 바꿔 보냄 (후타는 girl 로 셈) · 고환 유형 태그가 없으면 no testicles 를 더함 · 바꾼 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 적어 둔 글은 그대로 · 끄면 이 기능이 없을 때와 똑같이 나감 (알몸 여성 캐릭터에 더하는 pink nipples 는 이 설정과 무관)"
+        hint="카드에 futanari 가 있는 후타가 그려지면 남자 장면으로 적힌 태그(1boy·hetero·faceless male·male 구절·고환·he/his 문장)를 후타 구성에 맞게 바꿔 보냄 (후타는 girl 로 셈) · 고환 유형 태그가 없으면 no testicles 를 더함 · 바꾼 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 적어 둔 글은 그대로 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감 (알몸 pink nipples 는 아래 별도 설정)"
       >
         <Switch
           aria-label="후타 자동 재조립"
@@ -242,6 +246,26 @@ function GenerationSection(): React.JSX.Element {
           checked={futaReassembly && futaViewFix}
           disabled={!futaReassembly}
           onCheckedChange={setFutaViewFix}
+        />
+      </Row>
+      <Row
+        label="알몸일 때 pink nipples"
+        hint="알몸이고 가슴이 여성 몸인 캐릭터(후타 포함)에 pink nipples 를 더함 · 카드에 유두 색 태그가 있거나 pink nipples 를 음수 가중치로 막아 두면 더하지 않음 · 더한 것은 씬 상세·메인 탭의 「몸·후타」에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
+      >
+        <Switch
+          aria-label="알몸일 때 pink nipples"
+          checked={nudePinkNipples}
+          onCheckedChange={setNudePinkNipples}
+        />
+      </Row>
+      <Row
+        label="눈 감으면 눈 태그 빼기"
+        hint="그 캐릭터의 장면 태그에 closed eyes·eyes closed(영어 문장 her eyes are closed 포함)가 있으면 카드 글의 눈 색·동공·흰자·빛나는 눈·눈동자 무늬 태그를 보낼 때만 뺌 · 카드 원문은 그대로 · 뺀 것은 씬 상세·메인 탭의 「눈 감음」(다른 메모와 같이 있으면 「몸·후타」)에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
+      >
+        <Switch
+          aria-label="눈 감으면 눈 태그 빼기"
+          checked={eyesClosedStrip}
+          onCheckedChange={setEyesClosedStrip}
         />
       </Row>
       <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">

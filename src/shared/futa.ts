@@ -696,13 +696,17 @@ export function rewriteCharTexts(
 /**
  * 이 캐릭터 칸에 몸에 맞춰 더할 태그와 메모.
  *  - 후타(재조립이 켜져 있을 때)이고 고환 유형 태그가 없으면 no testicles
- *  - 알몸이고 가슴이 여성 몸이면 pink nipples (후타 하는쪽 포함 · 유두 색 태그가 있거나 이미 있으면 안 더함 · 설정 없음)
+ *  - 알몸이고 가슴이 여성 몸이면 pink nipples (후타 하는쪽 포함 · 유두 색 태그가 있거나 이미 있으면 안 더함 ·
+ *    설정 「알몸일 때 pink nipples」가 켜져 있을 때만)
+ * 두 설정이 모두 꺼져 있으면 아무것도 더하지 않고 메모도 남기지 않는다.
  * texts 는 이 캐릭터의 모든 글(카드·복장·씬 태그 — 바꾼 뒤의 것). nude 는 알몸 여부.
  */
 export function bodyTagsFor(input: {
   reading: BodyReading
   /** 후타 재조립 설정 */
   futaOn: boolean
+  /** 알몸일 때 pink nipples 설정 */
+  pinkNipples: boolean
   /** 이 캐릭터가 알몸인가 — 옷 벗기기로 벗겼거나 글이 온몸 알몸을 선언함 */
   nude: boolean
   texts: string[]
@@ -719,7 +723,10 @@ export function bodyTagsFor(input: {
   }
   if (input.futaOn && reading.body.futa && !reading.testicleType && !hasTesticleType(texts))
     add(NO_TESTICLES, '후타 카드에 고환 유형 태그가 없어 더함 (후타는 고환 없음이 기본)')
-  if (wantsPinkNipples({ chestFemale: reading.chestFemale, nude: input.nude, texts }))
+  if (
+    input.pinkNipples &&
+    wantsPinkNipples({ chestFemale: reading.chestFemale, nude: input.nude, texts })
+  )
     add(
       PINK_NIPPLES,
       '알몸이고 가슴이 여성 몸이라 더함 (단보루 태그는 아니지만 실측으로 유두가 잘 나옴)'

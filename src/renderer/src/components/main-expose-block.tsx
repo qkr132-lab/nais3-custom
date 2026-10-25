@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { BodyNote, ExposeNote } from '@shared/types'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
+import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
 import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useOutfitsStore } from '../stores/outfits-store'
@@ -18,6 +19,8 @@ export function MainExposeBlock(): React.JSX.Element | null {
   const [exposeWorn] = useExposeWorn()
   const [futaReassembly] = useFutaReassembly()
   const [futaViewFix] = useFutaViewFix()
+  const [eyesClosedStrip] = useEyesClosedStrip()
+  const [nudePinkNipples] = useNudePinkNipples()
   const prompt = useGenerationStore((s) => s.request.prompt)
   const parts = useGenerationStore((s) => s.request.promptParts)
   const split = useGenerationStore((s) => s.promptSplitEnabled)
@@ -30,7 +33,7 @@ export function MainExposeBlock(): React.JSX.Element | null {
   const [futaDrawn, setFutaDrawn] = useState<number | undefined>()
   const [futaOff, setFutaOff] = useState<number | undefined>()
   const active = cards.some((c) => c.enabled && c.prompt.trim())
-  // 젖힘이 꺼져 있어도 몸·후타 메모는 따로 나온다 (알몸에 붙는 pink nipples 는 설정이 없다)
+  // 젖힘이 꺼져 있어도 몸·후타 메모는 따로 나온다 (알몸 pink nipples·눈 감음은 설정이 따로 있다)
   const show = active
 
   useEffect(() => {
@@ -71,7 +74,9 @@ export function MainExposeBlock(): React.JSX.Element | null {
     stripOnNude,
     exposeWorn,
     futaReassembly,
-    futaViewFix
+    futaViewFix,
+    eyesClosedStrip,
+    nudePinkNipples
   ])
 
   const exposeShown = exposeWorn && !!notes?.length

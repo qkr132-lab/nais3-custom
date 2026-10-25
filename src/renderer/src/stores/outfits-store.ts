@@ -13,6 +13,8 @@ const STRIP_KEY = 'nude_strip_clothes'
 const EXPOSE_WORN_KEY = 'expose_worn_clothes'
 const FUTA_REASSEMBLY_KEY = 'futa_reassembly'
 const FUTA_VIEW_FIX_KEY = 'futa_view_fix'
+const EYES_CLOSED_STRIP_KEY = 'eyes_closed_strip'
+const NUDE_PINK_NIPPLES_KEY = 'nude_pink_nipples'
 
 /** 저장 모양 — 어느 판의 기본 목록까지 더했는지(v)를 같이 적는다 */
 const actsJson = (acts: ExposeActs): string =>
@@ -32,21 +34,34 @@ interface OutfitsState {
   stripOnNude: boolean
   setStripOnNude: (v: boolean) => void
   /**
-   * 입은 옷 자동 젖힘 — 씬 태그가 아래·가슴을 드러내는 장면이면 카드에 적은 옷과 복장 조각에 맞는 젖힘 태그를 붙인다 (설정, 기본 켬).
+   * 입은 옷 자동 젖힘 — 씬 태그가 아래·가슴을 드러내는 장면이면 카드에 적은 옷과 복장 조각에 맞는 젖힘 태그를 붙인다 (설정, 기본 꺼짐 — 저장값 '1' 일 때만 켬).
    * 붙은 태그와 안 붙은 이유는 요청의 exposeNotes 로 화면에 보인다. 끄면 이 기능이 없던 때와 글자 단위로 같다
    */
   exposeWorn: boolean
   setExposeWorn: (v: boolean) => void
   /**
    * 후타 자동 재조립 — 카드에 futanari 가 있는 캐릭터가 그려지면, 씬 글의 남자 장면 선언(hetero·1boy·faceless male·male 구절·he/his)을
-   * 후타 구성에 맞게 바꾸고 no testicles 를 더한다 (설정, 기본 켬). 바꾼 것은 요청의 bodyNotes 로 화면에 보인다.
-   * 끄면 후타를 읽지 않아 이 기능이 없던 때와 글자 단위로 같다 (알몸 여성 캐릭터의 pink nipples 만 고정 규칙이라 그대로)
+   * 후타 구성에 맞게 바꾸고 no testicles 를 더한다 (설정, 기본 꺼짐 — 저장값 '1' 일 때만 켬). 바꾼 것은 요청의 bodyNotes 로 화면에 보인다.
+   * 끄면 후타를 읽지 않아 이 기능이 없던 때와 글자 단위로 같다 (알몸 pink nipples 는 nudePinkNipples 가 따로 정한다)
    */
   futaReassembly: boolean
   setFutaReassembly: (v: boolean) => void
   /** 후타 재조립 가운데 시점·구도(pov → from side, head out of frame·lower body·penis focus 빼기)만 따로 끄는 설정 (기본 켬) */
   futaViewFix: boolean
   setFutaViewFix: (v: boolean) => void
+  /**
+   * 눈 감으면 눈 태그 빼기 — 그 캐릭터에게 걸린 장면 태그에 closed eyes 가 있으면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈·눈동자 무늬)를
+   * 보낼 때만 뺀다 (설정 eyes_closed_strip, 기본 꺼짐 — 저장값 '1' 일 때만 켬). 뺀 것은 요청의 bodyNotes 로 화면에 보인다.
+   * 끄면 카드 글을 읽지 않아 이 기능이 없던 때와 글자 단위로 같다
+   */
+  eyesClosedStrip: boolean
+  setEyesClosedStrip: (v: boolean) => void
+  /**
+   * 알몸일 때 pink nipples — 알몸이고 가슴이 여성 몸인 캐릭터(후타 포함)에게 pink nipples 를 더한다 (설정 nude_pink_nipples, 기본 꺼짐 — 저장값 '1' 일 때만 켬).
+   * 더한 것은 요청의 bodyNotes 로 화면에 보인다. 끄면 이 기능이 없던 때와 글자 단위로 같다
+   */
+  nudePinkNipples: boolean
+  setNudePinkNipples: (v: boolean) => void
   /** 태그 → 옷/알몸/몸/모름. 분류 자료가 메인에 있어 생성 직전에 모자란 것만 물어 채운다 */
   kinds: Record<string, TagKind>
   ensureKinds: (prompts: string[]) => Promise<void>
@@ -62,19 +77,23 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
   loaded: false,
   acts: DEFAULT_EXPOSE_ACTS,
   stripOnNude: true,
-  exposeWorn: true,
+  exposeWorn: false,
   futaReassembly: false,
   futaViewFix: true,
+  eyesClosedStrip: false,
+  nudePinkNipples: false,
   kinds: {},
 
   load: async () => {
-    const [{ items }, { value }, strip, expose, futa, futaView] = await Promise.all([
+    const [{ items }, { value }, strip, expose, futa, futaView, eyes, pink] = await Promise.all([
       window.nais.invoke('outfits:list', undefined),
       window.nais.invoke('settings:get', { key: ACTS_KEY }),
       window.nais.invoke('settings:get', { key: STRIP_KEY }),
       window.nais.invoke('settings:get', { key: EXPOSE_WORN_KEY }),
       window.nais.invoke('settings:get', { key: FUTA_REASSEMBLY_KEY }),
-      window.nais.invoke('settings:get', { key: FUTA_VIEW_FIX_KEY })
+      window.nais.invoke('settings:get', { key: FUTA_VIEW_FIX_KEY }),
+      window.nais.invoke('settings:get', { key: EYES_CLOSED_STRIP_KEY }),
+      window.nais.invoke('settings:get', { key: NUDE_PINK_NIPPLES_KEY })
     ])
     let acts = DEFAULT_EXPOSE_ACTS
     try {
@@ -94,10 +113,14 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
       items,
       acts,
       stripOnNude: strip.value !== '0',
-      exposeWorn: expose.value !== '0',
+      // 기본 꺼짐 — 켜 둔 사람만 1 로 저장돼 있다 (저장값이 없거나 0 이면 꺼짐)
+      exposeWorn: expose.value === '1',
       // 기본 꺼짐 — 켜 둔 사람만 1 로 저장돼 있다. 사용자가 맞춰 둔 후타 씬의 공수가 뒤바뀌어 옵트인으로 돌림
       futaReassembly: futa.value === '1',
       futaViewFix: futaView.value !== '0',
+      // 기본 꺼짐 — 켜 둔 사람만 1 로 저장돼 있다. 보내는 글이 바뀌는 기능이라 옵트인
+      eyesClosedStrip: eyes.value === '1',
+      nudePinkNipples: pink.value === '1',
       loaded: true
     })
   },
@@ -133,6 +156,22 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
     void window.nais.invoke('settings:set', {
       key: FUTA_VIEW_FIX_KEY,
       value: futaViewFix ? '1' : '0'
+    })
+  },
+
+  setEyesClosedStrip: (eyesClosedStrip) => {
+    set({ eyesClosedStrip })
+    void window.nais.invoke('settings:set', {
+      key: EYES_CLOSED_STRIP_KEY,
+      value: eyesClosedStrip ? '1' : '0'
+    })
+  },
+
+  setNudePinkNipples: (nudePinkNipples) => {
+    set({ nudePinkNipples })
+    void window.nais.invoke('settings:set', {
+      key: NUDE_PINK_NIPPLES_KEY,
+      value: nudePinkNipples ? '1' : '0'
     })
   },
 

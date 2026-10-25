@@ -297,7 +297,9 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       items: [school],
       acts: DEFAULT_EXPOSE_ACTS,
       stripOnNude: false,
+      // 두 설정 모두 기본은 꺼짐이다 — 이 시험은 켠 상태(입은 옷 자동 젖힘 · 알몸일 때 pink nipples)의 출력을 본다
       exposeWorn: true,
+      nudePinkNipples: true,
       kinds: {}
     })
     useCharactersStore.setState({ items: [{ ...card(1, 'blue eyes', true), outfitId: 9 }] })
@@ -357,7 +359,7 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
       useCharactersStore.setState({ items: [card(1, 'blue eyes, skirt', true)] })
       useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
       const r = request('bed, vaginal')
-      // 알몸이 된 여성 캐릭터에는 pink nipples 가 붙는다 (고정 규칙 · bodyNotes 에 남는다)
+      // 알몸이 된 여성 캐릭터에는 pink nipples 가 붙는다 (설정을 켠 경우 · bodyNotes 에 남는다)
       expect(r.characterPrompts[0].prompt).toBe('blue eyes, nude, completely nude, pink nipples')
       expect(r.exposeNotes).toContainEqual(
         expect.objectContaining({ area: 'lower', status: 'nude' })

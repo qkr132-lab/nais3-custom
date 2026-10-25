@@ -15,7 +15,8 @@ import type { BodyNote } from './types'
  * 남기는 것 — 눈 모양(tsurime · tareme · jitome), 속눈썹, 화장(eyeshadow · eyeliner · mascara),
  * 안경·안대·고글·가면, 눈 주변 흉터·문신. 눈이 보이는 표현(one eye closed · wink · half-closed eyes)은 감은 눈으로 치지 않는다.
  * 빼달라는 음수 가중치(-1::blue eyes::)·와일드카드·주석은 그대로 둔다 (nude-strip 의 filterTags 와 같은 규칙 — futa.ts 의 mapTags).
- * 뺀 것은 전부 BodyNote(kind removed, topic eyes)로 돌려줘 화면에 보인다 — 몰래 빼지 않는다. 설정은 따로 없다.
+ * 뺀 것은 전부 BodyNote(kind removed, topic eyes)로 돌려줘 화면에 보인다 — 몰래 빼지 않는다.
+ * 설정 「눈 감으면 눈 태그 빼기」(eyes_closed_strip, 기본 꺼짐)가 꺼져 있으면 카드 글을 읽지 않고 그대로 돌려준다 (이 기능이 없던 때와 같다).
  * DB·IPC 없는 순수 계산이다 (렌더러·폰이 같은 코드를 쓴다).
  */
 
@@ -220,10 +221,12 @@ export interface EyeStrip {
 
 /**
  * 눈 감음이면 카드 글에서 눈 외형 태그를 뺀다.
+ * enabled = 설정 「눈 감으면 눈 태그 빼기」 — false 면 아무것도 읽지 않고 카드 글을 그대로, 메모 없이 돌려준다.
  * contexts = 이 캐릭터에게 걸린 장면 태그 (sceneContextsFor · 얼굴 인셋 자리는 그 자리 태그만).
  * who = 메모에 실을 캐릭터 (characterPrompts 안의 순서·이름·카드 id).
  */
 export function stripEyesWhenClosed(input: {
+  enabled: boolean
   card: string
   contexts: readonly string[]
   sex: NudeStripSex | null
@@ -231,7 +234,7 @@ export function stripEyesWhenClosed(input: {
 }): EyeStrip {
   const { card, who } = input
   const none: EyeStrip = { text: card, notes: [] }
-  if (!card || !LOOK_HINT.test(card)) return none
+  if (!input.enabled || !card || !LOOK_HINT.test(card)) return none
   const evidence = closedEyesEvidence(input.contexts, input.sex)
   if (!evidence) return none
   const r = mapTags(

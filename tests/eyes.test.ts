@@ -18,7 +18,8 @@ const strip = (
   card: string,
   contexts: string[],
   sex: 'male' | 'female' | null = 'female'
-): ReturnType<typeof stripEyesWhenClosed> => stripEyesWhenClosed({ card, contexts, sex, who })
+): ReturnType<typeof stripEyesWhenClosed> =>
+  stripEyesWhenClosed({ enabled: true, card, contexts, sex, who })
 const tagsOf = (text: string): string[] => engineTagsOf(text)
 
 describe('감은 눈 읽기 — 태그', () => {
@@ -485,6 +486,7 @@ describe('카드에서 눈 외형 빼기', () => {
 
   it('카드 id 가 없으면 메모에도 charId 가 없다', () => {
     const r = stripEyesWhenClosed({
+      enabled: true,
       card: 'blue eyes',
       contexts: ['closed eyes'],
       sex: null,
@@ -492,6 +494,30 @@ describe('카드에서 눈 외형 빼기', () => {
     })
     expect(r.notes[0]).not.toHaveProperty('charId')
     expect(r.notes[0].charIndex).toBe(2)
+  })
+
+  it('설정이 꺼져 있으면(enabled false) 감은 눈이어도 카드 글 그대로, 메모 없음 — 이 기능이 없을 때와 같다', () => {
+    const cards = [
+      '1girl, blue eyes, red hair',
+      '1girl, blue eyes, slit pupils, black sclera, glowing eyes, ringed eyes',
+      '1.2::blue eyes, red hair::, smile',
+      '1girl, 1.2::blue eyes, red hair, slit pupils\ngreen eyes',
+      '1girl, (blue eyes/red eyes), red hair',
+      ''
+    ]
+    for (const card of cards) {
+      const off = stripEyesWhenClosed({
+        enabled: false,
+        card,
+        contexts: ['closed eyes', 'her eyes are closed'],
+        sex: 'female',
+        who
+      })
+      expect(off.text, card).toBe(card)
+      expect(off.notes, card).toEqual([])
+    }
+    // 같은 입력을 켜면 뺀다 — 끈 것과 켠 것이 갈린다
+    expect(strip('1girl, blue eyes', ['closed eyes']).text).toBe('1girl')
   })
 
   it('her/his 문장은 이 캐릭터 몸에 맞을 때만, 후타(null)는 어느 쪽이든', () => {

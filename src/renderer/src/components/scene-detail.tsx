@@ -22,6 +22,7 @@ import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
+import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
 import { futaCardsOff } from '../lib/body-notes'
 import { BodyBlock } from './body-notes'
 import { ExposeBlock } from './expose-notes'
@@ -68,6 +69,9 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   // 후타 자동 재조립 (커스텀) — 설정이 바뀌어도 미리보기를 다시 계산
   const [futaReassembly] = useFutaReassembly()
   const [futaViewFix] = useFutaViewFix()
+  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples (커스텀, 기본 꺼짐) — 설정이 바뀌어도 미리보기를 다시 계산
+  const [eyesClosedStrip] = useEyesClosedStrip()
+  const [nudePinkNipples] = useNudePinkNipples()
   const outfitItems = useOutfitsStore((s) => s.items)
   const exposeActs = useOutfitsStore((s) => s.acts)
   useEffect(() => {
@@ -145,6 +149,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       exposeWorn,
       futaReassembly,
       futaViewFix,
+      eyesClosedStrip,
+      nudePinkNipples,
       outfitItems,
       exposeActs
     ]

@@ -874,8 +874,15 @@ describe('실행 직전 재합성 (refreshScenePrompts)', () => {
 describe('몸에 맞춘 태그 (no testicles · pink nipples)', () => {
   const read = (role: 'source' | 'target' | null, card: string, futaOn = true): BodyReading =>
     readBody(role, [card], futaOn)
-  const tagsFor = (reading: BodyReading, nude: boolean, texts: string[], futaOn = true): string[] =>
-    bodyTagsFor({ reading, futaOn, nude, texts, index: 0, name: '카드' }).tags
+  // pinkNipples 는 설정 「알몸일 때 pink nipples」 — 기본 꺼짐이라, 아래 시험은 켠 채 시험하고 끈 경우는 맨 아래 시험이 맡는다
+  const tagsFor = (
+    reading: BodyReading,
+    nude: boolean,
+    texts: string[],
+    futaOn = true,
+    pinkNipples = true
+  ): string[] =>
+    bodyTagsFor({ reading, futaOn, pinkNipples, nude, texts, index: 0, name: '카드' }).tags
 
   it('후타에 고환 유형 태그가 없으면 no testicles 를 더한다', () => {
     const r = read('source', '1girl, futanari')
@@ -956,6 +963,7 @@ describe('몸에 맞춘 태그 (no testicles · pink nipples)', () => {
     const out = bodyTagsFor({
       reading: r,
       futaOn: true,
+      pinkNipples: true,
       nude: true,
       texts: ['1girl, futanari, nude'],
       index: 2,
@@ -966,5 +974,31 @@ describe('몸에 맞춘 태그 (no testicles · pink nipples)', () => {
       ['added', 'char', 2, '후타 카드', 'pink nipples']
     ])
     for (const n of out.notes) expect(n.reason).toMatch(/[가-힣]/)
+  })
+
+  it('설정 「알몸일 때 pink nipples」가 꺼져 있으면 알몸이어도 더하지 않고 메모도 없다 (no testicles 는 후타 재조립 몫)', () => {
+    const girl = read('target', '1girl, blue eyes')
+    const nudeTexts = ['1girl, blue eyes, nude, completely nude']
+    expect(tagsFor(girl, true, nudeTexts, true, false)).toEqual([])
+    expect(tagsFor(girl, true, nudeTexts, false, false)).toEqual([])
+    // 하는쪽 후타: no testicles 는 그대로 붙고 pink nipples 만 빠진다
+    const futa = read('source', '1girl, futanari')
+    expect(tagsFor(futa, true, ['1girl, futanari, nude'], true, false)).toEqual(['no testicles'])
+    expect(tagsFor(futa, true, ['1girl, futanari, nude'], true, true)).toEqual([
+      'no testicles',
+      'pink nipples'
+    ])
+    const off = bodyTagsFor({
+      reading: girl,
+      futaOn: true,
+      pinkNipples: false,
+      nude: true,
+      texts: nudeTexts,
+      index: 0,
+      name: '카드'
+    })
+    expect(off).toEqual({ tags: [], notes: [] })
+    // 켜면 지금과 똑같이 붙는다
+    expect(tagsFor(girl, true, nudeTexts, true, true)).toEqual(['pink nipples'])
   })
 })

@@ -290,8 +290,8 @@ export function BodyBlock({
           ))}
           {eyesOnly ? (
             <p className="text-[11px] text-muted">
-              뺀 것은 보낼 때만이고 카드(캐릭터 탭)의 글은 그대로입니다. 눈 감음은 설정이 따로
-              없습니다.
+              뺀 것은 보낼 때만이고 카드(캐릭터 탭)의 글은 그대로입니다. 설정의 「눈 감으면 눈 태그
+              빼기」를 끄면 이 기능이 없을 때와 똑같이 나갑니다.
             </p>
           ) : (
             <p className="text-[11px] text-muted">
@@ -299,9 +299,10 @@ export function BodyBlock({
               {reassembly
                 ? '설정의 「후타 자동 재조립」을 끄면 후타 글 바꾸기가 모두 꺼집니다'
                 : '「후타 자동 재조립」이 꺼져 있어 후타 글은 바꾸지 않습니다'}
-              {counts.some((c) => c.id === 'pink') && ' (pink nipples 는 이 설정과 무관합니다)'}
+              {counts.some((c) => c.id === 'pink') &&
+                ' (pink nipples 는 「알몸일 때 pink nipples」 설정에서 끕니다)'}
               {counts.some((c) => c.id === 'eyes') &&
-                ' (눈 감음으로 뺀 눈 외형 태그는 설정이 따로 없고 카드의 글은 그대로입니다)'}
+                ' (눈 감음으로 뺀 눈 외형 태그는 「눈 감으면 눈 태그 빼기」 설정에서 끄며 카드의 글은 그대로입니다)'}
               .
             </p>
           )}

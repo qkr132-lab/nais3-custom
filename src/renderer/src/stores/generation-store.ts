@@ -361,6 +361,9 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
   const sexes = enabled.map((c) => characterSex(c.role, c.prompt))
   // 몸 (음경·음부·가슴) — 카드의 futanari 로 후타를 읽는다. 후타 재조립을 끄면 후타를 읽지 않는다
   const futaOn = useOutfitsStore.getState().futaReassembly
+  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
+  const eyesOn = useOutfitsStore.getState().eyesClosedStrip
+  const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
   const readings = enabled.map((c) => readBody(c.role, [c.prompt], futaOn))
   const futaPlan = futaOn
     ? planFuta(
@@ -454,8 +457,9 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       kindOf
     })
     // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그(contexts)에 closed eyes 가 있을 때.
-    // 설정은 없고 뺀 것은 bodyNotes 에 남는다. 후타는 her/his 문장의 성별로 거르지 않는다
+    // 설정 「눈 감으면 눈 태그 빼기」가 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다. 후타는 her/his 문장의 성별로 거르지 않는다
     const eyes = stripEyesWhenClosed({
+      enabled: eyesOn,
       card: dressed.card,
       contexts,
       sex: readings[index].body.futa ? null : sexes[index],
@@ -480,10 +484,12 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
           )
         : null
     const partner = rw?.texts.partner ?? partnerRaw
-    // 몸에 맞춘 태그 — 후타에 no testicles, 알몸이고 가슴이 여성 몸이면 pink nipples (후타 포함). 더한 것은 bodyNotes 에 남는다
+    // 몸에 맞춘 태그 — 후타에 no testicles(후타 재조립), 알몸이고 가슴이 여성 몸이면 pink nipples(후타 포함 · 설정 「알몸일 때 pink nipples」).
+    // 둘 다 설정에서 켜야 더한다. 더한 것은 bodyNotes 에 남는다
     const body = bodyTagsFor({
       reading: readings[index],
       futaOn,
+      pinkNipples: pinkNipplesOn,
       nude: isNudeChar(dressed.nude != null, [dressed.card, dressed.outfit, partner]),
       texts: [dressed.card, dressed.outfit, partner],
       index,

@@ -292,6 +292,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   const globalStripOnNude = useOutfitsStore.getState().stripOnNude
   const kindOf = clothKindOf()
   const futaOn = useOutfitsStore.getState().futaReassembly
+  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
+  const eyesOn = useOutfitsStore.getState().eyesClosedStrip
+  const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
   const sourceContexts = [
     scene.sourceTags ?? '',
@@ -499,9 +502,11 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     })
     const outfitTag = dressed.outfit
     // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그
-    // (exposeContexts: 옷 벗기기와 같은 범위, 얼굴 인셋 자리는 그 자리 태그만)에 closed eyes 가 있을 때. 설정은 없고 뺀 것은 bodyNotes 에 남는다.
+    // (exposeContexts: 옷 벗기기와 같은 범위, 얼굴 인셋 자리는 그 자리 태그만)에 closed eyes 가 있을 때. 설정 「눈 감으면 눈 태그 빼기」가
+    // 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다.
     // 후타는 her/his 문장의 성별로 거르지 않는다 (몸이 역할의 성별과 다를 수 있다)
     const eyes = stripEyesWhenClosed({
+      enabled: eyesOn,
       card: dressed.card,
       contexts: exposeContexts,
       sex: reading.body.futa ? null : meta.sex,
@@ -549,12 +554,14 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       withRole(partnerTagOut),
       roleTagsOut
     ]
-    // 몸에 맞춘 태그 — 후타에 no testicles, 알몸이고 가슴이 여성 몸이면 pink nipples (후타 하는쪽 포함). 더한 것은 bodyNotes 에 남는다
+    // 몸에 맞춘 태그 — 후타에 no testicles(후타 재조립), 알몸이고 가슴이 여성 몸이면 pink nipples(후타 하는쪽 포함 · 설정 「알몸일 때 pink nipples」).
+    // 둘 다 설정에서 켜야 더한다. 더한 것은 bodyNotes 에 남는다
     const bodyTags = faceSeat
       ? null
       : bodyTagsFor({
           reading,
           futaOn,
+          pinkNipples: pinkNipplesOn,
           nude: isNudeChar(dressed.nude != null, [dressed.card, dressed.outfit, ...ownOut]),
           texts: [dressed.card, dressed.outfit, ...ownOut],
           index,

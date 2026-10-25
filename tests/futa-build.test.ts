@@ -75,6 +75,8 @@ function setup(opts: {
   strip?: boolean
   reassembly?: boolean
   viewFix?: boolean
+  /** 알몸일 때 pink nipples — 기존 기대를 그대로 두려고 기본 켬 (실제 기본값은 꺼짐) */
+  pink?: boolean
 }): void {
   useGenerationStore.setState({
     request: { ...DEFAULT_REQUEST, prompt: 'masterpiece', negativePrompt: '' },
@@ -88,6 +90,7 @@ function setup(opts: {
     exposeWorn: true,
     futaReassembly: opts.reassembly ?? true,
     futaViewFix: opts.viewFix ?? true,
+    nudePinkNipples: opts.pink ?? true,
     kinds: {},
     loaded: true
   })
@@ -482,12 +485,44 @@ describe('pink nipples — 알몸이 되는 모든 경우', () => {
     expect(r.characterPrompts[2].prompt).toBe('1girl, nude, pink nipples')
   })
 
-  it('후타 재조립을 꺼도 pink nipples 는 고정 규칙이다 (후타를 읽지 않으니 하는쪽 후타는 남캐 몸)', () => {
+  it('후타 재조립을 꺼도 pink nipples 는 자기 설정을 따른다 (후타를 읽지 않으니 하는쪽 후타는 남캐 몸)', () => {
     setup({ strip: true, reassembly: false })
     const r = buildSceneRequest(nudeScene)
     expect(r.characterPrompts[1].prompt).toContain('pink nipples')
     expect(r.characterPrompts[0].prompt).not.toContain('pink nipples')
     expect(r.characterPrompts[0].prompt).not.toContain('no testicles')
+  })
+
+  it('설정 「알몸일 때 pink nipples」를 끄면(기본) 알몸이어도 더하지 않고 메모도 없다 — 이 기능이 없을 때와 같다', () => {
+    setup({ strip: true, pink: false })
+    const off = buildSceneRequest(nudeScene)
+    expect(off.characterPrompts[1].prompt).toBe(
+      '1girl, red hair, pleated skirt, nude, completely nude'
+    )
+    // 하는쪽 후타의 no testicles 는 후타 재조립 몫이라 그대로
+    expect(off.characterPrompts[0].prompt).toBe('1girl, futanari, blue eyes, no testicles')
+    expect(JSON.stringify(off)).not.toContain('pink nipples')
+    expect((off.bodyNotes ?? []).some((n) => n.after === 'pink nipples')).toBe(false)
+    // 옷 벗기기 버튼으로 둘 다 벗겨도 같다
+    setup({ pink: false })
+    useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
+    const both = buildSceneRequest(sceneOf({ prompt: 'kiss' }))
+    expect(both.characterPrompts[0].prompt).toBe(
+      '1girl, futanari, blue eyes, nude, completely nude, no testicles'
+    )
+    expect(both.characterPrompts[1].prompt).toBe(
+      '1girl, red hair, pleated skirt, nude, completely nude'
+    )
+    // 알몸 카드도 더하지 않는다
+    setup({ pink: false, cards: [card(GIRL, '1girl, nude, completely nude', 'target')] })
+    expect(buildSceneRequest(sceneOf({ prompt: 'kiss' })).characterPrompts[0].prompt).toBe(
+      '1girl, nude, completely nude'
+    )
+    // 켜면 지금과 똑같이 붙는다
+    setup({ pink: true, cards: [card(GIRL, '1girl, nude, completely nude', 'target')] })
+    expect(buildSceneRequest(sceneOf({ prompt: 'kiss' })).characterPrompts[0].prompt).toBe(
+      '1girl, nude, completely nude, pink nipples'
+    )
   })
 })
 
@@ -561,6 +596,23 @@ describe('메인 탭 경로', () => {
     expect(r.characterPrompts[1].prompt).toContain('nude, completely nude, pink nipples')
     // 장면 태그의 nude 는 당하는쪽에게만 걸린다 — 하는쪽 후타는 벗지 않으니 pink nipples 도 없다 (no testicles 는 후타 몸 규칙)
     expect(r.characterPrompts[0].prompt).toBe('1girl, futanari, blue eyes, no testicles')
+  })
+
+  it('설정 「알몸일 때 pink nipples」를 끄면 메인 탭도 더하지 않고 메모도 없다', async () => {
+    setup({ pink: false })
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: 'bath, nude' },
+      promptSplitEnabled: false
+    })
+    useOutfitsStore.setState({
+      stripOnNude: true,
+      kinds: new Proxy({}, { has: () => true, get: () => 'body' }) as never
+    })
+    const r = await useGenerationStore.getState().buildMainRequest()
+    expect(r.characterPrompts[1].prompt).toBe(
+      '1girl, red hair, pleated skirt, nude, completely nude'
+    )
+    expect(JSON.stringify(r)).not.toContain('pink nipples')
   })
 })
 

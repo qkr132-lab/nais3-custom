@@ -90,7 +90,7 @@ describe('하는쪽 역할의 여성 카드 — 사람 수와 가슴은 카드�
     expect(readBody('source', ['1boy, 1girl'], true).chestFemale).toBe(false)
   })
 
-  it('설정을 꺼도 몸 판정은 같다 (pink nipples 는 고정 규칙)', () => {
+  it('후타 설정을 꺼도 몸 판정은 같다 (알몸 pink nipples 는 별도 설정)', () => {
     expect(readBody('source', ['1girl'], false).chestFemale).toBe(true)
   })
 

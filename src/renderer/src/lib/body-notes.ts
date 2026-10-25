@@ -91,7 +91,7 @@ const WHERE_ORDER: Record<BodyWhere, number> = {
   char: 5
 }
 
-/** 더한 태그가 pink nipples 인가 — 단보루 태그는 아니지만 실측으로 쓰는 고정 규칙이라 요약에서 따로 센다 */
+/** 더한 태그가 pink nipples 인가 — 단보루 태그는 아니지만 실측으로 쓰고 후타와 상관없이 여캐도 받아서, 요약에서 따로 센다 */
 export const isPinkNote = (n: BodyNote): boolean =>
   n.kind === 'added' &&
   (n.after ?? '')

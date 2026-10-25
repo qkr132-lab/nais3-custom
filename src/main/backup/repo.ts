@@ -73,12 +73,15 @@ const SETTINGS_KEYS = [
   'date_folders',
   'save_metadata',
   'scene_extras',
-  // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기, 입은 옷 자동 젖힘, 후타 자동 재조립(+시점·구도) (커스텀)
+  // 복장 — nsfw 조각이 켜지는 장면 목록, 누드면 옷 벗기기, 입은 옷 자동 젖힘, 후타 자동 재조립(+시점·구도),
+  // 눈 감으면 눈 태그 빼기, 알몸일 때 pink nipples (커스텀)
   'outfit_expose_acts',
   'nude_strip_clothes',
   'expose_worn_clothes',
   'futa_reassembly',
-  'futa_view_fix'
+  'futa_view_fix',
+  'eyes_closed_strip',
+  'nude_pink_nipples'
 ] as const
 
 type Row = Record<string, unknown>

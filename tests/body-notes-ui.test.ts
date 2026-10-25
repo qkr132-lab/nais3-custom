@@ -186,7 +186,7 @@ describe('메모 묶기', () => {
 })
 
 describe('판정 보조', () => {
-  it('pink nipples 더함만 따로 센다 (여캐도 받는 고정 규칙)', () => {
+  it('pink nipples 더함만 따로 센다 (여캐도 받는다)', () => {
     expect(isPinkNote(pink(0, 'A'))).toBe(true)
     expect(
       isPinkNote(note({ kind: 'added', where: 'char', after: 'nude, pink nipples, 1girl' }))

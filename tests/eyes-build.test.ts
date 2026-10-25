@@ -23,7 +23,9 @@ import { bodyNotesOfChar } from '../src/renderer/src/lib/body-notes'
 /**
  * 눈 감음이면 카드의 눈 외형 태그를 뺀다 — 요청 조립 전체 경로 (합성 카드·합성 씬만. 사용자 데이터는 쓰지 않는다).
  * 씬 경로(buildSceneRequest)와 메인 탭 경로(buildMainRequest)가 같은 규칙을 쓰고, 뺀 것은 전부 bodyNotes 에 있고,
- * 실행 직전 재조립(refreshScenePrompts · resyncPendingScenes)을 거쳐도 유지된다. 설정은 따로 없다.
+ * 실행 직전 재조립(refreshScenePrompts · resyncPendingScenes)을 거쳐도 유지된다.
+ * 설정 「눈 감으면 눈 태그 빼기」(eyesClosedStrip, 기본 꺼짐)를 켜야 동작한다 — 아래 setup 은 명시적으로 켜 두고,
+ * 맨 아래 describe 가 끈 경우(기본)와 저장값 읽기를 시험한다.
  */
 
 const card = (
@@ -78,6 +80,10 @@ function setup(opts: {
   exposeWorn?: boolean
   reassembly?: boolean
   viewFix?: boolean
+  /** 눈 감으면 눈 태그 빼기 — 이 파일은 눈 감음 시험이라 기본 켬 (실제 기본값은 꺼짐) */
+  eyes?: boolean
+  /** 알몸일 때 pink nipples — 기존 기대(알몸 캐릭터 글)를 그대로 두려고 기본 켬 (실제 기본값은 꺼짐) */
+  pink?: boolean
 }): void {
   useGenerationStore.setState({
     request: { ...DEFAULT_REQUEST, prompt: 'masterpiece', negativePrompt: '' },
@@ -91,6 +97,8 @@ function setup(opts: {
     exposeWorn: opts.exposeWorn ?? true,
     futaReassembly: opts.reassembly ?? true,
     futaViewFix: opts.viewFix ?? true,
+    eyesClosedStrip: opts.eyes ?? true,
+    nudePinkNipples: opts.pink ?? true,
     kinds: {},
     loaded: true
   })
@@ -305,9 +313,9 @@ describe('씬 경로 — 화면에 보이는 메모 (몰래 빼기 금지)', () 
   })
 })
 
-describe('씬 경로 — 다른 설정과 상관없다 (설정이 따로 없다)', () => {
+describe('씬 경로 — 옷 벗기기·젖힘·후타 재조립 설정과 상관없이 따로 켠다', () => {
   it('옷 벗기기·입은 옷 자동 젖힘·후타 재조립을 모두 꺼도 뺀다', () => {
-    setup({ strip: false, exposeWorn: false, reassembly: false })
+    setup({ strip: false, exposeWorn: false, reassembly: false, pink: false })
     const r = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
     expect(prompts(r)).toEqual([GIRL_CLOSED, BOY_CARD])
     expect(r.bodyNotes?.every((n) => n.topic === 'eyes')).toBe(true)
@@ -490,9 +498,114 @@ describe('메인 탭 경로', () => {
     expect(prompts(r)).toEqual([GIRL_CLOSED, BOY_CARD])
   })
 
-  it('설정(옷 벗기기·젖힘·후타 재조립)을 꺼도 뺀다', async () => {
-    setup({ exposeWorn: false, reassembly: false })
+  it('설정(옷 벗기기·젖힘·후타 재조립·pink nipples)을 꺼도 뺀다', async () => {
+    setup({ exposeWorn: false, reassembly: false, pink: false })
     const r = await main('bed, closed eyes')
     expect(prompts(r)).toEqual([GIRL_CLOSED, BOY_CARD])
+  })
+})
+
+describe('설정 「눈 감으면 눈 태그 빼기」 — 기본 꺼짐, 끄면 이 기능이 없을 때와 글자 단위로 같다', () => {
+  it('씬 경로: 끄면 closed eyes 가 있어도 카드 글 그대로 · bodyNotes 에 눈 감음 메모가 없다', () => {
+    setup({ eyes: false })
+    const scene = sceneOf({ prompt: 'bed, closed eyes, kiss' })
+    const r = buildSceneRequest(scene)
+    expect(prompts(r)).toEqual([GIRL_CARD, BOY_CARD])
+    expect((r.bodyNotes ?? []).filter((n) => n.topic === 'eyes')).toEqual([])
+    // 같은 씬을 켜면 뺀다 — 끈 것과 켠 것이 갈린다
+    setup({ eyes: true })
+    expect(prompts(buildSceneRequest(scene))).toEqual([GIRL_CLOSED, BOY_CARD])
+  })
+
+  it('씬 경로: 끄면 상대 태그·캐릭터 태그·자리 태그의 closed eyes 도 읽지 않는다', () => {
+    setup({
+      eyes: false,
+      cards: [
+        card(GIRL, GIRL_CARD, 'target'),
+        card(BOY, BOY_CARD, 'source', { partnerTags: 'closed eyes' })
+      ]
+    })
+    expect(prompts(buildSceneRequest(sceneOf({ prompt: 'bed' })))).toEqual([
+      `${GIRL_CARD}, closed eyes`,
+      BOY_CARD
+    ])
+    expect(
+      prompts(buildSceneRequest(sceneOf({ prompt: 'bed', sourceTags: 'eyes closed' })))
+    ).toEqual([`${GIRL_CARD}, closed eyes`, `${BOY_CARD}, eyes closed`])
+  })
+
+  it('메인 탭 경로: 끄면 눈 태그를 빼지 않고 메모도 없다', async () => {
+    setup({ eyes: false })
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: 'bed, with her eyes closed' },
+      promptSplitEnabled: false
+    })
+    const r = await useGenerationStore.getState().buildMainRequest()
+    expect(prompts(r)).toEqual([GIRL_CARD, BOY_CARD])
+    expect('bodyNotes' in r).toBe(false)
+  })
+
+  it('끄면 대기 항목 다시 만들기도 눈 태그를 빼지 않는다 (설정을 끄면 대기 중 씬이 되돌아온다)', async () => {
+    setup({ eyes: true })
+    const scene = sceneOf({ prompt: 'bed, closed eyes, kiss' })
+    const queued = buildSceneRequest(scene)
+    expect(prompts(queued)).toEqual([GIRL_CLOSED, BOY_CARD])
+    invoke.mockReset()
+    let updates: { id: string; request: GenerationRequest }[] = []
+    invoke.mockImplementation((channel: string, arg?: unknown): unknown => {
+      if (channel === 'queue:pending') return { items: [{ id: 'q0', request: queued }] }
+      if (channel === 'queue:updatePending') {
+        updates = (arg as { updates: typeof updates }).updates
+        return undefined
+      }
+      throw new Error(`예상하지 못한 IPC: ${channel}`)
+    })
+    useScenesStore.setState({ scenes: [scene] })
+    useOutfitsStore.setState({ eyesClosedStrip: false })
+    await useScenesStore.getState().resyncPendingScenes()
+    expect(prompts(updates[0].request)).toEqual([GIRL_CARD, BOY_CARD])
+    expect('bodyNotes' in updates[0].request).toBe(false)
+  })
+})
+
+describe('저장값 읽기 — eyes_closed_strip (저장값 없음 → 꺼짐, 1 → 켬, 0 → 꺼짐)', () => {
+  const loadWith = async (value: string | null): Promise<boolean> => {
+    invoke.mockReset()
+    invoke.mockImplementation((channel: string, arg?: unknown): unknown => {
+      if (channel === 'outfits:list') return { items: [] }
+      if (channel === 'settings:get') {
+        return { value: (arg as { key: string }).key === 'eyes_closed_strip' ? value : null }
+      }
+      throw new Error(`예상하지 못한 IPC: ${channel}`)
+    })
+    await useOutfitsStore.getState().load()
+    return useOutfitsStore.getState().eyesClosedStrip
+  }
+
+  it('저장값이 없으면 꺼짐, 1 일 때만 켜짐, 0 이나 다른 값은 꺼짐', async () => {
+    expect(await loadWith(null)).toBe(false)
+    expect(await loadWith('1')).toBe(true)
+    expect(await loadWith('0')).toBe(false)
+    expect(await loadWith('')).toBe(false)
+    expect(await loadWith('true')).toBe(false)
+  })
+
+  it('스토어 처음 값은 꺼짐이고, 켜고 끄면 저장값 1·0 을 보낸다', () => {
+    expect(useOutfitsStore.getInitialState().eyesClosedStrip).toBe(false)
+    invoke.mockReset()
+    const sent: { key: string; value: string }[] = []
+    invoke.mockImplementation((channel: string, arg?: unknown): unknown => {
+      if (channel === 'settings:set') {
+        sent.push(arg as { key: string; value: string })
+        return undefined
+      }
+      throw new Error(`예상하지 못한 IPC: ${channel}`)
+    })
+    useOutfitsStore.getState().setEyesClosedStrip(true)
+    useOutfitsStore.getState().setEyesClosedStrip(false)
+    expect(sent).toEqual([
+      { key: 'eyes_closed_strip', value: '1' },
+      { key: 'eyes_closed_strip', value: '0' }
+    ])
   })
 })

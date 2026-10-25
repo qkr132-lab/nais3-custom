@@ -35,6 +35,7 @@ import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
+import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { ScenePlacementDialog } from './scene-placement-dialog'
@@ -681,6 +682,8 @@ function PositionPanel({
   const [exposeWorn] = useExposeWorn()
   const [futaReassembly] = useFutaReassembly()
   const [futaViewFix] = useFutaViewFix()
+  const [eyesClosedStrip] = useEyesClosedStrip()
+  const [nudePinkNipples] = useNudePinkNipples()
   const outfitItems = useOutfitsStore((s) => s.items)
   const exposeActs = useOutfitsStore((s) => s.acts)
   const previewRequest = useMemo(
@@ -693,6 +696,8 @@ function PositionPanel({
       exposeWorn,
       futaReassembly,
       futaViewFix,
+      eyesClosedStrip,
+      nudePinkNipples,
       outfitItems,
       exposeActs,
       items,
@@ -709,7 +714,7 @@ function PositionPanel({
     ]
   )
   const exposeNotes = previewRequest && exposeWorn ? (previewRequest.exposeNotes ?? []) : undefined
-  // 후타 재조립이 꺼져 있어도 메모가 올 수 있다 (알몸에 붙는 pink nipples 는 설정이 없다) — 온 것은 그대로 보인다
+  // 후타 재조립이 꺼져 있어도 메모가 올 수 있다 (알몸 pink nipples·눈 감음은 설정이 따로 있다) — 온 것은 그대로 보인다
   const bodyNotes = previewRequest ? (previewRequest.bodyNotes ?? []) : undefined
   const futaCharIds = previewRequest
     ? (previewRequest.futaPlan?.chars ?? []).map((c) => c.id)

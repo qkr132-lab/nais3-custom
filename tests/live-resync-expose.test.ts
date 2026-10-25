@@ -51,6 +51,16 @@ describe('생성 중 편집 자동 반영 — 입은 옷 자동 젖힘', () => {
     expect(resync).toHaveBeenCalledTimes(2)
   })
 
+  it('눈 감으면 눈 태그 빼기·알몸일 때 pink nipples 설정을 바꾸면 다시 만든다 (둘 다 기본 꺼짐)', () => {
+    waitingQueue()
+    useOutfitsStore.setState({ eyesClosedStrip: !useOutfitsStore.getState().eyesClosedStrip })
+    vi.advanceTimersByTime(600)
+    expect(resync).toHaveBeenCalledTimes(1)
+    useOutfitsStore.setState({ nudePinkNipples: !useOutfitsStore.getState().nudePinkNipples })
+    vi.advanceTimersByTime(600)
+    expect(resync).toHaveBeenCalledTimes(2)
+  })
+
   it('복장을 고치면 다시 만든다', () => {
     waitingQueue()
     useOutfitsStore.setState({

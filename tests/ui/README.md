@@ -120,7 +120,9 @@ request builder); `?mode=placement` is the real placement dialog with synthetic 
 `?mode=picker&card=1|3` is the real outfit picker (`&notes=0` = scene unknown); `?mode=outfit` is the
 real outfit tab with the 「카드 글에서 읽은 옷」 section; `?mode=settings` is the real settings dialog
 opened on the 생성 tab (it also checks the two futa switches 「후타 자동 재조립」 and 「후타 시점·구도 정리」;
-`&futa=0` starts with the first one off so the second one must be disabled). In the browser console
+`&futa=0` starts with the first one off so the second one must be disabled; and the two default-off switches
+「알몸일 때 pink nipples」 and 「눈 감으면 눈 태그 빼기」, which this page turns on so the real request builder
+shows their notes — `&pink=0` / `&eyes=0` start them off). In the browser console
 `await exposeFixture.check()` walks the DOM of the current mode and returns a pass/fail list (no
 screenshots needed).
 
