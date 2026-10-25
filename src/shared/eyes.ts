@@ -337,8 +337,8 @@ const WORN_ELSEWHERE =
 const PEEK =
   /^(?:peek|peeks|peeking|peeked|through|between|fingers|gap|gaps|spread|hair|bangs|fringe)$/
 const COVER_VERB = /^(?:cover|covers|covered|covering)$/
-/** 눈을 덮는 물건·손 — hands over her eyes · bandages over eyes · penis over eyes (dick/cock/arm over eyes 는 단보루에 없는 표기라 읽지 않는다) */
-const COVER_THING = /^(?:hand|hands|bandage|bandages|gauze|penis)$/
+/** 눈을 덮는 물건·손 — hands over her eyes · bandages over eyes · penis over eyes · hat/helmet over eyes (dick/cock/arm over eyes 는 단보루에 없는 표기라 읽지 않는다) */
+const COVER_THING = /^(?:hand|hands|bandage|bandages|gauze|penis|hat|helmet)$/
 /** eyes covered 뒤에서 가린 것이 아니라 묻은 것을 뜻하는 말 — covered in tears · covered with cum */
 const COVERED_STAIN = /^(?:in|with)$/
 

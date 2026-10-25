@@ -373,8 +373,7 @@ describe('눈이 안 보임 읽기 — 눈 가림', () => {
       'she covers her eyes peeking through her fingers',
       'hair over eyes',
       'hair covering her eyes',
-      'hat over eyes',
-      'helmet over eyes',
+      'hat over one eye',
       'penis over one eye',
       'eyes in shadow',
       'eyes out of frame',
@@ -1490,9 +1489,12 @@ describe('검수 반영 — 눈 가림 주인 · 풀기 판정', () => {
     }
   })
 
-  it('음경이 눈을 덮은 것은 penis over eyes 만 읽는다 — dick/cock/arm over eyes 는 단보루에 없는 표기라 지원하지 않는다', () => {
+  it('음경·모자·투구가 두 눈을 덮은 것(penis/hat/helmet over eyes)은 눈 가림 — dick/cock/arm over eyes 는 단보루에 없는 표기라 지원하지 않는다', () => {
     expect(evidenceOf(['penis over eyes'])).toBe('covered:penis over eyes')
-    for (const text of ['dick over eyes', 'cock over eyes', 'arm over eyes', 'hat over eyes']) {
+    expect(evidenceOf(['hat over eyes'])).toBe('covered:hat over eyes')
+    expect(evidenceOf(['helmet over eyes'])).toBe('covered:helmet over eyes')
+    expect(evidenceOf(['hat over one eye'])).toBe('-')
+    for (const text of ['dick over eyes', 'cock over eyes', 'arm over eyes']) {
       expect(evidenceOf([text]), text).toBe('-')
     }
   })
