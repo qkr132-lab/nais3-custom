@@ -18,7 +18,8 @@ import {
  */
 
 const isWebp = (buf: Buffer): boolean =>
-  buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP'
+  buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+  buf.subarray(8, 12).toString('latin1') === 'WEBP'
 
 describe('R2 업로드 이름', () => {
   it('그림은 확장자를 .webp로, 나머지는 그대로', () => {

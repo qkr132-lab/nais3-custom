@@ -291,9 +291,7 @@ export async function pickCharacterBackup(): Promise<BackupPreview> {
       negativePrompt: c.negative_prompt,
       center: { x: c.center_x, y: c.center_y },
       role: (c.role === 'source' || c.role === 'target' ? c.role : null) as
-        | 'source'
-        | 'target'
-        | null,
+        'source' | 'target' | null,
       partnerTags: c.partner_tags ?? ''
     })),
     backup.characters,
@@ -369,9 +367,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       negativePrompt: c.negative_prompt,
       center: { x: c.center_x, y: c.center_y },
       role: (c.role === 'source' || c.role === 'target' ? c.role : null) as
-        | 'source'
-        | 'target'
-        | null,
+        'source' | 'target' | null,
       partnerTags: c.partner_tags ?? ''
     })),
     backup.characters,
@@ -411,7 +407,8 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
       const id = folderIds.get(f.name)
       const parentId = f.parent ? folderIds.get(f.parent) : null
       if (id == null) continue
-      if (f.color) db.prepare('UPDATE character_folders SET color = ? WHERE id = ?').run(f.color, id)
+      if (f.color)
+        db.prepare('UPDATE character_folders SET color = ? WHERE id = ?').run(f.color, id)
       if (parentId != null && parentId !== id) {
         db.prepare('UPDATE character_folders SET parent_id = ? WHERE id = ?').run(parentId, id)
       }
@@ -566,10 +563,7 @@ export function importCharacterBackup(filePath: string, mode: ImportMode): Impor
     restoredEntries++
   }
 
-  setSetting(
-    EXTRAS_KEY,
-    JSON.stringify({ ...extras, additions, entries } satisfies SceneExtras)
-  )
+  setSetting(EXTRAS_KEY, JSON.stringify({ ...extras, additions, entries } satisfies SceneExtras))
 
   return {
     created: plan.create.length,

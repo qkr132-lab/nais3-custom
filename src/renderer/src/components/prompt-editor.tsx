@@ -181,7 +181,6 @@ export function PromptEditor({
             onBlur={completion.onBlur}
           />
 
-
           <button
             type="button"
             className="absolute right-1 top-1 rounded p-1 text-muted hover:bg-surface-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"

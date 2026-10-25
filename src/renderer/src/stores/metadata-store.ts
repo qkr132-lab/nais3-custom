@@ -1,10 +1,6 @@
 import { create } from 'zustand'
 import type { ImageMetadata, UcPresetIndex } from '@shared/types'
-import {
-  splitQualityTags,
-  UC_PRESETS_V45_FULL,
-  UC_PRESETS_V45_WEB_FULL
-} from '@shared/nai-presets'
+import { splitQualityTags, UC_PRESETS_V45_FULL, UC_PRESETS_V45_WEB_FULL } from '@shared/nai-presets'
 import { imageUrl } from '../lib/constants'
 import { useCharactersStore } from './characters-store'
 import { mergePromptParts, useGenerationStore } from './generation-store'

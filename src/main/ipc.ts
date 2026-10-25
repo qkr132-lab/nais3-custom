@@ -626,10 +626,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
             : kinds.includes('body')
               ? 'body'
               : 'unknown'
-      const label = tags
-        .map(tagKo)
-        .filter(Boolean)
-        .join(', ')
+      const label = tags.map(tagKo).filter(Boolean).join(', ')
       return { token, kind, label }
     })
     return { tokens, hasData: hasClothingData() }

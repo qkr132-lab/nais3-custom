@@ -1,11 +1,13 @@
 # NAIS3 scene censor controls
 
 ## Atmosphere
+
 Extend the existing compact Korean image studio. Preserve Pretendard, theme variables,
 Lucide icons and Radix controls. Direction: native NAIS3 utility UI; variance 2,
 motion 1, density 7. Scope is a batch toolbar, card status and settings dialog.
 
 ## Color
+
 Use the existing runtime theme, never hard-code colors in new components.
 Light / dark defaults from assets/main.css:
 paper #fafafa / #0f0f10; surface #f1f1f2 / #161618;
@@ -16,17 +18,20 @@ Each name maps to --name and its Tailwind semantic utility. Accent-soft and
 accent/10 backgrounds communicate selected state with text and checkmarks too.
 
 ## Typography
+
 Use --font-ui (Pretendard Variable and Korean system fallbacks). Inherit --ui-scale.
 Card status 11px medium; helper text 12px regular; controls 13px medium;
 dialog title 15px semibold. Monospace only for expandable raw prompt preview.
 
 ## Spacing
+
 Tailwind base unit 4px: 0, 0.5 (2px), 1, 1.5 (6px), 2, 2.5 (10px), 3, 4, 5, 6.
 Icons 12/14/16px; touch/control heights 28/32/36px. Border 1px, focus ring 2px.
 Dialog max width 460px (shared primitive); max height 85dvh with internal scroll.
 Card footer gains a 28px status row outside the image; card itself keeps its aspect ratio.
 
 ## Components
+
 Toolbar uses shared small Button. Censor action is adjacent to selection count.
 Card status is a full-width footer button, muted when off and accent when on;
 long summaries truncate with full accessible label/title. It never covers the image.
@@ -38,13 +43,16 @@ Hover surface-2, keyboard focus accent ring, disabled shared Button opacity.
 Save error is inline and retains the draft. Empty selection disables batch apply.
 
 ## Motion
+
 No new animation. Preserve existing shared dialog behavior. No layout animation added.
 
 ## Depth
+
 Border and tonal surfaces; shared modal overlay/shadow only. No new gradients,
 decorative imagery, pills over images or standalone color system.
 
 ## Tag completion extension
+
 Use the same theme and Pretendard. English tags use the existing mono stack;
 Korean meanings and controls use UI type at 12px/13px. Semantic type colors from
 the existing editor: artist #e05c50, character #5c9e6e, copyright #b07fd8,
@@ -64,6 +72,7 @@ row identity check. Escape dismisses only the suggestion layer. Ctrl+Space opens
 search/history; user-confirmed insertion retains native undo and an undo toast.
 
 ## Censor tags and unified suggestions
+
 Censor option rows contain a checkbox and, once a part is applied, a per-part weight
 control (minus / number / plus / reset; default 1.0, range 0.1 to 5). A part left at
 1.0 is added without a weight; any other value wraps only that part's tag as
@@ -73,6 +82,7 @@ Tag suggestions use a single list: relevance first, then recent/frequent history
 deduplicated by canonical tag. Remove the search/recent/frequent tab navigation.
 
 ## Character subfolder actions
+
 Keep the compact native NAIS3 layout (variance 2, motion 1, density 7).
 Root toolbar shows a labelled FolderPlus button. Each root folder row has an
 always-visible 28px-high, 12px-label subfolder button beside its item action.

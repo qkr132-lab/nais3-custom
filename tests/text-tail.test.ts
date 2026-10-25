@@ -62,7 +62,9 @@ describe('Text: 블록은 어디에 적어도 전송 프롬프트 맨 끝으로'
       }
     )
     expect(c.promptParts!.additional).toBe('')
-    expect(c.promptParts!.detail).toMatch(/completely white censored penis\nText: PIZZA MOZZARELLA♪$/)
+    expect(c.promptParts!.detail).toMatch(
+      /completely white censored penis\nText: PIZZA MOZZARELLA♪$/
+    )
     expect(c.prompt).toMatch(/completely white censored penis\nText: PIZZA MOZZARELLA♪$/)
   })
 
