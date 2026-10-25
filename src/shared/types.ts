@@ -1155,7 +1155,10 @@ export interface IpcInvokeMap {
   'r2:cancelUpload': { req: void; res: void }
   'r2:clearUploadHistory': { req: void; res: void }
   // R2 둘러보기 (커스텀) — 미리보기는 userData/r2-cache 사본 경로, 내려받기는 대화상자로 위치 선택
-  'r2:preview': { req: { bucket: string; key: string; lastModified: string }; res: { path: string } }
+  'r2:preview': {
+    req: { bucket: string; key: string; lastModified: string }
+    res: { path: string }
+  }
   /** 파일 하나면 저장 대화상자, 아니면 폴더 선택 → base 기준 상대 경로로 저장. 폴더는 안의 전부 */
   'r2:download': {
     req: { bucket: string; keys: string[]; folders: string[]; base: string }

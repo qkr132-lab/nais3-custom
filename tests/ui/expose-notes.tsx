@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- 시험 화면 전용 파일: 컴포넌트를 내보내지 않고 바로 화면에 그린다 */
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type {
