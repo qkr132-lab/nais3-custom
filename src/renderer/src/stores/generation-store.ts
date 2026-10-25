@@ -361,7 +361,7 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
   const sexes = enabled.map((c) => characterSex(c.role, c.prompt))
   // 몸 (음경·음부·가슴) — 카드의 futanari 로 후타를 읽는다. 후타 재조립을 끄면 후타를 읽지 않는다
   const futaOn = useOutfitsStore.getState().futaReassembly
-  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
+  // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
   const eyesOn = useOutfitsStore.getState().eyesClosedStrip
   const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
   const readings = enabled.map((c) => readBody(c.role, [c.prompt], futaOn))
@@ -456,12 +456,17 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       enabled: stripOnNude,
       kindOf
     })
-    // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그(contexts)에 closed eyes 가 있을 때.
-    // 설정 「눈 감으면 눈 태그 빼기」가 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다. 후타는 her/his 문장의 성별로 거르지 않는다
+    // 눈이 안 보이면(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈·기호 눈·눈 상태·시선)를 뺀다 (커스텀) —
+    // 이 캐릭터에게 걸린 장면 태그(contexts: 메인 프롬프트는 씬 전체 글, 상대 태그는 이 캐릭터만의 글)나 지금 입은 복장의 눈 가림 물건에 근거가 있을 때.
+    // 설정 「눈이 안 보이면 눈 태그 빼기」가 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다. 후타는 her/his 문장의 성별로 거르지 않는다
     const eyes = stripEyesWhenClosed({
       enabled: eyesOn,
       card: dressed.card,
-      contexts,
+      contexts: {
+        scene: c.role === 'target' || !anyRole ? [baseRequest.prompt] : [],
+        char: [partnerTagsFor(c.role, givers, c.id)]
+      },
+      outfit: dressed.outfit,
       sex: readings[index].body.futa ? null : sexes[index],
       who: { index, name: c.name, id: c.id }
     })

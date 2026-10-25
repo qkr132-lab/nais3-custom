@@ -24,7 +24,7 @@ import { bodyNotesOfChar } from '../src/renderer/src/lib/body-notes'
  * 눈 감음이면 카드의 눈 외형 태그를 뺀다 — 요청 조립 전체 경로 (합성 카드·합성 씬만. 사용자 데이터는 쓰지 않는다).
  * 씬 경로(buildSceneRequest)와 메인 탭 경로(buildMainRequest)가 같은 규칙을 쓰고, 뺀 것은 전부 bodyNotes 에 있고,
  * 실행 직전 재조립(refreshScenePrompts · resyncPendingScenes)을 거쳐도 유지된다.
- * 설정 「눈 감으면 눈 태그 빼기」(eyesClosedStrip, 기본 꺼짐)를 켜야 동작한다 — 아래 setup 은 명시적으로 켜 두고,
+ * 설정 「눈이 안 보이면 눈 태그 빼기」(eyesClosedStrip, 기본 꺼짐)를 켜야 동작한다 — 아래 setup 은 명시적으로 켜 두고,
  * 맨 아래 describe 가 끈 경우(기본)와 저장값 읽기를 시험한다.
  */
 
@@ -80,7 +80,7 @@ function setup(opts: {
   exposeWorn?: boolean
   reassembly?: boolean
   viewFix?: boolean
-  /** 눈 감으면 눈 태그 빼기 — 이 파일은 눈 감음 시험이라 기본 켬 (실제 기본값은 꺼짐) */
+  /** 눈이 안 보이면 눈 태그 빼기 — 이 파일은 눈 감음 시험이라 기본 켬 (실제 기본값은 꺼짐) */
   eyes?: boolean
   /** 알몸일 때 pink nipples — 기존 기대(알몸 캐릭터 글)를 그대로 두려고 기본 켬 (실제 기본값은 꺼짐) */
   pink?: boolean
@@ -201,7 +201,7 @@ describe('씬 경로 — 어느 캐릭터에게 걸린 장면 태그인가 (옷 
   })
 })
 
-describe('씬 경로 — 얼굴 인셋 자리는 그 자리 태그 기준', () => {
+describe('씬 경로 — 얼굴 인셋 자리도 몸 자리와 같은 근거를 받는다', () => {
   const inset = (slotTags: Record<number, string>): void =>
     useSceneExtrasStore.setState({
       additionsEnabled: true,
@@ -225,16 +225,44 @@ describe('씬 경로 — 얼굴 인셋 자리는 그 자리 태그 기준', () =
     })
   beforeEach(() => setup({}))
 
-  it('씬 글의 closed eyes 는 몸 자리에만 걸리고, 얼굴 인셋 자리는 눈 색이 남는다', () => {
+  it('씬 글의 closed eyes 는 몸 자리와 얼굴 인셋 자리 모두에서 눈 색을 뺀다', () => {
     inset({ 2: 'close-up, portrait' })
     const r = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
     // 캐릭터 순서대로 — 같은 카드가 앉은 자리 둘이 이어지고 하는쪽이 뒤에 온다
-    expect(prompts(r)).toEqual([
-      GIRL_CLOSED,
-      // 얼굴 인셋: 자리 태그만 본다
-      `${GIRL_CARD}, close-up, portrait`,
+    expect(prompts(r)).toEqual([GIRL_CLOSED, `${GIRL_CLOSED}, close-up, portrait`, BOY_CARD])
+    // 메모는 자리(순서)마다 따로 — 인셋 자리(순서 1)에도 있다
+    const notes = r.bodyNotes ?? []
+    expect(new Set(notes.map((n) => n.charIndex))).toEqual(new Set([0, 1]))
+    expect(notes.every((n) => n.kind === 'removed' && n.evidence === 'closed eyes')).toBe(true)
+  })
+
+  it('하는쪽 칸·당하는쪽 칸·상대 태그의 근거도 인셋 자리가 받는다', () => {
+    inset({ 2: 'close-up, portrait' })
+    const t = buildSceneRequest(sceneOf({ targetTags: 'sleeping' }))
+    expect(prompts(t)).toEqual([
+      `${GIRL_CLOSED}, sleeping`,
+      `${GIRL_CLOSED}, close-up, portrait, sleeping`,
       BOY_CARD
     ])
+  })
+
+  it('인셋 자리 자체 글에 눈 뜬 표현이 분명하면 더 좁은 자리의 말이 이긴다 — 안 바꿈 메모', () => {
+    inset({ 2: 'close-up, portrait, rolling eyes' })
+    const r = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
+    expect(prompts(r)).toEqual([
+      GIRL_CLOSED,
+      `${GIRL_CARD}, close-up, portrait, rolling eyes`,
+      BOY_CARD
+    ])
+    const kept = (r.bodyNotes ?? []).filter((n) => n.kind === 'kept')
+    expect(kept.map((n) => [n.charIndex, n.before, n.reason])).toEqual([
+      [1, 'blue eyes', '눈 감음 — 인셋 자리에 눈 뜬 표현(rolling eyes)이 있어 그대로 둠'],
+      [1, 'slit pupils', '눈 감음 — 인셋 자리에 눈 뜬 표현(rolling eyes)이 있어 그대로 둠']
+    ])
+    // 몸 자리(순서 0)는 평소대로 뺀다
+    expect(
+      (r.bodyNotes ?? []).filter((n) => n.kind === 'removed').every((n) => n.charIndex === 0)
+    ).toBe(true)
   })
 
   it('인셋 자리에 closed eyes 를 적으면 그 자리만 뺀다', () => {
@@ -313,6 +341,230 @@ describe('씬 경로 — 화면에 보이는 메모 (몰래 빼기 금지)', () 
   })
 })
 
+describe('씬 경로 — 잠듦 · 눈 가림 · 입은 복장', () => {
+  const BLINDFOLD_OUTFIT = {
+    id: 9,
+    name: '합성 복장',
+    negative: '',
+    pieces: [{ id: 'a', name: '눈가리개 한 벌', tags: 'black blindfold, white dress', on: true }]
+  }
+  beforeEach(() => setup({}))
+
+  it('잠듦: 씬 글의 sleeping 은 당하는쪽의 눈 외형을 빼고, 메모의 까닭이 「잠듦」이다', () => {
+    const r = buildSceneRequest(sceneOf({ prompt: 'bed, sleeping' }))
+    expect(prompts(r)).toEqual([GIRL_CLOSED, BOY_CARD])
+    expect((r.bodyNotes ?? []).map((n) => [n.cause, n.evidence, n.before, n.reason])).toEqual([
+      ['asleep', 'sleeping', 'blue eyes', '잠듦 — 눈 색 뺌'],
+      ['asleep', 'sleeping', 'slit pupils', '잠듦 — 동공 뺌']
+    ])
+    // 영어 문장도 읽는다
+    const s = buildSceneRequest(sceneOf({ prompt: 'bed, she is fast asleep' }))
+    expect(prompts(s)).toEqual([GIRL_CLOSED, BOY_CARD])
+  })
+
+  it('잠듦이 아닌 표현은 건드리지 않는다 — sleepy · waking up · half-asleep · sleeping bag', () => {
+    for (const text of ['sleepy', 'waking up', 'half-asleep', 'sleeping bag', 'sleepwear']) {
+      const r = buildSceneRequest(sceneOf({ prompt: `bed, ${text}` }))
+      expect(prompts(r), text).toEqual([GIRL_CARD, BOY_CARD])
+      expect(r.bodyNotes, text).toBeUndefined()
+    }
+  })
+
+  it('눈 가림: 하는쪽 칸의 blindfold 는 하는쪽에게, 씬 글의 것은 당하는쪽에게', () => {
+    const src = buildSceneRequest(sceneOf({ sourceTags: 'blindfold' }))
+    expect(prompts(src)).toEqual([GIRL_CARD, `${BOY_CLOSED}, blindfold`])
+    expect(src.bodyNotes?.map((n) => [n.cause, n.reason])).toEqual([
+      ['covered', '눈 가림 — 눈 색 뺌']
+    ])
+    const scn = buildSceneRequest(sceneOf({ prompt: 'bed, blindfolded' }))
+    expect(prompts(scn)).toEqual([GIRL_CLOSED, BOY_CARD])
+    // 들어 올렸거나 벗은 눈가리개는 아니다
+    for (const text of ['blindfold lift', 'blindfold removed', 'blindfold around neck']) {
+      const r = buildSceneRequest(sceneOf({ prompt: `bed, blindfold, ${text}` }))
+      expect(prompts(r), text).toEqual([GIRL_CARD, BOY_CARD])
+    }
+  })
+
+  it('xd 의 감은 눈 · penis over eyes 의 눈 가림 — 눈 상태·시선까지 뺀다', () => {
+    setup({
+      cards: [
+        card(GIRL, `${GIRL_CARD}, half-closed eyes, eyes rolled back, looking at viewer`, 'target'),
+        card(BOY, BOY_CARD, 'source')
+      ]
+    })
+    const closed = buildSceneRequest(sceneOf({ prompt: 'bed, xd' }))
+    expect(prompts(closed)).toEqual([GIRL_CLOSED, BOY_CARD])
+    expect((closed.bodyNotes ?? []).map((n) => [n.cause, n.evidence, n.before, n.reason])).toEqual([
+      [undefined, 'xd', 'blue eyes', '눈 감음 — 눈 색 뺌'],
+      [undefined, 'xd', 'slit pupils', '눈 감음 — 동공 뺌'],
+      [undefined, 'xd', 'half-closed eyes', '눈 감음 — 눈 상태 뺌'],
+      [undefined, 'xd', 'eyes rolled back', '눈 감음 — 눈 상태 뺌'],
+      [undefined, 'xd', 'looking at viewer', '눈 감음 — 시선 뺌']
+    ])
+    const covered = buildSceneRequest(sceneOf({ prompt: 'bed, penis over eyes' }))
+    expect(prompts(covered)).toEqual([GIRL_CLOSED, BOY_CARD])
+    expect((covered.bodyNotes ?? []).every((n) => n.cause === 'covered')).toBe(true)
+    expect(covered.bodyNotes?.[0]).toMatchObject({
+      evidence: 'penis over eyes',
+      reason: '눈 가림 — 눈 색 뺌'
+    })
+    // 한쪽 눈만 덮은 표현은 눈이 보인다
+    const oneEye = buildSceneRequest(sceneOf({ prompt: 'bed, penis over one eye' }))
+    expect(oneEye.characterPrompts[0].prompt).toContain('blue eyes')
+    expect(oneEye.bodyNotes).toBeUndefined()
+  })
+
+  it('입은 복장의 blindfold 도 근거 — 메모의 근거에 「복장」이 보인다', () => {
+    setup({
+      cards: [card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }), card(BOY, BOY_CARD, 'source')]
+    })
+    useOutfitsStore.setState({ items: [BLINDFOLD_OUTFIT] as never })
+    const r = buildSceneRequest(sceneOf())
+    expect(prompts(r)).toEqual([`${GIRL_CLOSED}, black blindfold, white dress`, BOY_CARD])
+    expect(r.bodyNotes?.map((n) => [n.cause, n.evidence, n.before, n.reason])).toEqual([
+      ['covered', '복장 black blindfold', 'blue eyes', '눈 가림 — 눈 색 뺌'],
+      ['covered', '복장 black blindfold', 'slit pupils', '눈 가림 — 동공 뺌']
+    ])
+    // 씬에서 눈가리개를 들어 올렸다고 적으면 복장의 눈가리개도 근거가 아니다
+    const lifted = buildSceneRequest(sceneOf({ prompt: 'bed, blindfold lift' }))
+    expect(prompts(lifted)[0]).toBe(`${GIRL_CARD}, black blindfold, white dress`)
+    expect(lifted.bodyNotes).toBeUndefined()
+  })
+
+  it('복장에서도 꺼진 조각 · when 으로 안 켜진 조각 · 벗겨진 조각의 눈 가림은 근거가 아니다', () => {
+    setup({
+      cards: [card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }), card(BOY, BOY_CARD, 'source')]
+    })
+    // 꺼진 조각(on false)과, 드러나는 장면이어야 켜지는 nsfw 조각(when) — 이 씬에서는 둘 다 입지 않는다
+    useOutfitsStore.setState({
+      items: [
+        {
+          id: 9,
+          name: '합성 복장',
+          negative: '',
+          pieces: [
+            { id: 'a', name: '꺼진 눈가리개', tags: 'black blindfold', on: false },
+            { id: 'b', name: '조건 조각', tags: 'sleep mask', on: false, when: 'nsfw-lower' },
+            { id: 'c', name: '드레스', tags: 'white dress', on: true }
+          ]
+        }
+      ] as never
+    })
+    const off = buildSceneRequest(sceneOf())
+    expect(prompts(off)).toEqual([`${GIRL_CARD}, white dress`, BOY_CARD])
+    expect(off.bodyNotes).toBeUndefined()
+    // 옷 벗기기로 벗겨진 조각 — 눈을 덮는 문장은 벗기면서 사라지니 근거가 아니고, 얼굴 장비인 눈가리개는 남아 근거다
+    setup({
+      strip: true,
+      cards: [card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }), card(BOY, BOY_CARD, 'source')]
+    })
+    useSceneExtrasStore.setState({ nudeStrips: { 1: { 4: true } } })
+    useOutfitsStore.setState({
+      items: [
+        {
+          id: 9,
+          name: '합성 복장',
+          negative: '',
+          pieces: [{ id: 'a', name: '가림', tags: 'covered eyes, white dress', on: true }]
+        }
+      ] as never
+    })
+    const nude = buildSceneRequest(sceneOf())
+    expect(nude.characterPrompts[0].prompt).toContain('blue eyes')
+    expect(nude.characterPrompts[0].prompt).not.toContain('covered eyes')
+    expect(nude.bodyNotes?.some((n) => n.topic === 'eyes') ?? false).toBe(false)
+    useOutfitsStore.setState({
+      items: [
+        {
+          id: 9,
+          name: '합성 복장',
+          negative: '',
+          pieces: [{ id: 'a', name: '가림', tags: 'black blindfold, white dress', on: true }]
+        }
+      ] as never
+    })
+    const kept = buildSceneRequest(sceneOf())
+    expect(kept.characterPrompts[0].prompt).not.toContain('blue eyes')
+    expect(kept.characterPrompts[0].prompt).toContain('black blindfold')
+    expect(kept.bodyNotes?.find((n) => n.topic === 'eyes')).toMatchObject({
+      cause: 'covered',
+      evidence: '복장 black blindfold'
+    })
+  })
+
+  it('복장의 눈가리개와 카드의 눈 색 — 카드 원본은 그대로이고 복장이 없는 캐릭터는 영향이 없다', () => {
+    setup({
+      cards: [card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }), card(BOY, BOY_CARD, 'source')]
+    })
+    useOutfitsStore.setState({ items: [BLINDFOLD_OUTFIT] as never })
+    const r = buildSceneRequest(sceneOf())
+    expect(r.characterPrompts[1].prompt).toBe(BOY_CARD)
+    expect(useCharactersStore.getState().items[0].prompt).toBe(GIRL_CARD)
+  })
+})
+
+describe('씬 경로 — 더 좁은 글의 눈 뜬 표현이 이긴다', () => {
+  beforeEach(() => setup({}))
+
+  it('당하는쪽 칸에 눈 뜬 표현이 있으면 씬 전체 글의 closed eyes 로 빼지 않는다 — 안 바꿈 메모', () => {
+    const r = buildSceneRequest(
+      sceneOf({ prompt: 'bed, closed eyes', targetTags: 'looking at viewer' })
+    )
+    expect(prompts(r)).toEqual([`${GIRL_CARD}, looking at viewer`, BOY_CARD])
+    expect((r.bodyNotes ?? []).map((n) => [n.kind, n.before, n.reason])).toEqual([
+      [
+        'kept',
+        'blue eyes',
+        '눈 감음 — 하는쪽·당하는쪽 칸에 눈 뜬 표현(looking at viewer)이 있어 그대로 둠'
+      ],
+      [
+        'kept',
+        'slit pupils',
+        '눈 감음 — 하는쪽·당하는쪽 칸에 눈 뜬 표현(looking at viewer)이 있어 그대로 둠'
+      ]
+    ])
+  })
+
+  it('이 씬에서만 얹는 캐릭터 태그에 눈 뜬 표현이 있어도 같다', () => {
+    useSceneExtrasStore.setState({
+      additionsEnabled: true,
+      additions: {
+        1: {
+          4: {
+            characterIds: [GIRL, BOY],
+            charRefIds: [],
+            vibeIds: [],
+            charTags: { [GIRL]: 'wide-eyed' }
+          }
+        }
+      }
+    })
+    const r = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes' }))
+    expect(prompts(r)).toEqual([`${GIRL_CARD}, wide-eyed`, BOY_CARD])
+    expect((r.bodyNotes ?? []).every((n) => n.kind === 'kept' && n.topic === 'eyes')).toBe(true)
+  })
+
+  it('근거가 더 좁으면 근거를 따른다 — 씬 전체 글의 looking at viewer 는 당하는쪽 칸의 closed eyes 에 진다', () => {
+    const r = buildSceneRequest(
+      sceneOf({ prompt: 'bed, looking at viewer', targetTags: 'closed eyes' })
+    )
+    expect(prompts(r)).toEqual([`${GIRL_CLOSED}, closed eyes`, BOY_CARD])
+    expect((r.bodyNotes ?? []).map((n) => n.reason)).toEqual([
+      '눈 감음 — 눈 색 뺌',
+      '눈 감음 — 동공 뺌'
+    ])
+  })
+
+  it('근거와 눈 뜬 표현이 같은 글에 있으면(모순) 근거를 따르되 이유에 둘 다 보인다', () => {
+    const r = buildSceneRequest(sceneOf({ prompt: 'bed, closed eyes, looking at viewer' }))
+    expect(prompts(r)).toEqual([GIRL_CLOSED, BOY_CARD])
+    for (const n of r.bodyNotes ?? []) {
+      expect(n.kind).toBe('removed')
+      expect(n.reason).toContain('같은 범위에 눈 뜬 표현(looking at viewer)')
+    }
+  })
+})
+
 describe('씬 경로 — 옷 벗기기·젖힘·후타 재조립 설정과 상관없이 따로 켠다', () => {
   it('옷 벗기기·입은 옷 자동 젖힘·후타 재조립을 모두 꺼도 뺀다', () => {
     setup({ strip: false, exposeWorn: false, reassembly: false, pink: false })
@@ -366,6 +618,25 @@ describe('실행 직전 재조립에서도 유지된다', () => {
     // 씬 글을 고쳐도(실행 직전 재합성) 조립 때 정한 캐릭터 글은 그대로 — 새로 만들려면 대기 항목 다시 만들기가 한다
     const edited = refreshScenePrompts(r, { ...scene, prompt: 'bed, kiss' })
     expect(prompts(edited)).toEqual([GIRL_CLOSED, BOY_CARD])
+  })
+
+  it('잠듦·눈 가림·인셋 안 바꿈 메모도 refreshScenePrompts 를 거쳐 직렬화해서 다시 읽어도 같다', () => {
+    const scenes = [
+      sceneOf({ prompt: 'bed, sleeping, kiss' }),
+      sceneOf({ prompt: 'bed, kiss', sourceTags: 'blindfold' }),
+      sceneOf({ prompt: 'bed, closed eyes', targetTags: 'looking at viewer' })
+    ]
+    for (const scene of scenes) {
+      const r = buildSceneRequest(scene)
+      expect(r.bodyNotes?.length).toBeGreaterThan(0)
+      const refreshed = refreshScenePrompts(r, scene)
+      expect(refreshed.characterPrompts).toEqual(r.characterPrompts)
+      expect(refreshed.bodyNotes).toEqual(r.bodyNotes)
+      const wire = JSON.parse(JSON.stringify(r)) as GenerationRequest
+      const again = refreshScenePrompts(wire, scene)
+      expect(again.characterPrompts).toEqual(r.characterPrompts)
+      expect(again.bodyNotes).toEqual(r.bodyNotes)
+    }
   })
 
   it('후타 재조립 계획이 있는 요청도 캐릭터 칸 메모(눈 감음)는 남는다', () => {
@@ -422,6 +693,41 @@ describe('실행 직전 재조립에서도 유지된다', () => {
       const plain = buildSceneRequest(sceneOf({ prompt: 'bed, kiss' }))
       const [added] = await run([plain], [{ ...scene, prompt: 'bed, eyes closed' }])
       expect(prompts(added.request)).toEqual([GIRL_CLOSED, BOY_CARD])
+    })
+
+    it('씬 항목: 잠듦 → 글을 고치면 되살아나고, 복장의 눈가리개는 복장이 그대로면 계속 근거다', async () => {
+      const scene = sceneOf({ prompt: 'bed, sleeping, kiss' })
+      const queued = buildSceneRequest(scene)
+      expect(prompts(queued)).toEqual([GIRL_CLOSED, BOY_CARD])
+      const [same] = await run([queued], [{ ...scene, prompt: 'bed, sleeping, hug' }])
+      expect(prompts(same.request)).toEqual([GIRL_CLOSED, BOY_CARD])
+      expect(same.request.bodyNotes?.map((n) => n.cause)).toEqual(['asleep', 'asleep'])
+      const [awake] = await run([queued], [{ ...scene, prompt: 'bed, waking up, kiss' }])
+      expect(prompts(awake.request)).toEqual([GIRL_CARD, BOY_CARD])
+      expect('bodyNotes' in awake.request).toBe(false)
+      // 복장의 눈가리개
+      setup({
+        cards: [card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }), card(BOY, BOY_CARD, 'source')]
+      })
+      useOutfitsStore.setState({
+        items: [
+          {
+            id: 9,
+            name: '합성 복장',
+            negative: '',
+            pieces: [{ id: 'a', name: '눈가리개', tags: 'black blindfold', on: true }]
+          }
+        ] as never
+      })
+      const plain = sceneOf({ prompt: 'bed, kiss' })
+      const worn = buildSceneRequest(plain)
+      expect(prompts(worn)[0]).toBe(`${GIRL_CLOSED}, black blindfold`)
+      const [u] = await run([worn], [{ ...plain, prompt: 'bed, hug' }])
+      expect(prompts(u.request)[0]).toBe(`${GIRL_CLOSED}, black blindfold`)
+      expect(u.request.bodyNotes?.map((n) => n.evidence)).toEqual([
+        '복장 black blindfold',
+        '복장 black blindfold'
+      ])
     })
 
     it('메인 항목: 대기열에 넣을 때 정한 캐릭터 글(눈 색 뺌)과 메모가 그대로 남는다', async () => {
@@ -484,6 +790,46 @@ describe('메인 탭 경로', () => {
     expect('bodyNotes' in open).toBe(false)
   })
 
+  it('잠듦·눈 가림도 읽고, 상대 태그에 눈 뜬 표현이 있으면 안 바꿈', async () => {
+    const asleep = await main('bed, sleeping')
+    expect(prompts(asleep)).toEqual([GIRL_CLOSED, BOY_CARD])
+    expect(asleep.bodyNotes?.map((n) => [n.cause, n.reason])).toEqual([
+      ['asleep', '잠듦 — 눈 색 뺌'],
+      ['asleep', '잠듦 — 동공 뺌']
+    ])
+    const covered = await main('bed, blindfold')
+    expect(prompts(covered)).toEqual([GIRL_CLOSED, BOY_CARD])
+    const cards = [
+      card(GIRL, GIRL_CARD, 'target'),
+      card(BOY, BOY_CARD, 'source', { partnerTags: 'looking at viewer' })
+    ]
+    const narrow = await main('bed, closed eyes', cards)
+    expect(prompts(narrow)).toEqual([`${GIRL_CARD}, looking at viewer`, BOY_CARD])
+    expect((narrow.bodyNotes ?? []).map((n) => [n.kind, n.reason])).toEqual([
+      ['kept', '눈 감음 — 이 캐릭터의 글에 눈 뜬 표현(looking at viewer)이 있어 그대로 둠'],
+      ['kept', '눈 감음 — 이 캐릭터의 글에 눈 뜬 표현(looking at viewer)이 있어 그대로 둠']
+    ])
+  })
+
+  it('메인 탭도 입은 복장의 눈가리개를 근거로 본다', async () => {
+    useOutfitsStore.setState({
+      items: [
+        {
+          id: 9,
+          name: '합성 복장',
+          negative: '',
+          pieces: [{ id: 'a', name: '눈가리개', tags: 'black blindfold', on: true }]
+        }
+      ] as never
+    })
+    const r = await main('bed', [
+      card(GIRL, GIRL_CARD, 'target', { outfitId: 9 }),
+      card(BOY, BOY_CARD, 'source')
+    ])
+    expect(prompts(r)).toEqual([`${GIRL_CLOSED}, black blindfold`, BOY_CARD])
+    expect(r.bodyNotes?.[0].evidence).toBe('복장 black blindfold')
+  })
+
   it('3분할 메인 프롬프트도 같다', async () => {
     useGenerationStore.setState({
       request: {
@@ -505,7 +851,7 @@ describe('메인 탭 경로', () => {
   })
 })
 
-describe('설정 「눈 감으면 눈 태그 빼기」 — 기본 꺼짐, 끄면 이 기능이 없을 때와 글자 단위로 같다', () => {
+describe('설정 「눈이 안 보이면 눈 태그 빼기」 — 기본 꺼짐, 끄면 이 기능이 없을 때와 글자 단위로 같다', () => {
   it('씬 경로: 끄면 closed eyes 가 있어도 카드 글 그대로 · bodyNotes 에 눈 감음 메모가 없다', () => {
     setup({ eyes: false })
     const scene = sceneOf({ prompt: 'bed, closed eyes, kiss' })

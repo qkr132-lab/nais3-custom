@@ -221,8 +221,28 @@ export function sceneContextsFor(input: {
   /** 이 씬 태그·자리 태그·상대 태그 */
   tags: string[]
 }): string[] {
+  const g = sceneContextGroupsFor(input)
+  return [...g.scene, ...g.role, ...g.char]
+}
+
+/**
+ * sceneContextsFor 와 같은 글을 범위별로 나눈 것 (커스텀) — 눈 감음처럼 「더 좁은 글의 말이 이긴다」를 가려야 하는 곳이 쓴다.
+ * scene = 씬 전체 글(기본·씬 프롬프트 — 받는 캐릭터만) · role = 하는쪽/당하는쪽 태그 칸 · char = 이 캐릭터만의 글(씬별 캐릭터·자리·상대 태그).
+ * 이어 붙이면 sceneContextsFor 의 결과와 같다.
+ */
+export function sceneContextGroupsFor(input: {
+  role: CharRole | undefined
+  anyRole: boolean
+  prompts: string[]
+  scene: { sourceTags?: string; targetTags?: string }
+  tags: string[]
+}): { scene: string[]; role: string[]; char: string[] } {
   const { role, anyRole, prompts, scene, tags } = input
-  return [...(role === 'target' || !anyRole ? prompts : []), roleTagsFor(role, scene), ...tags]
+  return {
+    scene: role === 'target' || !anyRole ? prompts : [],
+    role: [roleTagsFor(role, scene)],
+    char: tags
+  }
 }
 
 /**

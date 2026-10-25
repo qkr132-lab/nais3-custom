@@ -108,6 +108,11 @@ export interface BodyNote {
    * 화면이 후타 메모와 따로 세고 「눈 감음」 배지를 다는 데 쓴다.
    */
   topic?: 'eyes'
+  /**
+   * 눈이 안 보이는 까닭 (topic 이 eyes 일 때) — closed 눈 감음 · asleep 잠듦 · covered 눈 가림. 없으면 눈 감음.
+   * 화면이 배지·요약에 「눈 감음」「잠듦」「눈 가림」을 갈라 쓴다.
+   */
+  cause?: 'closed' | 'asleep' | 'covered'
   /** 한국어 한 줄 설명 */
   reason: string
 }

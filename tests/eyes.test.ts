@@ -1,37 +1,56 @@
 import { describe, expect, it } from 'vitest'
 import {
+  EYE_CAUSE_LABEL,
   EYE_LOOK_LABEL,
-  closedEyesEvidence,
+  hiddenEyesEvidence,
   eyeLookKind,
   eyeReason,
-  stripEyesWhenClosed
+  openEyesExpression,
+  stripEyesWhenClosed,
+  type EyeContexts
 } from '../src/shared/eyes'
 import { engineTagsOf } from '../src/shared/auto-expose'
 
 /**
- * 눈 감음이면 카드의 눈 외형 태그를 뺀다 — 순수 계산 시험.
+ * 눈이 안 보이면(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그를 뺀다 — 순수 계산 시험.
  * 합성 카드·합성 장면 글만 쓴다 (사용자 데이터 없음). 태그는 단보루 실존 태그, 문장은 지어낸 것.
  */
 
+type Sex = 'male' | 'female' | null
 const who = { index: 0, name: '합성 카드', id: 7 }
 const strip = (
   card: string,
-  contexts: string[],
-  sex: 'male' | 'female' | null = 'female'
+  contexts: string[] | EyeContexts,
+  sex: Sex = 'female',
+  extra: { outfit?: string; faceSeat?: boolean } = {}
 ): ReturnType<typeof stripEyesWhenClosed> =>
-  stripEyesWhenClosed({ enabled: true, card, contexts, sex, who })
+  stripEyesWhenClosed({ enabled: true, card, contexts, sex, who, ...extra })
 const tagsOf = (text: string): string[] => engineTagsOf(text)
+/** 눈 감음 근거만 — 다른 까닭으로 읽히면 「!까닭」 으로 돌려줘 시험이 알아챈다 */
+const closedEvidence = (contexts: string[], sex: Sex): string | null => {
+  const e = hiddenEyesEvidence(contexts, sex)
+  return e ? (e.cause === 'closed' ? e.text : `!${e.cause}`) : null
+}
+/** 어떤 까닭이든 근거 — 「까닭:글」 */
+const evidenceOf = (
+  contexts: string[] | EyeContexts,
+  sex: Sex = 'female',
+  outfit?: string
+): string => {
+  const e = hiddenEyesEvidence(contexts, sex, outfit)
+  return e ? `${e.cause}:${e.text}` : '-'
+}
 
 describe('감은 눈 읽기 — 태그', () => {
   it('closed eyes · eyes closed · closed_eyes 를 감은 눈으로 읽고 근거를 원문 그대로 돌려준다', () => {
     for (const text of ['closed eyes', 'eyes closed', 'closed_eyes', 'Closed Eyes']) {
-      expect(closedEyesEvidence([text], 'female'), text).toBe(text)
+      expect(closedEvidence([text], 'female'), text).toBe(text)
     }
-    expect(closedEyesEvidence(['smile, closed eyes, blush'], 'female')).toBe('closed eyes')
+    expect(closedEvidence(['smile, closed eyes, blush'], 'female')).toBe('closed eyes')
     // 가중치 묶음 안, 여러 글 중 뒤쪽 글, 역할 접두사
-    expect(closedEyesEvidence(['1.3::closed eyes, blush::'], 'female')).toBe('closed eyes')
-    expect(closedEyesEvidence(['smile', 'blush, eyes closed'], 'female')).toBe('eyes closed')
-    expect(closedEyesEvidence(['target#closed eyes'], 'female')).toBe('target#closed eyes')
+    expect(closedEvidence(['1.3::closed eyes, blush::'], 'female')).toBe('closed eyes')
+    expect(closedEvidence(['smile', 'blush, eyes closed'], 'female')).toBe('eyes closed')
+    expect(closedEvidence(['target#closed eyes'], 'female')).toBe('target#closed eyes')
   })
 
   it('눈이 보이는 표현은 감은 눈이 아니다 — one eye closed · wink · half-closed eyes · 한쪽 눈', () => {
@@ -55,7 +74,7 @@ describe('감은 눈 읽기 — 태그', () => {
       'closed mouth',
       'closed door'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBeNull()
+      expect(closedEvidence([text], 'female'), text).toBeNull()
     }
   })
 
@@ -72,14 +91,14 @@ describe('감은 눈 읽기 — 태그', () => {
       'smile\nText: closed eyes',
       '"close your eyes" she says'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBeNull()
+      expect(closedEvidence([text], 'female'), text).toBeNull()
     }
   })
 
   it('글이 없거나 감은 눈 이야기가 없으면 null', () => {
-    expect(closedEyesEvidence([], 'female')).toBeNull()
-    expect(closedEyesEvidence(['', '  '], 'female')).toBeNull()
-    expect(closedEyesEvidence(['1girl, blue eyes, smile'], 'female')).toBeNull()
+    expect(closedEvidence([], 'female')).toBeNull()
+    expect(closedEvidence(['', '  '], 'female')).toBeNull()
+    expect(closedEvidence(['1girl, blue eyes, smile'], 'female')).toBeNull()
   })
 })
 
@@ -102,10 +121,10 @@ describe('감은 눈 읽기 — 영어 문장', () => {
       'eyes remain closed',
       'both eyes closed'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBe(text)
+      expect(closedEvidence([text], 'female'), text).toBe(text)
     }
     // 쉼표로 이어진 문장 속 한 토막
-    expect(closedEyesEvidence(['she moans, eyes tightly closed, trembling'], 'female')).toBe(
+    expect(closedEvidence(['she moans, eyes tightly closed, trembling'], 'female')).toBe(
       'eyes tightly closed'
     )
   })
@@ -124,7 +143,7 @@ describe('감은 눈 읽기 — 영어 문장', () => {
       'her eyes are wide open',
       'she refuses to close her eyes'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBeNull()
+      expect(closedEvidence([text], 'female'), text).toBeNull()
     }
   })
 
@@ -137,11 +156,11 @@ describe('감은 눈 읽기 — 영어 문장', () => {
       'she closes her eyes partway',
       'closed eyes wide open'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBeNull()
+      expect(closedEvidence([text], 'female'), text).toBeNull()
     }
     // 눈이 감겼다는 말은 그대로 읽는다
-    expect(closedEyesEvidence(['closed eyes blush'], 'female')).toBe('closed eyes blush')
-    expect(closedEyesEvidence(['eyes closed, mouth open'], 'female')).toBe('eyes closed')
+    expect(closedEvidence(['closed eyes blush'], 'female')).toBe('closed eyes blush')
+    expect(closedEvidence(['eyes closed, mouth open'], 'female')).toBe('eyes closed')
   })
 
   it('한쪽 눈·반쯤 감은 눈 문장은 눈이 보인다', () => {
@@ -154,25 +173,347 @@ describe('감은 눈 읽기 — 영어 문장', () => {
       'her eyes are slightly closed',
       'half closed eyes'
     ]) {
-      expect(closedEyesEvidence([text], 'female'), text).toBeNull()
+      expect(closedEvidence([text], 'female'), text).toBeNull()
     }
   })
 
   it('her/his 는 이 캐릭터 몸과 맞을 때만 — 후타(null)는 거르지 않고 상대의 눈은 읽지 않는다', () => {
-    expect(closedEyesEvidence(['his eyes are closed'], 'female')).toBeNull()
-    expect(closedEyesEvidence(['his eyes are closed'], 'male')).toBe('his eyes are closed')
-    expect(closedEyesEvidence(['her eyes are closed'], 'male')).toBeNull()
-    expect(closedEyesEvidence(['her eyes are closed'], 'female')).toBe('her eyes are closed')
-    expect(closedEyesEvidence(['her eyes are closed'], null)).toBe('her eyes are closed')
-    expect(closedEyesEvidence(['his eyes are closed'], null)).toBe('his eyes are closed')
+    expect(closedEvidence(['his eyes are closed'], 'female')).toBeNull()
+    expect(closedEvidence(['his eyes are closed'], 'male')).toBe('his eyes are closed')
+    expect(closedEvidence(['her eyes are closed'], 'male')).toBeNull()
+    expect(closedEvidence(['her eyes are closed'], 'female')).toBe('her eyes are closed')
+    expect(closedEvidence(['her eyes are closed'], null)).toBe('her eyes are closed')
+    expect(closedEvidence(['his eyes are closed'], null)).toBe('his eyes are closed')
     // 주어로 가른다
-    expect(closedEyesEvidence(['he keeps eyes closed'], 'female')).toBeNull()
-    expect(closedEyesEvidence(['she keeps eyes closed'], 'female')).toBe('she keeps eyes closed')
+    expect(closedEvidence(['he keeps eyes closed'], 'female')).toBeNull()
+    expect(closedEvidence(['she keeps eyes closed'], 'female')).toBe('she keeps eyes closed')
     // 누구 눈인지 안 밝힌 문장은 누구에게나
-    expect(closedEyesEvidence(['with eyes closed'], 'male')).toBe('with eyes closed')
+    expect(closedEvidence(['with eyes closed'], 'male')).toBe('with eyes closed')
     // 상대의 눈
-    expect(closedEyesEvidence(["her partner's eyes are closed"], 'female')).toBeNull()
-    expect(closedEyesEvidence(["another's eyes closed"], 'male')).toBeNull()
+    expect(closedEvidence(["her partner's eyes are closed"], 'female')).toBeNull()
+    expect(closedEvidence(["another's eyes closed"], 'male')).toBeNull()
+  })
+})
+
+describe('눈이 안 보임 읽기 — 눈 감음 기호', () => {
+  it('^_^ · >_< · u_u · ^q^ · x3 · xd · dx 는 완전히 감은 눈이다 — 가중치 묶음·쉼표 목록·역할 접두사 안에서도', () => {
+    for (const text of ['^_^', '^ ^', '>_<', '> <', 'u_u', '^q^', 'x3', 'xd', 'dx']) {
+      expect(evidenceOf([text]), text).toBe(`closed:${text}`)
+    }
+    expect(evidenceOf(['smile, >_<, blush'])).toBe('closed:>_<')
+    expect(evidenceOf(['1.2::>_<, blush::'])).toBe('closed:>_<')
+    expect(evidenceOf(['1.2::^_^::'])).toBe('closed:^_^')
+    expect(evidenceOf(['target#>_<'])).toBe('closed:target#>_<')
+    expect(evidenceOf(['1.2::xd, blush::'])).toBe('closed:xd')
+  })
+
+  it('반쯤 뜬 기호(=_=)·윙크(>_o)·울음(T_T)·한쪽 눈 기호는 감은 눈이 아니다', () => {
+    for (const text of [
+      '=_=',
+      '= =',
+      '>_o',
+      ';)',
+      ';d',
+      ':q',
+      'T_T',
+      't t',
+      '^^^',
+      '^_o',
+      '@_@',
+      'o_o',
+      // 눈 하나만 감은 윙크 이모티콘 · 입 모양만 있는 이모티콘 · 낱말 속 xd
+      ';p',
+      ';o',
+      ';q',
+      ':d',
+      ':3',
+      'xdd',
+      'the xd file',
+      'dx11'
+    ]) {
+      expect(evidenceOf([text]), text).toBe('-')
+    }
+  })
+
+  it('실제로 보내지 않는 글의 기호는 신호가 아니다 — 음수 가중치 · 주석 · 와일드카드', () => {
+    for (const text of ['-1::^_^::', '0::>_<::', '# ^_^', 'smile # >_<', '<a>_<b>', 'x3/x4']) {
+      expect(evidenceOf([text]), text).toBe('-')
+    }
+  })
+})
+
+describe('눈이 안 보임 읽기 — 잠듦', () => {
+  it('sleeping · sleeping upright · sleeping on person · sleeping on desk · sleep molestation · asleep 태그', () => {
+    for (const text of [
+      'sleeping',
+      'Sleeping',
+      'sleeping upright',
+      'sleeping on person',
+      'sleeping on desk',
+      'sleep molestation',
+      'asleep',
+      'fast asleep',
+      '1.2::sleeping::'
+    ]) {
+      expect(evidenceOf([text]).startsWith('asleep:'), text).toBe(true)
+    }
+  })
+
+  it('영어 문장 — she is asleep · she is sleeping soundly · she sleeps · while she sleeps', () => {
+    for (const text of [
+      'she is asleep',
+      'she is fast asleep',
+      "she's asleep",
+      'she is sleeping soundly',
+      'she sleeps',
+      'while she sleeps',
+      'her sleeping face',
+      'the girl is sleeping'
+    ]) {
+      expect(evidenceOf([text]), text).toBe(`asleep:${text}`)
+    }
+  })
+
+  it('잠든 게 아니거나 이 캐릭터가 아니면 읽지 않는다 — half-asleep · sleepy · waking up · 잠들려는 참 · 침낭 · 잠옷 · 부정문 · 상대', () => {
+    for (const text of [
+      'half-asleep',
+      'she is half asleep',
+      'sleepy',
+      'she is sleepy',
+      'waking up',
+      'she is waking up',
+      'she is about to fall asleep',
+      'she falls asleep',
+      'sleeping bag',
+      'sleepwear',
+      'sleepover',
+      'she is not sleeping',
+      "she isn't asleep",
+      'feigning sleep',
+      'she pretends to be asleep',
+      'unconscious',
+      'fainting',
+      'messy sleeper',
+      'sleeping animal',
+      'sleeping cat',
+      'her sleeping partner',
+      'her partner is asleep',
+      'he is asleep',
+      'sleep'
+    ]) {
+      expect(evidenceOf([text]), text).toBe('-')
+    }
+  })
+
+  it('her/his 는 이 캐릭터 몸에 맞을 때만 — 후타(null)는 거르지 않는다', () => {
+    expect(evidenceOf(['he is asleep'], 'male')).toBe('asleep:he is asleep')
+    expect(evidenceOf(['he is asleep'], 'female')).toBe('-')
+    expect(evidenceOf(['he is asleep'], null)).toBe('asleep:he is asleep')
+    expect(evidenceOf(['she is asleep'], 'male')).toBe('-')
+  })
+})
+
+describe('눈이 안 보임 읽기 — 눈 가림', () => {
+  it('blindfold 계열 — 색·재질이 붙은 것 · blindfolded · covered eyes · covering own eyes · 양쪽 눈 붕대', () => {
+    for (const text of [
+      'blindfold',
+      'black blindfold',
+      'white blindfold',
+      'red blindfold',
+      'blindfolded',
+      'she is blindfolded',
+      'covered eyes',
+      'covering own eyes',
+      'bandages over eyes',
+      // 단보루 실존 태그 — 눈 위를 음경이 덮음 (한쪽 눈은 아래 제외 목록)
+      'penis over eyes'
+    ]) {
+      expect(evidenceOf([text]), text).toBe(`covered:${text}`)
+    }
+  })
+
+  it('영어 문장 — 눈이 덮였다 · 제 눈을 가렸다 · 손으로 가렸다', () => {
+    for (const text of [
+      'her eyes are covered',
+      'with her eyes covered',
+      'she covers her eyes with her hands',
+      'she covered her eyes',
+      'covering her eyes',
+      'her hands over her eyes',
+      'sleep mask over her eyes',
+      'wearing a sleep mask'
+    ]) {
+      expect(evidenceOf([text]), text).toBe(`covered:${text}`)
+    }
+  })
+
+  it('눈가리개를 들어 올렸거나 벗었거나 비치는 것 · 한쪽 눈 · 손가락 사이 · 머리카락 · 상대의 눈은 아니다', () => {
+    for (const text of [
+      'blindfold lift',
+      'blindfold lifted',
+      'blindfold removed',
+      'removing blindfold',
+      'blindfold around neck',
+      'blindfold on head',
+      'blindfold on her forehead',
+      'unworn blindfold',
+      'no blindfold',
+      'holding blindfold',
+      'see-through blindfold',
+      'sleep mask on head',
+      'mask on head',
+      'eye mask',
+      'eyepatch',
+      'one eye covered',
+      'covering one eye',
+      'bandage over one eye',
+      'hand over eye',
+      'shading eyes',
+      'peeking through fingers',
+      'she covers her eyes peeking through her fingers',
+      'hair over eyes',
+      'hair covering her eyes',
+      'hat over eyes',
+      'helmet over eyes',
+      'penis over one eye',
+      'eyes in shadow',
+      'eyes out of frame',
+      "covering another's eyes",
+      "her partner's eyes are covered",
+      'eyes covered in tears',
+      'her eyes are not covered',
+      'covering face',
+      'facepalm',
+      'blind',
+      'his blindfold'
+    ]) {
+      expect(evidenceOf([text]), text).toBe('-')
+    }
+  })
+
+  it('눈가리개를 들어 올렸다는 글이 어디에라도 있으면 같은 눈가리개는 근거로 치지 않는다', () => {
+    expect(evidenceOf(['blindfold, blindfold lift'])).toBe('-')
+    expect(evidenceOf({ scene: ['blindfold'], char: ['blindfold lift'] })).toBe('-')
+    expect(evidenceOf(['sleep mask, mask on head'])).toBe('-')
+    // 그냥 mask on head 는 무슨 마스크인지 모른다 — 수면 안대만 지우고 눈가리개는 그대로 근거
+    expect(evidenceOf(['gas mask on head, blindfold'])).toBe('covered:blindfold')
+    expect(evidenceOf({ scene: ['blindfold'], char: ['mask on head'] })).toBe('covered:blindfold')
+    expect(evidenceOf({ scene: ['sleep mask'], char: ['mask on head'] })).toBe('-')
+    expect(evidenceOf([], 'female', 'black blindfold, mask on head')).toBe(
+      'covered:black blindfold'
+    )
+    expect(evidenceOf([], 'female', 'black blindfold')).toBe('covered:black blindfold')
+    expect(evidenceOf({ char: ['blindfold removed'] }, 'female', 'black blindfold')).toBe('-')
+  })
+
+  it('her/his 는 눈 주인이 이 캐릭터 몸일 때만', () => {
+    expect(evidenceOf(['his eyes are covered'], 'female')).toBe('-')
+    expect(evidenceOf(['his eyes are covered'], 'male')).toBe('covered:his eyes are covered')
+    expect(evidenceOf(['his eyes are covered'], null)).toBe('covered:his eyes are covered')
+    expect(evidenceOf(['he is blindfolded'], 'female')).toBe('-')
+  })
+})
+
+describe('눈이 안 보임 읽기 — 복장 · 범위', () => {
+  it('입은 복장에서는 눈 가림 물건만 근거가 된다 — blindfold · 눈을 덮은 sleep mask', () => {
+    const e = hiddenEyesEvidence([], 'female', 'black blindfold, white dress')
+    expect(e).toMatchObject({ cause: 'covered', text: 'black blindfold', outfit: true })
+    expect(evidenceOf([], 'female', 'sleep mask')).toBe('covered:sleep mask')
+    // 복장 글의 감은 눈·잠듦은 근거가 아니다
+    expect(evidenceOf([], 'female', 'closed eyes, sleeping')).toBe('-')
+    expect(evidenceOf([], 'female', 'glasses, eyepatch, mask on head')).toBe('-')
+  })
+
+  it('같은 글에 잠듦이 먼저, 눈 감음이 나중에 적혀 있어도 눈 감음을 보여 준다', () => {
+    expect(evidenceOf(['bed, sleeping, closed eyes'])).toBe('closed:closed eyes')
+    expect(evidenceOf(['bed, blindfold', 'sleeping, closed eyes'])).toBe('closed:closed eyes')
+    expect(evidenceOf(['bed, blindfold, sleeping'])).toBe('asleep:sleeping')
+  })
+
+  it('근거가 여럿이면 눈 감음 > 잠듦 > 눈 가림 순으로 보여 준다 — 같은 까닭이면 넓은 범위부터', () => {
+    expect(
+      hiddenEyesEvidence({ scene: ['sleeping'], role: ['closed eyes'] }, 'female')
+    ).toMatchObject({
+      cause: 'closed',
+      text: 'closed eyes',
+      scope: 'role',
+      narrowest: 'role'
+    })
+    expect(
+      hiddenEyesEvidence({ scene: ['blindfold'], char: ['sleeping'] }, 'female')
+    ).toMatchObject({
+      cause: 'asleep',
+      scope: 'char',
+      narrowest: 'char'
+    })
+    expect(hiddenEyesEvidence({ scene: ['closed eyes'], role: ['^_^'] }, 'female')).toMatchObject({
+      text: 'closed eyes',
+      scope: 'scene',
+      narrowest: 'role'
+    })
+  })
+
+  it('근거가 놓인 범위 — 보여 주는 근거는 넓은 쪽부터, narrowest 는 가장 좁은 쪽', () => {
+    expect(hiddenEyesEvidence({ scene: ['closed eyes'] }, 'female')).toMatchObject({
+      cause: 'closed',
+      scope: 'scene',
+      narrowest: 'scene'
+    })
+    expect(hiddenEyesEvidence({ scene: ['smile'], role: ['closed eyes'] }, 'female')).toMatchObject(
+      {
+        scope: 'role',
+        narrowest: 'role'
+      }
+    )
+    expect(
+      hiddenEyesEvidence({ scene: ['closed eyes'], char: ['sleeping'] }, 'female')
+    ).toMatchObject({ cause: 'closed', scope: 'scene', narrowest: 'char' })
+    // 복장은 이 캐릭터만의 글과 같은 범위
+    expect(hiddenEyesEvidence({ scene: ['closed eyes'] }, 'female', 'blindfold')).toMatchObject({
+      scope: 'scene',
+      narrowest: 'char'
+    })
+    // 글 목록만 주면 씬 전체 글
+    expect(hiddenEyesEvidence(['sleeping'], 'female')).toMatchObject({ scope: 'scene' })
+  })
+
+  it('눈 뜬 표현 — 가장 좁은 범위의 것을 돌려준다 (눈 색·빛나는 눈은 눈 뜸이 분명하지 않다)', () => {
+    expect(
+      openEyesExpression({ scene: ['looking at viewer'], char: ['rolling eyes'] }, 'female')
+    ).toEqual({
+      text: 'rolling eyes',
+      scope: 'char'
+    })
+    for (const text of [
+      'looking at viewer',
+      'wide-eyed',
+      'half-closed eyes',
+      'heart-shaped pupils',
+      '@_@',
+      'open eyes',
+      'eyes wide open',
+      'her eyes are wide open',
+      'she opens her eyes',
+      'jitome'
+    ]) {
+      expect(openEyesExpression([text], 'female'), text).toMatchObject({ scope: 'scene' })
+    }
+    for (const text of [
+      'blue eyes',
+      'glowing eyes',
+      'black sclera',
+      'closed eyes',
+      'one eye closed',
+      'facing viewer',
+      'looking back',
+      'her eyes are not open',
+      'his eyes are wide open',
+      '-1::looking at viewer::',
+      '# rolling eyes',
+      '(rolling eyes/wide-eyed)'
+    ]) {
+      expect(openEyesExpression([text], 'female'), text).toBeNull()
+    }
   })
 })
 
@@ -241,20 +582,338 @@ describe('눈 외형 태그 분류', () => {
       expect(eyeLookKind(tag), tag).toBe('iris')
   })
 
-  it('눈 모양 · 속눈썹 · 화장 · 안경류 · 눈 주변 흉터 · 눈이 보이는 표현은 눈 외형이 아니다', () => {
+  it('기호 눈 — 눈 자리에 만화 기호가 그려진 눈 (@_@ · +_+ · x_x · o_o · 하트 모양 눈 · 단색 원/타원 눈)', () => {
+    for (const tag of [
+      'heart-shaped eyes',
+      'heart shaped eyes',
+      'spiral-only eyes',
+      '@_@',
+      '@ @',
+      '+_+',
+      'x_x',
+      'o_o',
+      '0_0',
+      '._.',
+      'solid circle eyes',
+      'solid oval eyes',
+      'solid eyes',
+      'wide oval eyes',
+      'wavy eyes',
+      'dashed eyes',
+      'pac-man eyes',
+      // 옛 이름(spiral-only eyes 의 앞 이름 · star-shaped pupils 로 모인 이름)도 같은 뜻
+      'spiral eyes',
+      'star-shaped eyes'
+    ]) {
+      expect(eyeLookKind(tag.replace(/_/g, ' ')), tag).toBe('symbol')
+    }
+  })
+
+  it('눈 상태 — 눈을 떠야 성립하는 모양·표정 (반쯤 뜬 눈 · 가늘게 뜬 눈 · 공허한 눈 · 광기 어린 눈 · 눈을 크게 뜬 · 눈알 굴리기 · 사팔뜨기 · jitome · sanpaku)', () => {
+    for (const tag of [
+      'half-closed eyes',
+      'half closed eyes',
+      'half-closed eye',
+      'narrowed eyes',
+      'jitome',
+      'sanpaku',
+      'empty eyes',
+      'hollow eyes',
+      'blank eyes',
+      'crazy eyes',
+      'wide-eyed',
+      'rolling eyes',
+      'cross-eyed',
+      'wall-eyed',
+      'unusually open eyes',
+      'uneven eyes',
+      'bulging eyes',
+      'squinting',
+      'crying with eyes open',
+      'open eyes',
+      'opening eyes',
+      'eyes wide open',
+      'cross eye',
+      // 눈이 위로 돌아간 모양 (rolling eyes 와 같은 뜻)
+      'eyes rolled back',
+      'eyes rolling back',
+      'eyes half rolled back',
+      'eyes rolled back showing mostly whites',
+      'rolled up eyes',
+      '= =',
+      '3 3'
+    ]) {
+      expect(eyeLookKind(tag), tag).toBe('state')
+    }
+    // 눈과 상관없는 rolled · 문장은 건드리지 않는다
+    for (const tag of [
+      'rolled up sleeves',
+      'sleeves rolled up',
+      'hair rolled up',
+      'her eyes rolled back in pleasure as she lost herself in the moment'
+    ]) {
+      expect(eyeLookKind(tag), tag).toBeNull()
+    }
+  })
+
+  it('시선 — looking … 태그 · eye contact · staring · glaring — 얼굴 방향(facing viewer)과 고개 돌림(looking back)은 남긴다', () => {
+    for (const tag of [
+      'looking at viewer',
+      'looking_at_viewer',
+      'looking at another',
+      'looking away',
+      'looking down',
+      'looking up',
+      'looking to the side',
+      'looking ahead',
+      'looking past viewer',
+      'looking at hand',
+      'eye contact',
+      'sideways glance',
+      'glance',
+      'staring',
+      'glaring',
+      'averting eyes',
+      'blank stare',
+      'downturned eyes',
+      'upturned eyes'
+    ]) {
+      expect(eyeLookKind(tag.replace(/_/g, ' ')), tag).toBe('gaze')
+    }
+    for (const tag of [
+      'facing viewer',
+      'facing away',
+      'looking back',
+      'looking at viewer with a smile and a blush',
+      'she is looking at the viewer while smiling'
+    ]) {
+      expect(eyeLookKind(tag), tag).toBeNull()
+    }
+  })
+
+  it('분류표 — 단보루 눈 관련 태그(사용 수 150 이상) 전수: 뺌 / 남김이 늘 같다', () => {
+    const REMOVE: Record<string, string[]> = {
+      color: [
+        'blue eyes',
+        'red eyes',
+        'heterochromia',
+        'multicolored eyes',
+        'white eyes',
+        'alternate eye color',
+        'two-tone eyes',
+        'gradient eyes',
+        'official alternate eye color',
+        'rainbow eyes',
+        'no heterochromia'
+      ],
+      pupil: [
+        'symbol-shaped pupils',
+        'bright pupils',
+        'heart-shaped pupils',
+        'slit pupils',
+        'no pupils',
+        'constricted pupils',
+        'dilated pupils',
+        'glowing pupils',
+        'dot pupils',
+        'small pupils',
+        'solid circle pupils',
+        'extra pupils'
+      ],
+      sclera: ['colored sclera', 'black sclera', 'no sclera', 'mismatched sclera', 'red sclera'],
+      glow: [
+        'glowing eyes',
+        'glowing eye',
+        'sparkling eyes',
+        'shiny eyes',
+        'bloodshot eyes',
+        'flaming eyes',
+        'flaming eye'
+      ],
+      iris: [
+        'ringed eyes',
+        'symbol in eye',
+        'star in eye',
+        'heart in eye',
+        'flower in eye',
+        'clock eyes',
+        'text in eyes',
+        'sharingan',
+        'byakugan',
+        'rinnegan'
+      ],
+      symbol: [
+        'spiral eyes',
+        'star-shaped eyes',
+        '@ @',
+        '+ +',
+        'x x',
+        'o o',
+        '0 0',
+        '. .',
+        'solid oval eyes',
+        'solid circle eyes',
+        'solid eyes',
+        'wavy eyes',
+        'dashed eyes',
+        'heart-shaped eyes',
+        'wide oval eyes',
+        'spiral-only eyes',
+        'pac-man eyes'
+      ],
+      state: [
+        'half-closed eyes',
+        'half-closed eye',
+        'crying with eyes open',
+        'jitome',
+        'empty eyes',
+        'wide-eyed',
+        'rolling eyes',
+        'blank eyes',
+        'sanpaku',
+        'uneven eyes',
+        'crazy eyes',
+        'narrowed eyes',
+        'unusually open eyes',
+        'squinting',
+        'opening eyes',
+        'eyes rolled back',
+        'hollow eyes',
+        'bulging eyes',
+        'cross-eyed',
+        'lazy eye',
+        'wall-eyed',
+        'evil eyes',
+        'eye pop',
+        'pleading eyes',
+        'creepy eyes',
+        '= =',
+        '3 3',
+        'lowered eyelids'
+      ],
+      gaze: [
+        'looking at viewer',
+        'looking at another',
+        'looking to the side',
+        'looking down',
+        'looking up',
+        'eye contact',
+        'looking ahead',
+        'sideways glance',
+        'looking afar',
+        'looking at object',
+        'glaring',
+        'averting eyes',
+        'staring',
+        'looking over eyewear',
+        'upturned eyes',
+        'blank stare',
+        'looking outside',
+        'looking through own legs',
+        'downturned eyes',
+        'looking past viewer',
+        'glance'
+      ]
+    }
+    for (const [kind, tags] of Object.entries(REMOVE)) {
+      for (const tag of tags) expect(eyeLookKind(tag), tag).toBe(kind)
+    }
+    // 남기는 것 — 눈매 윤곽 · 속눈썹 · 눈썹 · 화장 · 안경류 · 가면 · 눈 주변 무늬 · 눈물 · 감은 눈에도 그려지는 것 · 눈 수·종 특징 · 구도
+    const KEEP = [
+      'tsurime',
+      'tareme',
+      'thick eyebrows',
+      'curly eyebrows',
+      'v-shaped eyebrows',
+      'raised eyebrows',
+      'long eyelashes',
+      'thick eyelashes',
+      'white eyelashes',
+      'lower eyelashes only',
+      'mismatched eyelashes',
+      'eyelashes',
+      'colored eyelashes',
+      'eyeshadow',
+      'red eyeshadow',
+      'eyeliner',
+      'mascara',
+      'glasses',
+      'sunglasses',
+      'eyepatch',
+      'goggles',
+      'monocle',
+      'mask',
+      'eye mask',
+      'blindfold',
+      'sleep mask',
+      'mole under eye',
+      'scar across eye',
+      'bags under eyes',
+      'tears',
+      'crying',
+      'tearing up',
+      'closed eyes',
+      'one eye closed',
+      'one eye covered',
+      'covered eyes',
+      'covering own eyes',
+      'one-eyed',
+      'no eyes',
+      'third eye',
+      'extra eyes',
+      'cephalopod eyes',
+      'compound eyes',
+      'button eyes',
+      'lens eye',
+      'v-shaped eyes',
+      'mature eyes',
+      'very big eyes',
+      'large eyes',
+      'hair between eyes',
+      'hair over one eye',
+      'hair over eyes',
+      'eyes visible through hair',
+      'eyes visible through eyewear',
+      'eye focus',
+      'eye reflection',
+      'ahegao',
+      'facing viewer',
+      'looking back',
+      'closed mouth',
+      'blush',
+      // 눈을 가리거나 감은 표현 자체 — 근거로는 읽어도 눈 외형은 아니다
+      '^ ^',
+      '> <',
+      'u u',
+      'xd',
+      'sleeping',
+      'sleepy',
+      'blindfold',
+      'hat over eyes',
+      'helmet over eyes',
+      'penis over eyes',
+      'eyes in shadow',
+      'eyes out of frame',
+      'eyes visible through hair',
+      'unconscious',
+      'fainting',
+      'eyelid pull',
+      'blood from eyes',
+      'eye trail',
+      '| |',
+      '<|> <|>',
+      '<o> <o>',
+      't t'
+    ]
+    for (const tag of KEEP) expect(eyeLookKind(tag), tag).toBeNull()
+  })
+
+  it('눈 모양 · 속눈썹 · 화장 · 안경류 · 눈 주변 흉터 · 감은 눈에도 그려지는 것은 눈 외형이 아니다', () => {
     for (const tag of [
       'tsurime',
       'tareme',
-      'jitome',
-      'sanpaku',
-      'narrowed eyes',
-      'half-closed eyes',
       'one eye closed',
       'closed eyes',
-      'empty eyes',
-      'crazy eyes',
-      'wide-eyed',
-      'cross-eyed',
       'eyelashes',
       'long eyelashes',
       'thick eyelashes',
@@ -288,11 +947,15 @@ describe('눈 외형 태그 분류', () => {
     }
   })
 
-  it('갈래마다 한국어 이름이 있고 이유 문구는 「눈 감음 — … 뺌」이다', () => {
+  it('갈래마다 한국어 이름이 있고 이유 문구는 「까닭 — 갈래 뺌」이다', () => {
     for (const label of Object.values(EYE_LOOK_LABEL)) expect(label).toMatch(/[가-힣]/)
+    for (const label of Object.values(EYE_CAUSE_LABEL)) expect(label).toMatch(/[가-힣]/)
     expect(eyeReason('color')).toBe('눈 감음 — 눈 색 뺌')
     expect(eyeReason('pupil')).toBe('눈 감음 — 동공 뺌')
     expect(eyeReason('sclera')).toBe('눈 감음 — 흰자 뺌')
+    expect(eyeReason('symbol', 'asleep')).toBe('잠듦 — 기호 눈 뺌')
+    expect(eyeReason('gaze', 'covered')).toBe('눈 가림 — 시선 뺌')
+    expect(eyeReason('state', 'closed')).toBe('눈 감음 — 눈 상태 뺌')
   })
 })
 
@@ -352,12 +1015,12 @@ describe('카드에서 눈 외형 빼기', () => {
     }
   })
 
-  it('눈 모양 · 속눈썹 · 화장 · 안경 · 안대 · 고글 · 가면 · 눈 주변 흉터 · 반쯤 감은 눈은 남긴다', () => {
+  it('눈매 윤곽 · 속눈썹 · 눈썹 · 화장 · 안경 · 안대 · 고글 · 가면 · 눈 주변 흉터·점 · 눈물은 남긴다', () => {
     const keep = [
       'tsurime',
       'tareme',
-      'jitome',
       'long eyelashes',
+      'thick eyebrows',
       'eyeshadow',
       'eyeliner',
       'mascara',
@@ -366,8 +1029,11 @@ describe('카드에서 눈 외형 빼기', () => {
       'goggles',
       'eye mask',
       'scar across eye',
-      'half-closed eyes',
-      'one eye covered'
+      'mole under eye',
+      'bags under eyes',
+      'tears',
+      'one eye covered',
+      'facing viewer'
     ]
     const card = `1girl, blue eyes, ${keep.join(', ')}, slit pupils, red hair`
     const r = strip(card, ['closed eyes'])
@@ -375,6 +1041,205 @@ describe('카드에서 눈 외형 빼기', () => {
     expect(r.notes.map((n) => n.before)).toEqual(['blue eyes', 'slit pupils'])
   })
 
+  it('기호 눈 · 눈 상태 · 시선도 뺀다 — 눈을 떠야만 보이는 것은 카드에서 전부', () => {
+    const card = [
+      '1girl',
+      'blue eyes',
+      'heart-shaped eyes',
+      '@_@',
+      'solid circle eyes',
+      'half-closed eyes',
+      'jitome',
+      'sanpaku',
+      'empty eyes',
+      'crazy eyes',
+      'wide-eyed',
+      'rolling eyes',
+      'looking at viewer',
+      'eye contact',
+      'tsurime',
+      'facing viewer',
+      'red hair'
+    ].join(', ')
+    const r = strip(card, ['closed eyes'])
+    expect(r.text).toBe('1girl, tsurime, facing viewer, red hair')
+    expect(r.notes.map((n) => [n.before, n.reason])).toEqual([
+      ['blue eyes', '눈 감음 — 눈 색 뺌'],
+      ['heart-shaped eyes', '눈 감음 — 기호 눈 뺌'],
+      ['@_@', '눈 감음 — 기호 눈 뺌'],
+      ['solid circle eyes', '눈 감음 — 기호 눈 뺌'],
+      ['half-closed eyes', '눈 감음 — 눈 상태 뺌'],
+      ['jitome', '눈 감음 — 눈 상태 뺌'],
+      ['sanpaku', '눈 감음 — 눈 상태 뺌'],
+      ['empty eyes', '눈 감음 — 눈 상태 뺌'],
+      ['crazy eyes', '눈 감음 — 눈 상태 뺌'],
+      ['wide-eyed', '눈 감음 — 눈 상태 뺌'],
+      ['rolling eyes', '눈 감음 — 눈 상태 뺌'],
+      ['looking at viewer', '눈 감음 — 시선 뺌'],
+      ['eye contact', '눈 감음 — 시선 뺌']
+    ])
+  })
+
+  it('xd 의 감은 눈이 근거이면 위로 돌아간 눈 · 눈 뜨는 중 · 나선 눈 · 별 모양 눈도 뺀다', () => {
+    const card =
+      '1girl, green eyes, eyes rolled back, opening eyes, spiral eyes, star-shaped eyes, xd, red hair'
+    const r = strip(card, ['xd'])
+    expect(r.text).toBe('1girl, xd, red hair')
+    expect(r.notes.map((n) => [n.before, n.reason])).toEqual([
+      ['green eyes', '눈 감음 — 눈 색 뺌'],
+      ['eyes rolled back', '눈 감음 — 눈 상태 뺌'],
+      ['opening eyes', '눈 감음 — 눈 상태 뺌'],
+      ['spiral eyes', '눈 감음 — 기호 눈 뺌'],
+      ['star-shaped eyes', '눈 감음 — 기호 눈 뺌']
+    ])
+    expect(r.notes.every((n) => n.evidence === 'xd' && n.cause === undefined)).toBe(true)
+  })
+
+  it('까닭마다 이유에 까닭이 보이고, 눈 감음이 아니면 메모에 cause 가 붙는다', () => {
+    const card = '1girl, blue eyes, heart-shaped eyes, looking at viewer'
+    const closed = strip(card, ['closed eyes'])
+    expect(closed.notes.every((n) => !('cause' in n))).toBe(true)
+    const asleep = strip(card, ['sleeping'])
+    expect(asleep.text).toBe('1girl')
+    expect(asleep.notes.map((n) => [n.cause, n.evidence, n.reason])).toEqual([
+      ['asleep', 'sleeping', '잠듦 — 눈 색 뺌'],
+      ['asleep', 'sleeping', '잠듦 — 기호 눈 뺌'],
+      ['asleep', 'sleeping', '잠듦 — 시선 뺌']
+    ])
+    const covered = strip(card, ['black blindfold'])
+    expect(covered.text).toBe('1girl')
+    expect(covered.notes.map((n) => [n.cause, n.evidence, n.reason])).toEqual([
+      ['covered', 'black blindfold', '눈 가림 — 눈 색 뺌'],
+      ['covered', 'black blindfold', '눈 가림 — 기호 눈 뺌'],
+      ['covered', 'black blindfold', '눈 가림 — 시선 뺌']
+    ])
+  })
+
+  it('복장에 눈 가림 물건이 있으면 근거 — 「복장 …」으로 보이고, 복장의 감은 눈·잠듦은 근거가 아니다', () => {
+    const r = strip('1girl, blue eyes, red hair', [], 'female', {
+      outfit: 'black blindfold, white dress'
+    })
+    expect(r.text).toBe('1girl, red hair')
+    expect(r.notes).toEqual([
+      {
+        kind: 'removed',
+        where: 'char',
+        topic: 'eyes',
+        cause: 'covered',
+        charIndex: 0,
+        name: '합성 카드',
+        charId: 7,
+        before: 'blue eyes',
+        evidence: '복장 black blindfold',
+        reason: '눈 가림 — 눈 색 뺌'
+      }
+    ])
+    expect(
+      strip('1girl, blue eyes', [], 'female', { outfit: 'closed eyes, sleeping' }).notes
+    ).toEqual([])
+    // 눈가리개를 들어 올린 장면이면 복장의 눈가리개도 근거가 아니다
+    expect(
+      strip('1girl, blue eyes', { char: ['blindfold lift'] }, 'female', {
+        outfit: 'black blindfold'
+      }).notes
+    ).toEqual([])
+  })
+
+  it('card 자체 글의 감음·잠듦·가림 태그는 근거로 쓰지 않는다', () => {
+    for (const card of [
+      '1girl, blue eyes, closed eyes',
+      '1girl, blue eyes, sleeping',
+      '1girl, blue eyes, blindfold'
+    ]) {
+      const r = strip(card, ['smile'])
+      expect(r.text, card).toBe(card)
+      expect(r.notes, card).toEqual([])
+    }
+  })
+})
+
+describe('더 좁은 글의 말이 이긴다', () => {
+  const CARD = '1girl, blue eyes, slit pupils, red hair'
+
+  it('근거가 씬 전체 글인데 이 캐릭터의 글에 눈 뜬 표현이 분명하면 빼지 않고 안 바꿈으로 알린다', () => {
+    const r = strip(CARD, { scene: ['bed, closed eyes'], char: ['smile, rolling eyes'] })
+    expect(r.text).toBe(CARD)
+    expect(r.notes.map((n) => [n.kind, n.before, n.evidence, n.reason])).toEqual([
+      [
+        'kept',
+        'blue eyes',
+        'closed eyes',
+        '눈 감음 — 이 캐릭터의 글에 눈 뜬 표현(rolling eyes)이 있어 그대로 둠'
+      ],
+      [
+        'kept',
+        'slit pupils',
+        'closed eyes',
+        '눈 감음 — 이 캐릭터의 글에 눈 뜬 표현(rolling eyes)이 있어 그대로 둠'
+      ]
+    ])
+    expect(r.notes.every((n) => n.topic === 'eyes' && n.where === 'char')).toBe(true)
+  })
+
+  it('얼굴 인셋 자리면 이유에 「인셋 자리」가 보인다', () => {
+    const r = strip(CARD, { scene: ['closed eyes'], char: ['close-up, wide-eyed'] }, 'female', {
+      faceSeat: true
+    })
+    expect(r.text).toBe(CARD)
+    expect(r.notes[0].reason).toBe('눈 감음 — 인셋 자리에 눈 뜬 표현(wide-eyed)이 있어 그대로 둠')
+  })
+
+  it('역할 칸의 눈 뜬 표현도 씬 전체 글보다 좁다', () => {
+    const r = strip(CARD, { scene: ['closed eyes'], role: ['looking at viewer'] })
+    expect(r.text).toBe(CARD)
+    expect(r.notes[0].reason).toBe(
+      '눈 감음 — 하는쪽·당하는쪽 칸에 눈 뜬 표현(looking at viewer)이 있어 그대로 둠'
+    )
+  })
+
+  it('눈 뜬 표현이 더 넓은 글에 있고 근거가 더 좁으면 근거를 따른다 — 말도 안 한다', () => {
+    const r = strip(CARD, { scene: ['looking at viewer, wide-eyed'], char: ['closed eyes'] })
+    expect(r.text).toBe('1girl, red hair')
+    expect(r.notes.map((n) => n.reason)).toEqual(['눈 감음 — 눈 색 뺌', '눈 감음 — 동공 뺌'])
+  })
+
+  it('근거와 눈 뜬 표현이 같은 범위에 있으면(모순) 근거를 따르되 메모에 둘 다 보인다', () => {
+    const r = strip(CARD, ['bed, closed eyes, looking at viewer'])
+    expect(r.text).toBe('1girl, red hair')
+    expect(r.notes.map((n) => [n.evidence, n.reason])).toEqual([
+      [
+        'closed eyes',
+        '눈 감음 — 눈 색 뺌 · 같은 범위에 눈 뜬 표현(looking at viewer)도 있으나 근거를 따름'
+      ],
+      [
+        'closed eyes',
+        '눈 감음 — 동공 뺌 · 같은 범위에 눈 뜬 표현(looking at viewer)도 있으나 근거를 따름'
+      ]
+    ])
+  })
+
+  it('복장의 눈가리개는 이 캐릭터의 글과 같은 범위라 — 이 캐릭터 글의 시선과는 모순으로 보고 뺀다', () => {
+    const r = strip(CARD, { char: ['looking at viewer'] }, 'female', { outfit: 'black blindfold' })
+    expect(r.text).toBe('1girl, red hair')
+    expect(r.notes[0].reason).toContain('같은 범위에 눈 뜬 표현(looking at viewer)')
+    // 씬 전체 글의 시선은 복장보다 넓어서 지고, 이 캐릭터 글의 눈 뜬 표현이 복장보다 좁을 수는 없다
+    expect(
+      strip(CARD, { scene: ['looking at viewer'] }, 'female', {
+        outfit: 'black blindfold'
+      }).notes.map((n) => n.reason)
+    ).toEqual(['눈 가림 — 눈 색 뺌', '눈 가림 — 동공 뺌'])
+  })
+
+  it('눈 뜬 표현 때문에 아무것도 안 빼는 경우, 짝 안 맞는 줄·랜덤 선택지 안내는 따로 하지 않는다', () => {
+    const r = strip('1girl, (blue eyes/red eyes), 1.2::slit pupils', {
+      scene: ['closed eyes'],
+      char: ['rolling eyes']
+    })
+    expect(r.notes).toEqual([])
+  })
+})
+
+describe('카드에서 눈 외형 빼기 — 나머지', () => {
   it('가중치 묶음은 그 태그만 빼고 가중치는 그대로, 비면 묶음째 뺀다', () => {
     expect(strip('1.3::blue eyes, red hair::, smile', ['closed eyes']).text).toBe(
       '1.3::red hair::, smile'

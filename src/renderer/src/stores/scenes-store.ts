@@ -40,7 +40,7 @@ import {
   seatSlots,
   scenePositivePrompt,
   sceneNegativePrompt,
-  sceneContextsFor,
+  sceneContextGroupsFor,
   prioritizeSceneCharacterIds,
   roleTagsFor
 } from '@shared/scene-request'
@@ -292,7 +292,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   const globalStripOnNude = useOutfitsStore.getState().stripOnNude
   const kindOf = clothKindOf()
   const futaOn = useOutfitsStore.getState().futaReassembly
-  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
+  // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
   const eyesOn = useOutfitsStore.getState().eyesClosedStrip
   const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
@@ -440,13 +440,15 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // — 그래야 배치 창에서 본 그림과 실제 생성이 같다.
     const addPos = seated ? undefined : add?.positions?.[c.id]
     // 이 캐릭터에게 걸린 장면 태그 — 씬 전체 태그는 당하는쪽(역할이 없는 씬이면 전원)에게만
-    const sceneContexts = sceneContextsFor({
+    // (눈 감음은 범위별로 갈라 읽는다 — 더 좁은 글의 말이 이기려면 어느 범위의 글인지 알아야 한다)
+    const sceneGroups = sceneContextGroupsFor({
       role,
       anyRole,
       prompts: [base.prompt, scene.prompt],
       scene,
       tags: [charTag, slotTag, partnerTag]
     })
+    const sceneContexts = [...sceneGroups.scene, ...sceneGroups.role, ...sceneGroups.char]
     // nsfw 조각 (커스텀) — 아래·가슴이 드러나는 장면이면 그 조각이 저절로 켜진다.
     // 씬에서 켜고 끈 것이 이기고, 씬에서 자동 켜기를 껐으면 켜지지 않는다
     // 얼굴만 나오는 자리(inset·portrait·close-up)는 씬 전체 태그로 켜지 않고 자리 태그로만
@@ -501,15 +503,18 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       kindOf
     })
     const outfitTag = dressed.outfit
-    // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그
-    // (exposeContexts: 옷 벗기기와 같은 범위, 얼굴 인셋 자리는 그 자리 태그만)에 closed eyes 가 있을 때. 설정 「눈 감으면 눈 태그 빼기」가
-    // 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다.
+    // 눈이 안 보이면(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈·기호 눈·눈 상태·시선)를 뺀다 (커스텀) —
+    // 이 캐릭터에게 걸린 장면 태그(sceneGroups: 옷 벗기기와 같은 범위, 얼굴 인셋 자리도 몸 자리와 같이 읽는다)나
+    // 지금 입은 복장(dressed.outfit)의 눈 가림 물건에 근거가 있을 때. 더 좁은 글(캐릭터·자리·상대 태그)에 눈 뜬 표현이 분명하면 빼지 않는다.
+    // 설정 「눈이 안 보이면 눈 태그 빼기」가 꺼져 있으면(기본) 카드 글 그대로이고, 뺀 것은 bodyNotes 에 남는다.
     // 후타는 her/his 문장의 성별로 거르지 않는다 (몸이 역할의 성별과 다를 수 있다)
     const eyes = stripEyesWhenClosed({
       enabled: eyesOn,
       card: dressed.card,
-      contexts: exposeContexts,
+      contexts: sceneGroups,
+      outfit: dressed.outfit,
       sex: reading.body.futa ? null : meta.sex,
+      faceSeat,
       who: { index, name: c.name, id: c.id }
     })
     // 후타 재조립 (커스텀) — 이 캐릭터에게 붙는 글(하는쪽/당하는쪽 칸·자리·캐릭터·상대 태그)도 후타 구성에 맞게 바꾼다.
