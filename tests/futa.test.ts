@@ -207,6 +207,38 @@ describe('후타 계획', () => {
     expect(girlsTag(c(3, 4, 0))).toBe('6+girls')
   })
 
+  it('하는쪽 역할의 후타가 있을 때만 sourceFuta — 당하는쪽·역할 없음·후타 아님은 아니다', () => {
+    const counts = { futa: 1, female: 1, male: 0 }
+    const base = { counts, viewFix: true, dedupePenis: false }
+    expect(planFuta([{ kind: 'futa', role: 'source' }, { kind: 'female' }], true)).toEqual({
+      ...base,
+      sourceFuta: true
+    })
+    expect(planFuta([{ kind: 'futa', role: 'target' }, { kind: 'female' }], true)).toEqual(base)
+    expect(planFuta([{ kind: 'futa', role: null }, { kind: 'female' }], true)).toEqual(base)
+    expect(planFuta([{ kind: 'futa' }, { kind: 'female' }], true)).toEqual(base)
+    // 하는쪽 역할이어도 후타가 아니면(남·여) 세지 않는다
+    expect(
+      planFuta(
+        [
+          { kind: 'futa', role: 'target' },
+          { kind: 'female', role: 'source' }
+        ],
+        true
+      )
+    ).toEqual(base)
+    // 후타가 둘이고 하나만 하는쪽이어도 켠다
+    expect(
+      planFuta(
+        [
+          { kind: 'futa', role: 'target' },
+          { kind: 'futa', role: 'source' }
+        ],
+        true
+      )?.sourceFuta
+    ).toBe(true)
+  })
+
   it('large penis 가 카드에 있는 후타가 있으면 dedupePenis', () => {
     const p = planFuta([{ kind: 'futa', largePenis: true }, { kind: 'female' }], false)
     expect(p).toEqual({
@@ -464,6 +496,92 @@ describe('씬 글 재조립 (rewriteSceneTexts) — 후타+여', () => {
   })
 })
 
+describe('R8 구도 — 하는쪽 후타가 그려지면 씬 전체 글의 head out of frame 도 뺀다', () => {
+  const src: FutaPlan = { ...plan(1, 1), sourceFuta: true }
+  const rw = (prompt: string, p: FutaPlan = src): ReturnType<typeof rewriteSceneTexts> =>
+    rewriteSceneTexts(p, { base: '', prompt })
+
+  it('씬 글의 head out of frame 을 빼고 메모에 이유를 남긴다', () => {
+    const r = rw('1girl, 1boy, hetero, head out of frame, pov, kiss')
+    expect(r.prompt).toBe('2girls, futa with female, from side, kiss')
+    const note = r.notes.find((n) => n.before === 'head out of frame')
+    expect(note).toEqual({
+      kind: 'removed',
+      where: 'scene',
+      before: 'head out of frame',
+      reason: '하는쪽 후타의 얼굴이 보이게 씬 전체 글의 head out of frame 을 뺌'
+    })
+  })
+
+  it('메인 프롬프트(3분할 포함)의 head out of frame 도 같다 — 메모의 위치는 main', () => {
+    const r = rewriteSceneTexts(src, {
+      base: '',
+      parts: { base: '1girl, masterpiece', additional: 'head out of frame', detail: 'hetero' },
+      prompt: '1boy, kiss'
+    })
+    expect(r.parts?.additional).toBe('')
+    expect(r.notes.find((n) => n.before === 'head out of frame')?.where).toBe('main')
+  })
+
+  it('가중치 묶음 안이면 그 태그만 뺀다 (가중치 숫자는 그대로, 비면 묶음째)', () => {
+    expect(rw('1boy, hetero, 1.2::head out of frame, sweat::, kiss').prompt).toBe(
+      'futa with female, 1.2::sweat::, kiss'
+    )
+    expect(rw('1boy, hetero, 1.2::head out of frame::, kiss').prompt).toBe('futa with female, kiss')
+  })
+
+  it('하는쪽 후타가 아니면 그대로 — 당하는쪽·역할 없음·옛 계획(sourceFuta 없음)', () => {
+    const text = '1girl, 1boy, hetero, head out of frame, pov, kiss'
+    const keep = '2girls, futa with female, head out of frame, from side, kiss'
+    expect(rw(text, plan(1, 1)).prompt).toBe(keep)
+    expect(rw(text, { ...plan(1, 1), sourceFuta: false }).prompt).toBe(keep)
+  })
+
+  it('시점·구도 정리를 끄면 그대로, 남자가 같이 그려져도 그대로', () => {
+    expect(rw('1boy, hetero, head out of frame, kiss', { ...src, viewFix: false }).prompt).toBe(
+      'futa with female, head out of frame, kiss'
+    )
+    const withMale: FutaPlan = { ...plan(1, 0, 1), sourceFuta: true }
+    expect(rw('1girl, 1boy, hetero, head out of frame, kiss', withMale).prompt).toBe(
+      '1girl, 1boy, futa with male, head out of frame, kiss'
+    )
+  })
+
+  it('남자 시점 씬이 아니면(입맞춤 등) 그대로 — 다른 시점·구도 정리와 같은 조건', () => {
+    expect(rw('1girl, head out of frame, imminent kiss').prompt).toBe(
+      '1girl, head out of frame, imminent kiss'
+    )
+  })
+
+  it('다른 구도 태그와 문장은 건드리지 않는다 — lower body 는 씬 글에서 그대로, 화면 밖 문장은 안 바꿈', () => {
+    const r = rw('1boy, hetero, lower body, His head out of frame, kiss')
+    expect(r.prompt).toBe('futa with female, lower body, His head out of frame, kiss')
+    expect(r.notes.filter((n) => n.kind === 'kept').map((n) => n.before)).toEqual([
+      'His head out of frame'
+    ])
+  })
+
+  it('하는쪽 칸의 head out of frame 은 이 값과 상관없이 뺀다 (예전과 같음)', () => {
+    const state = rw('handjob').state
+    for (const p of [plan(1, 1), src]) {
+      const c = rewriteCharTexts(
+        p,
+        { source: 'head out of frame, smile' },
+        { index: 0, name: '카드', role: 'source', hasGirl: true },
+        state
+      )
+      expect(c.texts.source).toBe('smile')
+    }
+  })
+
+  it('멱등 — 같은 계획으로 다시 적용해도 결과가 같고 새 메모가 없다', () => {
+    const once = rw('1girl, 1boy, hetero, head out of frame, pov, penis focus, kiss')
+    const twice = rw(once.prompt)
+    expect(twice.prompt).toBe(once.prompt)
+    expect(twice.notes.filter((n) => n.kind !== 'kept')).toEqual([])
+  })
+})
+
 describe('후타+남 — 남자는 그려지니 hetero 만 바꾼다', () => {
   it('hetero → futa with male, 1boy·male 구절·pov 는 그대로', () => {
     const r = rewriteSceneTexts(plan(1, 0, 1), {
@@ -558,11 +676,20 @@ const SYNTHETIC: string[] = [
   '3::1boy, hetero::, 1girl, # 1boy 는 주석\nsweat',
   '1girl, 1boy, hetero, <outfit>, (1boy/2boys), smile',
   '1boy, hetero, disembodied hand, from side',
-  'multiple boys, 1girl, hetero, girl blush'
+  'multiple boys, 1girl, hetero, girl blush',
+  '1girl, 1boy, hetero, head out of frame, pov, fellatio',
+  '1girl, hetero, 2::head out of frame, lower body::, sweat'
 ]
 
 describe('불변식 — 몰래 바꾸기 금지 · 멱등', () => {
-  const plans = [plan(1, 1), plan(1, 0), plan(2, 0), plan(1, 2), plan(1, 1, 0, false, true)]
+  const plans = [
+    plan(1, 1),
+    plan(1, 0),
+    plan(2, 0),
+    plan(1, 2),
+    plan(1, 1, 0, false, true),
+    { ...plan(1, 1), sourceFuta: true }
+  ]
 
   it('치환 전후의 태그 차이는 전부 메모에 있다', () => {
     for (const p of plans) {

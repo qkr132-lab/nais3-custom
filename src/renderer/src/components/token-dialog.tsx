@@ -235,7 +235,7 @@ function GenerationSection(): React.JSX.Element {
       </Row>
       <Row
         label="후타 시점·구도 정리"
-        hint="남자 시점 씬(남자 선언이나 음경 행위가 있음)에서 후타가 보이도록 pov·pov hands·pov crotch·disembodied hand 를 from side 로 바꾸고(다른 앵글 태그가 있으면 뺄 뿐) 하는쪽 칸의 head out of frame·lower body, 씬의 penis focus 를 뺌 · 후타 자동 재조립이 켜져 있을 때만 · 끄면 시점·구도는 글 그대로"
+        hint="남자 시점 씬(남자 선언이나 음경 행위가 있음)에서 후타가 보이도록 pov·pov hands·pov crotch·disembodied hand 를 from side 로 바꾸고(다른 앵글 태그가 있으면 뺄 뿐) 하는쪽 칸의 head out of frame·lower body, 씬의 penis focus 를 뺌 (하는쪽 후타가 그려지면 씬 전체 글의 head out of frame 도 뺌) · 후타 자동 재조립이 켜져 있을 때만 · 끄면 시점·구도는 글 그대로"
       >
         <Switch
           aria-label="후타 시점·구도 정리"

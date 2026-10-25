@@ -11,6 +11,7 @@ import {
   bodySummaryText,
   futaCardsOff,
   groupBodyRounds,
+  isEyeNote,
   isFutaNote,
   isPinkNote,
   mergeBodyRows,
@@ -398,6 +399,110 @@ describe('캐릭터 배지', () => {
       ]).attention
     ).toEqual(['conflict', 'unreadable'])
     expect(bodyCharBadge([]).title).toBe('')
+  })
+})
+
+describe('눈 감음 메모 — 카드의 눈 외형 태그를 뺀 것', () => {
+  const eye = (charIndex: number, name: string, before: string, charId = charIndex + 1): BodyNote =>
+    note({
+      kind: 'removed',
+      where: 'char',
+      topic: 'eyes',
+      charIndex,
+      charId,
+      name,
+      before,
+      evidence: 'closed eyes',
+      reason: '눈 감음 — 눈 색 뺌'
+    })
+
+  it('후타 메모와 따로 센다 — 후타 때문에 뺀 것과 섞이지 않고, 태그 수가 아니라 카드 수로 센다', () => {
+    const notes = [
+      eye(0, 'A', 'blue eyes'),
+      eye(0, 'A', 'slit pupils'),
+      eye(1, 'B', 'red eyes'),
+      note({ kind: 'removed', where: 'scene', before: '1boy' })
+    ]
+    expect(isEyeNote(notes[0])).toBe(true)
+    expect(isEyeNote(notes[3])).toBe(false)
+    expect(bodyCounts(notes).map((c) => c.label)).toEqual(['뺌 1', '눈 감음 2명'])
+    expect(
+      bodyCounts([eye(0, 'A', 'blue eyes'), eye(0, 'A', 'slit pupils')]).map((c) => c.label)
+    ).toEqual(['눈 감음 1명'])
+    // 메모가 없으면 말하지 않는다
+    expect(bodyCounts([]).map((c) => c.label)).toEqual([])
+  })
+
+  it('눈 감음만 있으면 처음부터 펴지 않고 접힌 줄의 색으로 알린다 (감은 눈 씬마다 매번 열리지 않게)', () => {
+    const counts = bodyCounts([eye(0, 'A', 'blue eyes')])
+    expect(counts.find((c) => c.id === 'eyes')).toMatchObject({ tone: 'ok', loud: false })
+    expect(opensByDefault(counts)).toBe(false)
+    // 후타 때문에 바뀐 것이 같이 있으면 평소처럼 편다
+    expect(
+      opensByDefault(
+        bodyCounts([eye(0, 'A', 'blue eyes'), replaced('scene', 'hetero', 'futa with female')])
+      )
+    ).toBe(true)
+  })
+
+  it('후타 배지의 호버에는 들지 않고, 「눈 감음」 배지가 따로 달린다', () => {
+    const own = [
+      note({ kind: 'added', where: 'char', charIndex: 0, name: 'A', after: 'no testicles' }),
+      eye(0, 'A', 'blue eyes'),
+      eye(0, 'A', 'slit pupils')
+    ]
+    expect(isFutaNote(own[1])).toBe(false)
+    const badge = bodyCharBadge(own, true)
+    expect(badge).toMatchObject({ futa: true, pink: false, eyes: true, attention: [] })
+    expect(badge.titleOf('futa')).toContain('no testicles')
+    expect(badge.titleOf('futa')).not.toContain('blue eyes')
+    const lines = badge.titleOf('eyes').split('\n')
+    expect(lines[0]).toBe('눈 감음')
+    expect(lines).toHaveLength(3)
+    expect(lines.join('\n')).toContain('blue eyes')
+    expect(lines.join('\n')).toContain('(근거 closed eyes)')
+    expect(lines.join('\n')).toContain('눈 감음 — 눈 색 뺌')
+    // 종류 배지(뺌)에는 눈 감음 메모가 들지 않는다
+    expect(badge.titleOf('removed')).toBe('')
+    expect(bodyCharBadge([eye(0, 'A', 'blue eyes')]).eyes).toBe(true)
+    expect(bodyCharBadge([pink(0, 'A')]).eyes).toBe(false)
+    expect(bodyCharBadge([]).eyes).toBe(false)
+  })
+
+  it('뺄 수 없어 둔 눈 외형은 「안 바꿈」으로 세고, 「눈 감음 N명」·배지는 실제로 뺀 카드만', () => {
+    const kept = note({
+      kind: 'kept',
+      where: 'char',
+      topic: 'eyes',
+      charIndex: 0,
+      charId: 1,
+      name: 'A',
+      before: '(blue eyes/red eyes)',
+      evidence: 'closed eyes',
+      reason:
+        '눈 감음 — 눈 외형이 있으나 랜덤 선택지·와일드카드라 뽑힐 값을 미리 알 수 없어 그대로 둠'
+    })
+    expect(isEyeNote(kept)).toBe(true)
+    expect(bodyCounts([kept]).map((c) => c.label)).toEqual(['안 바꿈 1'])
+    expect(bodyCounts([kept, eye(1, 'B', 'blue eyes')]).map((c) => c.label)).toEqual([
+      '눈 감음 1명',
+      '안 바꿈 1'
+    ])
+    // 뺀 것이 없는 카드에는 「눈 감음」 배지를 달지 않는다 — 호버(안 바꿈)에는 보인다
+    const badge = bodyCharBadge([kept])
+    expect(badge.eyes).toBe(false)
+    expect(badge.titleOf('kept')).toContain('(blue eyes/red eyes)')
+    expect(isFutaNote(kept)).toBe(false)
+    expect(opensByDefault(bodyCounts([kept]))).toBe(false)
+  })
+
+  it('같은 태그를 뺀 줄은 위치를 모아 한 줄로 보인다', () => {
+    const rows = mergeBodyRows([eye(0, 'A', 'blue eyes'), eye(1, 'B', 'blue eyes')])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].places).toEqual(['A', 'B'])
+    expect(bodyNoteLine(eye(0, 'A', 'blue eyes'))).toBe(
+      'A · 뺌 blue eyes (근거 closed eyes) — 눈 감음 — 눈 색 뺌'
+    )
   })
 })
 

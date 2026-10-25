@@ -23,6 +23,7 @@ import {
   receivesSceneText
 } from '@shared/expose-state'
 import { readBody } from '@shared/body'
+import { stripEyesWhenClosed } from '@shared/eyes'
 import {
   bodyTagsFor,
   flagNotes,
@@ -368,7 +369,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
                     testicleType: m.reading.testicleType,
                     index,
                     id: m.c.id,
-                    name: m.c.name
+                    name: m.c.name,
+                    // 하는쪽 후타가 그려지면 씬 전체 글의 head out of frame 도 뺀다 (시점·구도 정리)
+                    role: m.role ?? null
                   }
                 ]
           ),
@@ -495,6 +498,15 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       kindOf
     })
     const outfitTag = dressed.outfit
+    // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그
+    // (exposeContexts: 옷 벗기기와 같은 범위, 얼굴 인셋 자리는 그 자리 태그만)에 closed eyes 가 있을 때. 설정은 없고 뺀 것은 bodyNotes 에 남는다.
+    // 후타는 her/his 문장의 성별로 거르지 않는다 (몸이 역할의 성별과 다를 수 있다)
+    const eyes = stripEyesWhenClosed({
+      card: dressed.card,
+      contexts: exposeContexts,
+      sex: reading.body.futa ? null : meta.sex,
+      who: { index, name: c.name, id: c.id }
+    })
     // 후타 재조립 (커스텀) — 이 캐릭터에게 붙는 글(하는쪽/당하는쪽 칸·자리·캐릭터·상대 태그)도 후타 구성에 맞게 바꾼다.
     // 젖힘 엔진은 바꾸기 전 원문을 읽는다 (아래 own 은 원문)
     const rw =
@@ -552,7 +564,8 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     bodyNotes.push(
       ...(rw?.notes ?? []),
       ...(bodyTags?.notes ?? []),
-      ...(futaOn && !faceSeat ? flagNotes(reading, index, c.name, c.id) : [])
+      ...(futaOn && !faceSeat ? flagNotes(reading, index, c.name, c.id) : []),
+      ...eyes.notes
     )
     // 입은 옷 자동 젖힘 (커스텀) — 옷 벗기기가 끝난 카드·복장 글을 읽어, 입은 옷에 맞는 젖힘 태그를 붙이거나
     // 안 붙인 이유를 남긴다. 알몸이면 붙이지 않는다. 붙은 태그는 반드시 exposeNotes 에 있다
@@ -589,7 +602,7 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
         withRole(slotTagOut),
         withRole(partnerTagOut),
         roleTagsOut
-      ].reduce(appendPrompt, dressed.card),
+      ].reduce(appendPrompt, eyes.text),
       // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
       negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
       // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은

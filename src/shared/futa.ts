@@ -38,6 +38,8 @@ export interface FutaPerson {
   index?: number
   id?: number
   name?: string
+  /** 이 사람의 행위 역할 (자리 역할 > 씬별 역할 > 카드 역할) — 하는쪽 후타가 그려지는지 가린다 */
+  role?: 'source' | 'target' | null
 }
 
 /**
@@ -55,6 +57,7 @@ export function planFuta(people: FutaPerson[], viewFix: boolean): FutaPlan | nul
     viewFix,
     dedupePenis: futas.some((p) => p.largePenis),
     ...(futas.some((p) => p.testicleType) ? { keepTesticles: true } : {}),
+    ...(futas.some((p) => p.role === 'source') ? { sourceFuta: true } : {}),
     ...(chars.length
       ? { chars: chars.map((p) => ({ index: p.index!, id: p.id!, name: p.name ?? '' })) }
       : {})
@@ -119,9 +122,18 @@ export type TagVerdict =
  * - 바뀐 게 없으면 원문 그대로 돌려준다 (같은 문자열)
  * decide(정규화 태그, 원문 태그): null = 그대로.
  */
+/** mapTags 가 바꾸지 못한 곳을 알릴 때 무엇을 알릴 만한 글로 볼지 — 정하지 않으면 후타의 기준(남성 낱말)을 쓴다 */
+export interface MapTagsWatch {
+  /** 가중치 짝이 안 맞아 줄째 둔 줄(body)에 알릴 만한 태그가 있는가 */
+  broken?: (body: string) => boolean
+  /** 랜덤 선택지·와일드카드 토큰이라 건드리지 않은 토큰에 알릴 만한 태그가 있는가 (정하지 않으면 알리지 않는다) */
+  wildcard?: (token: string) => boolean
+}
+
 export function mapTags(
   prompt: string,
-  decide: (tag: string, raw: string) => TagVerdict | null
+  decide: (tag: string, raw: string) => TagVerdict | null,
+  watch?: MapTagsWatch
 ): { text: string; edits: TagEdit[]; kept: TagKept[] } {
   const edits: TagEdit[] = []
   const kept: TagKept[] = []
@@ -156,7 +168,7 @@ export function mapTags(
     // 가중치 표기(::)의 짝이 맞지 않는 줄 — 어디까지가 한 묶음인지 알 수 없다. 줄째 건드리지 않는다
     // (-2:: 같은 억제가 사라지거나, 줄을 다시 이으며 쉼표가 끼어 뜻이 달라지면 안 된다)
     if (tokens.some(isBrokenWeight)) {
-      if (BROKEN_WATCH.test(body))
+      if (watch?.broken ? watch.broken(body) : BROKEN_WATCH.test(body))
         kept.push({
           before: body.trim(),
           reason: '가중치 표기(::)의 짝이 맞지 않는 줄이라 안전하게 바꿀 수 없어 줄째 그대로 둠'
@@ -167,10 +179,17 @@ export function mapTags(
     for (const token of tokens) {
       const quotes = (token.match(/["“”]/g) ?? []).length
       const group = /^(-?\d*\.?\d+)::([\s\S]*?)::$/.exec(token.trim())
-      const skip =
-        inQuote || quotes > 0 || isNegativeWeight(token) || isZeroWeight(token) || isWildcard(token)
+      const quoted = inQuote || quotes > 0
+      const off = isNegativeWeight(token) || isZeroWeight(token)
+      const skip = quoted || off || isWildcard(token)
       if (quotes % 2 === 1) inQuote = !inQuote
       if (skip) {
+        // 랜덤 선택지·와일드카드는 뽑힐 값을 알 수 없다 — 알릴 만한 태그가 들어 있으면 그대로 뒀다고 알린다
+        if (!quoted && !off && watch?.wildcard?.(token))
+          kept.push({
+            before: token.trim(),
+            reason: '랜덤 선택지·와일드카드라 뽑힐 값을 미리 알 수 없어 그대로 둠'
+          })
         keptTokens.push(token)
         continue
       }
@@ -441,6 +460,13 @@ function rewriteOne(
         (where === 'source' || ((where === 'slot' || where === 'char') && ctx.role === 'source'))
       )
         return { after: '', reason: `하는쪽의 얼굴·몸이 보이게 ${tag} 를 뺌` }
+      // 하는쪽 후타가 그려지면 씬 전체 글(메인·씬 프롬프트)의 head out of frame 도 뺀다 — 하는쪽 칸의 것과 같은 까닭이다.
+      // 하는쪽 후타가 아닌 씬(후타가 당하는쪽이거나 남자가 같이 그려짐)의 씬 글은 누구의 얼굴인지 몰라 그대로 둔다
+      if (tag === 'head out of frame' && scene && plan.sourceFuta)
+        return {
+          after: '',
+          reason: '하는쪽 후타의 얼굴이 보이게 씬 전체 글의 head out of frame 을 뺌'
+        }
       if (tag === 'penis focus' && scene)
         return { after: '', reason: '후타 얼굴·몸이 보이게 penis focus 를 뺌' }
     }

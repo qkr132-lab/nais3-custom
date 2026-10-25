@@ -29,7 +29,7 @@ export const KIND_META: Record<BodyKind, KindMeta> = {
   removed: {
     label: '뺌',
     tone: 'ok',
-    hint: '후타 구성에 맞지 않는 태그를 빼고 보냄 · 적어 둔 원본은 그대로'
+    hint: '후타 구성에 맞지 않거나 눈을 감아 안 보이는 태그를 빼고 보냄 · 적어 둔 원본은 그대로'
   },
   added: {
     label: '더함',
@@ -105,11 +105,18 @@ export const isPinkNote = (n: BodyNote): boolean =>
           .toLowerCase() === 'pink nipples'
     )
 
+/** 눈 감음 때문에 카드의 눈 외형 태그를 뺀 메모인가 — 후타와 상관없이 어느 카드에나 생긴다 */
+export const isEyeNote = (n: BodyNote): boolean => n.topic === 'eyes'
+
+/** 눈 외형 태그를 실제로 뺀 눈 감음 메모 — 뺄 수 없어 둔 것(kept)은 「안 바꿈」으로 센다 */
+const isEyeRemoved = (n: BodyNote): boolean => n.topic === 'eyes' && n.kind === 'removed'
+
 /**
- * 후타 때문에 생긴 메모인가 — 알몸에 더한 pink nipples(여캐도 받는다)와 눈여겨볼 상태(의심·충돌·못 읽음)는 뺀다.
+ * 후타 때문에 생긴 메모인가 — 알몸에 더한 pink nipples(여캐도 받는다), 눈 감음으로 뺀 눈 외형, 눈여겨볼 상태(의심·충돌·못 읽음)는 뺀다.
  * 어느 카드가 후타인지는 메모로 짐작하지 않는다 (상대 여캐에도 글을 바꾼 메모가 붙는다) — 요청의 futaPlan 이 알려 준다
  */
-export const isFutaNote = (n: BodyNote): boolean => !isPinkNote(n) && !BODY_ATTENTION.has(n.kind)
+export const isFutaNote = (n: BodyNote): boolean =>
+  !isPinkNote(n) && !isEyeNote(n) && !BODY_ATTENTION.has(n.kind)
 
 /**
  * 메모가 가리키는 곳 — 「메인」 「씬」 「합성 카드 A · 하는쪽 칸」.
@@ -194,7 +201,7 @@ export function mergeBodyRows(notes: readonly BodyNote[]): BodyRow[] {
 
 /** 요약 한 칸 — 개수 말고도 후타 명수 같은 글자가 들어 있다 */
 export interface BodyCount {
-  id: 'futa' | 'off' | BodyKind | 'pink'
+  id: 'futa' | 'off' | BodyKind | 'pink' | 'eyes'
   label: string
   tone: NoteTone
   /** 접힌 줄에서 색으로 눈에 띄어야 하는가 (바뀐 것·눈여겨볼 것) */
@@ -209,6 +216,7 @@ const COUNT_ORDER: BodyCount['id'][] = [
   'removed',
   'added',
   'pink',
+  'eyes',
   'conflict',
   'suspect',
   'unreadable',
@@ -229,9 +237,12 @@ export function bodyCounts(
     futa: futaDrawn && futaDrawn > 0 ? futaDrawn : -1,
     off: futaOff && futaOff > 0 ? futaOff : -1,
     replaced: notes.filter((n) => n.kind === 'replaced').length,
-    removed: notes.filter((n) => n.kind === 'removed').length,
+    removed: notes.filter((n) => n.kind === 'removed' && !isEyeNote(n)).length,
     added: notes.filter((n) => n.kind === 'added' && !isPinkNote(n)).length,
     pink: notes.filter(isPinkNote).length,
+    // 눈 감음은 태그 수가 아니라 눈 외형을 뺀 카드(캐릭터) 수로 센다
+    eyes: new Set(notes.filter(isEyeRemoved).map((n) => n.charId ?? n.charIndex ?? n.name ?? ''))
+      .size,
     conflict: notes.filter((n) => n.kind === 'conflict').length,
     suspect: notes.filter((n) => n.kind === 'suspect').length,
     unreadable: notes.filter((n) => n.kind === 'unreadable').length,
@@ -245,6 +256,8 @@ export function bodyCounts(
       return n < 0
         ? []
         : [{ id, label: `후타 카드 ${n}장 · 재조립 꺼짐`, tone: 'mute', loud: false }]
+    if (id === 'eyes')
+      return n <= 0 ? [] : [{ id, label: `눈 감음 ${n}명`, tone: 'ok', loud: false }]
     if (n <= 0) return []
     const meta = id === 'pink' ? { label: 'pink nipples', tone: 'ok' as const } : KIND_META[id]
     return [{ id, label: `${meta.label} ${n}`, tone: meta.tone, loud: id !== 'kept' }]
@@ -253,7 +266,8 @@ export function bodyCounts(
 
 /**
  * 저장된 펼침이 없을 때 처음부터 펴 둘까 — 바뀐 것이나 눈여겨볼 것이 있으면 편다 (접어 두면 바뀐 태그를 못 본다).
- * 알몸 여캐마다 붙는 pink nipples 와, 바뀐 것 없이 「못 읽음」뿐일 때는 접힌 줄의 요약(색이 있다)으로 충분해 펴지 않는다
+ * 알몸 여캐마다 붙는 pink nipples 와 눈 감음(loud 가 아니다 — 접힌 줄의 요약에서 색으로 보인다),
+ * 바뀐 것 없이 「못 읽음」뿐일 때는 접힌 줄의 요약(색이 있다)으로 충분해 펴지 않는다
  */
 export const opensByDefault = (counts: readonly BodyCount[]): boolean =>
   counts.some((c) => c.loud && c.id !== 'pink' && c.id !== 'unreadable')
@@ -297,10 +311,12 @@ export interface BodyCharBadge {
   /** 이 카드가 후타로 읽혔는가 (요청의 futaPlan.chars) */
   futa: boolean
   pink: boolean
+  /** 눈 감음으로 카드의 눈 외형 태그를 뺐다 */
+  eyes: boolean
   /** 눈여겨볼 종류 (충돌·후타 의심·못 읽음) */
   attention: BodyKind[]
   /** 배지 하나의 호버 글 — 그 배지가 가리키는 메모만 한 줄씩 */
-  titleOf: (id: 'futa' | 'pink' | BodyKind) => string
+  titleOf: (id: 'futa' | 'pink' | 'eyes' | BodyKind) => string
   /** 모든 메모의 호버 글 */
   title: string
 }
@@ -313,20 +329,23 @@ export function bodyCharBadge(notes: readonly BodyNote[], futa = false): BodyCha
   const attention = KIND_ORDER.filter(
     (k) => BODY_ATTENTION.has(k) && notes.some((n) => n.kind === k)
   )
-  const lines = (list: readonly BodyNote[]): string =>
-    list.length ? ['몸·후타', ...sorted(list).map(bodyNoteLine)].join('\n') : ''
+  const lines = (list: readonly BodyNote[], head = '몸·후타'): string =>
+    list.length ? [head, ...sorted(list).map(bodyNoteLine)].join('\n') : ''
   return {
     futa,
     pink: notes.some(isPinkNote),
+    eyes: notes.some(isEyeRemoved),
     attention,
     titleOf: (id) =>
-      lines(
-        id === 'futa'
-          ? notes.filter(isFutaNote)
-          : id === 'pink'
-            ? notes.filter(isPinkNote)
-            : notes.filter((n) => n.kind === id)
-      ),
+      id === 'eyes'
+        ? lines(notes.filter(isEyeNote), '눈 감음')
+        : lines(
+            id === 'futa'
+              ? notes.filter(isFutaNote)
+              : id === 'pink'
+                ? notes.filter(isPinkNote)
+                : notes.filter((n) => n.kind === id && !isEyeRemoved(n))
+          ),
     title: lines(notes)
   }
 }

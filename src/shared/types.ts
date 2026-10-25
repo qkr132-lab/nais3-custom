@@ -103,6 +103,11 @@ export interface BodyNote {
   after?: string
   /** 근거가 된 글 조각 */
   evidence?: string
+  /**
+   * 어느 갈래의 메모인가 — 눈 감음이면 'eyes' (카드의 눈 외형 태그를 뺀 메모). 없으면 후타·몸 메모.
+   * 화면이 후타 메모와 따로 세고 「눈 감음」 배지를 다는 데 쓴다.
+   */
+  topic?: 'eyes'
   /** 한국어 한 줄 설명 */
   reason: string
 }
@@ -120,6 +125,11 @@ export interface FutaPlan {
   dedupePenis: boolean
   /** 후타 카드에 고환 유형 태그가 있어 씬 글의 고환 태그를 빼지 않음 (없으면 거짓) */
   keepTesticles?: boolean
+  /**
+   * 하는쪽 역할의 후타가 그려진다 (없으면 거짓) — 시점·구도 정리가 씬 전체 글(메인·씬 프롬프트)의 head out of frame 도 뺀다.
+   * 하는쪽 칸의 head out of frame 은 이 값과 상관없이 뺀다. 이 값이 없던 옛 계획은 씬 전체 글을 건드리지 않는다
+   */
+  sourceFuta?: boolean
   /** 후타로 읽힌 카드 — 화면이 어느 카드에 「후타」 표시를 달지 가리는 데 쓴다 (index = characterPrompts 안의 순서) */
   chars?: { index: number; id: number; name: string }[]
 }

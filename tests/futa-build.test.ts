@@ -133,6 +133,8 @@ describe('씬 경로 — 후타(하는쪽) + 여(당하는쪽)', () => {
       counts: { futa: 1, female: 1, male: 0 },
       viewFix: true,
       dedupePenis: false,
+      // 하는쪽 역할의 후타가 그려진다 — 씬 전체 글의 head out of frame 도 뺀다
+      sourceFuta: true,
       // 어느 카드가 후타로 읽혔는지 — 화면이 「후타」 표시를 그 카드에만 달게
       chars: [{ index: 0, id: FUTA, name: '카드 1' }]
     })
@@ -643,5 +645,191 @@ describe('대기 항목 다시 만들기 (resyncPendingScenes)', () => {
     const [u] = await run([main], [])
     expect(u.request.prompt).toBe('2girls, futa with female, pov, fellatio')
     expect(u.request.futaPlan?.viewFix).toBe(false)
+  })
+})
+
+describe('씬 전체 글의 head out of frame — 하는쪽 후타가 그려질 때만 뺀다 (시점·구도 정리)', () => {
+  const HEAD = '1girl, 1boy, hetero, head out of frame, pov, kiss'
+  const headScene = sceneOf({ prompt: HEAD })
+  const HEAD_NOTE = {
+    kind: 'removed',
+    where: 'scene',
+    before: 'head out of frame',
+    reason: '하는쪽 후타의 얼굴이 보이게 씬 전체 글의 head out of frame 을 뺌'
+  }
+  beforeEach(() => setup({}))
+
+  it('하는쪽 후타 + 여: 씬 글의 head out of frame 을 빼고 메모와 계획에 남긴다', () => {
+    const r = buildSceneRequest(headScene)
+    expect(r.prompt).toBe('masterpiece, 2girls, futa with female, from side, kiss')
+    expect(r.futaPlan?.sourceFuta).toBe(true)
+    expect(r.bodyNotes).toContainEqual(HEAD_NOTE)
+    // 씬에 적힌 원본은 그대로다
+    expect(headScene.prompt).toBe(HEAD)
+  })
+
+  it('역할은 자리 역할이 이긴다 — 카드에 역할이 없어도 하는쪽 자리에 앉은 후타', () => {
+    setup({ cards: [card(FUTA, '1girl, futanari', null), card(GIRL, '1girl, red hair', null)] })
+    useSceneExtrasStore.setState({
+      additionsEnabled: true,
+      additions: {
+        1: {
+          4: {
+            characterIds: [FUTA, GIRL],
+            charRefIds: [],
+            vibeIds: [],
+            slots: [
+              { x: 0.3, y: 0.5 },
+              { x: 0.7, y: 0.5 }
+            ],
+            slotChars: { 0: FUTA, 1: GIRL },
+            slotRoles: { 0: 'source', 1: 'target' }
+          }
+        }
+      }
+    })
+    const r = buildSceneRequest(headScene)
+    expect(r.futaPlan?.sourceFuta).toBe(true)
+    expect(r.prompt).toBe('masterpiece, 2girls, futa with female, from side, kiss')
+  })
+
+  it('후타가 당하는쪽이거나 역할이 없으면 씬 글은 그대로 (하는쪽 칸 규칙은 예전과 같다)', () => {
+    setup({ futaRole: 'target', girlRole: 'source' })
+    const a = buildSceneRequest(headScene)
+    expect(a.prompt).toBe(
+      'masterpiece, 2girls, futa with female, head out of frame, from side, kiss'
+    )
+    expect(a.futaPlan).not.toHaveProperty('sourceFuta')
+    setup({ cards: [card(FUTA, '1girl, futanari', null), card(GIRL, '1girl, red hair', null)] })
+    const b = buildSceneRequest(headScene)
+    expect(b.prompt).toBe(
+      'masterpiece, 2girls, futa with female, head out of frame, from side, kiss'
+    )
+    expect(b.futaPlan).not.toHaveProperty('sourceFuta')
+  })
+
+  it('남자가 같이 그려지면(후타 + 남) 씬 글은 그대로 — 누구의 얼굴인지 모른다', () => {
+    setup({
+      cards: [card(FUTA, '1girl, futanari', 'source'), card(MAN, '1boy, muscular', 'target')]
+    })
+    const r = buildSceneRequest(headScene)
+    expect(r.prompt).toBe('masterpiece, 1girl, 1boy, futa with male, head out of frame, pov, kiss')
+  })
+
+  it('시점·구도 정리를 끄면 그대로, 후타 재조립을 끄면 계획도 없다', () => {
+    setup({ viewFix: false })
+    expect(buildSceneRequest(headScene).prompt).toBe(
+      'masterpiece, 2girls, futa with female, head out of frame, pov, kiss'
+    )
+    setup({ reassembly: false })
+    const off = buildSceneRequest(headScene)
+    expect(off.prompt).toBe(`masterpiece, ${HEAD}`)
+    expect('futaPlan' in off).toBe(false)
+  })
+
+  it('하는쪽 칸의 head out of frame 은 예전처럼 뺀다 (하는쪽 후타가 아니어도)', () => {
+    setup({ futaRole: 'target', girlRole: 'source' })
+    const r = buildSceneRequest(
+      sceneOf({ prompt: HEAD, sourceTags: '1boy, male, head out of frame, smile' })
+    )
+    expect(r.characterPrompts[1].prompt).toBe('1girl, red hair, pleated skirt, smile')
+  })
+
+  it('실행 직전 refreshScenePrompts 를 거쳐도 유지되고, 고친 씬 글에도 적용된다', () => {
+    const r = buildSceneRequest(headScene)
+    const wire = JSON.parse(JSON.stringify(r)) as GenerationRequest
+    expect(refreshScenePrompts(wire, headScene).prompt).toBe(r.prompt)
+    expect(refreshScenePrompts(wire, headScene).bodyNotes).toEqual(r.bodyNotes)
+    expect(
+      refreshScenePrompts(wire, {
+        ...headScene,
+        prompt: '1girl, hetero, head out of frame, fellatio'
+      }).prompt
+    ).toBe('masterpiece, 2girls, futa with female, fellatio')
+    // 이 값이 없던 옛 계획으로 만든 대기 항목은 예전처럼 씬 글을 건드리지 않는다
+    const old = JSON.parse(JSON.stringify(r)) as GenerationRequest
+    delete old.futaPlan?.sourceFuta
+    expect(refreshScenePrompts(old, headScene).prompt).toBe(
+      'masterpiece, 2girls, futa with female, head out of frame, from side, kiss'
+    )
+  })
+})
+
+describe('메인 탭 — 하는쪽 후타가 그려지면 메인 프롬프트의 head out of frame 도 뺀다', () => {
+  beforeEach(() => setup({}))
+
+  it('메인 프롬프트(한 줄·3분할)의 head out of frame 을 빼고 메모를 남긴다', async () => {
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: '1girl, 1boy, hetero, head out of frame, pov, kiss' },
+      promptSplitEnabled: false
+    })
+    const r = await useGenerationStore.getState().buildMainRequest()
+    expect(r.prompt).toBe('2girls, futa with female, from side, kiss')
+    expect(r.futaPlan?.sourceFuta).toBe(true)
+    expect(r.bodyNotes).toContainEqual(
+      expect.objectContaining({ kind: 'removed', where: 'main', before: 'head out of frame' })
+    )
+    useGenerationStore.setState({
+      request: {
+        ...DEFAULT_REQUEST,
+        prompt: '1girl, hetero, head out of frame, 1boy, kiss',
+        promptParts: {
+          base: '1girl, hetero',
+          additional: 'head out of frame',
+          detail: '1boy, kiss'
+        }
+      },
+      promptSplitEnabled: true
+    })
+    const split = await useGenerationStore.getState().buildMainRequest()
+    // 가변 칸의 head out of frame 이 빠져 칸이 비고, hetero 는 기본 칸에서 관계 태그로 바뀐다
+    expect(split.promptParts).toEqual({
+      base: '2girls, futa with female',
+      additional: '',
+      detail: 'kiss'
+    })
+  })
+
+  it('후타가 당하는쪽이면 그대로', async () => {
+    setup({ futaRole: 'target', girlRole: 'source' })
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: '1girl, 1boy, hetero, head out of frame, kiss' },
+      promptSplitEnabled: false
+    })
+    const r = await useGenerationStore.getState().buildMainRequest()
+    expect(r.prompt).toBe('2girls, futa with female, head out of frame, kiss')
+    expect(r.futaPlan).not.toHaveProperty('sourceFuta')
+  })
+
+  it('대기 중인 메인 항목을 다시 만들 때도 최신 메인 글에 같은 규칙을 적용한다', async () => {
+    invoke.mockReset()
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: '1girl, 1boy, hetero, kiss' },
+      promptSplitEnabled: false
+    })
+    const main = await useGenerationStore.getState().buildMainRequest()
+    // 대기 중에 메인 프롬프트를 고친다
+    useGenerationStore.setState({
+      request: { ...DEFAULT_REQUEST, prompt: '1girl, hetero, head out of frame, pov, fellatio' },
+      promptSplitEnabled: false
+    })
+    let updates: { id: string; request: GenerationRequest }[] = []
+    invoke.mockImplementation((channel: string, arg?: unknown): unknown => {
+      if (channel === 'queue:pending') return { items: [{ id: 'q0', request: main }] }
+      if (channel === 'queue:updatePending') {
+        updates = (arg as { updates: typeof updates }).updates
+        return undefined
+      }
+      throw new Error(`예상하지 못한 IPC: ${channel}`)
+    })
+    useScenesStore.setState({ scenes: [] })
+    await useScenesStore.getState().resyncPendingScenes()
+    expect(updates[0].request.prompt).toBe('2girls, futa with female, from side, fellatio')
+    // 시점·구도 정리만 끄면 계획에 반영돼 그대로 남는다
+    useOutfitsStore.setState({ futaViewFix: false })
+    await useScenesStore.getState().resyncPendingScenes()
+    expect(updates[0].request.prompt).toBe(
+      '2girls, futa with female, head out of frame, pov, fellatio'
+    )
   })
 })

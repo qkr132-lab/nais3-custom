@@ -30,6 +30,7 @@ import {
   receivesSceneText
 } from '@shared/expose-state'
 import { readBody } from '@shared/body'
+import { stripEyesWhenClosed } from '@shared/eyes'
 import {
   bodyTagsFor,
   flagNotes,
@@ -373,7 +374,9 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
           testicleType: r.testicleType,
           index,
           id: enabled[index].id,
-          name: enabled[index].name
+          name: enabled[index].name,
+          // 하는쪽 후타가 그려지면 메인 프롬프트의 head out of frame 도 뺀다 (시점·구도 정리)
+          role: enabled[index].role ?? null
         })),
         useOutfitsStore.getState().futaViewFix
       )
@@ -450,6 +453,14 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
       enabled: stripOnNude,
       kindOf
     })
+    // 눈 감음이면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈)를 뺀다 (커스텀) — 이 캐릭터에게 걸린 장면 태그(contexts)에 closed eyes 가 있을 때.
+    // 설정은 없고 뺀 것은 bodyNotes 에 남는다. 후타는 her/his 문장의 성별로 거르지 않는다
+    const eyes = stripEyesWhenClosed({
+      card: dressed.card,
+      contexts,
+      sex: readings[index].body.futa ? null : sexes[index],
+      who: { index, name: c.name, id: c.id }
+    })
     // 후타 재조립 — 상대 태그도 후타 구성에 맞게. 젖힘 엔진은 바꾸기 전 원문을 읽는다 (아래 own 은 원문)
     const partnerRaw = partnerTagsFor(c.role, givers, c.id)
     const rw =
@@ -482,10 +493,11 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
     bodyNotes.push(
       ...(rw?.notes ?? []),
       ...body.notes,
-      ...(futaOn ? flagNotes(readings[index], index, c.name, c.id) : [])
+      ...(futaOn ? flagNotes(readings[index], index, c.name, c.id) : []),
+      ...eyes.notes
     )
     // 카드(몸) → 몸에 맞춘 태그 → 복장 → 입은 옷 자동 젖힘 → 상대 태그
-    let prompt = [body.tags.join(', '), dressed.outfit].reduce(appendPrompt, dressed.card)
+    let prompt = [body.tags.join(', '), dressed.outfit].reduce(appendPrompt, eyes.text)
     if (exposure && exposed) {
       // 옷 벗기기로 벗긴 캐릭터는 알몸 선언으로 조각을 막지 않은 값(exposed.auto)으로 본다
       const piece = pieceInfo(

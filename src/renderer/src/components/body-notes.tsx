@@ -6,6 +6,7 @@ import {
   bodyCharBadge,
   bodyNoteLine,
   groupBodyRounds,
+  isEyeNote,
   mergeBodyRows,
   mergedBodyCounts,
   opensByDefault,
@@ -141,7 +142,7 @@ export function FutaCharBadges({
   const badge = bodyCharBadge(notes, futa)
   if (!badge.title && !futa) return null
   const item = (
-    id: 'futa' | 'pink' | BodyKind,
+    id: 'futa' | 'pink' | 'eyes' | BodyKind,
     text: string,
     tone: NoteTone
   ): React.JSX.Element => {
@@ -167,6 +168,7 @@ export function FutaCharBadges({
         item(k, k === 'suspect' ? '후타 의심' : `후타 ${KIND_META[k].label}`, KIND_META[k].tone)
       )}
       {badge.pink && !badge.futa && item('pink', 'pink nipples', 'ok')}
+      {badge.eyes && item('eyes', '눈 감음', 'ok')}
     </span>
   )
 }
@@ -234,6 +236,10 @@ export function BodyBlock({
     )
   }
   const own = scope === 'main' ? '메인에 적은 글' : '씬에 적힌 글'
+  // 눈 감음 메모뿐이면(후타도 pink nipples 도 없다) 후타 설명을 붙이지 않는다 — 카드의 눈 외형만 뺀 것이다
+  const eyesOnly =
+    !counts.some((c) => c.id === 'futa' || c.id === 'off') &&
+    groups.every((g) => g.notes.every(isEyeNote))
   return (
     <section data-testid="body-block" className="rounded-lg border border-line bg-surface-2/40">
       <button
@@ -247,7 +253,7 @@ export function BodyBlock({
           size={13}
           className={cn('shrink-0 transition-transform', open && 'rotate-90')}
         />
-        <span className="shrink-0 font-medium">몸·후타</span>
+        <span className="shrink-0 font-medium">{eyesOnly ? '눈 감음' : '몸·후타'}</span>
         {/* 접힌 줄이 길어져도 잘리지 않고 줄바꿈 — 충돌·후타 의심이 말줄임에 가려지지 않게 */}
         <span
           data-testid="body-summary"
@@ -258,7 +264,11 @@ export function BodyBlock({
             <span key={c.id}>
               {i > 0 && ' · '}
               {/* 바뀐 것과 눈여겨볼 것은 접어도 색으로 보인다 */}
-              <span className={c.loud || c.id === 'futa' ? TONE_TEXT[c.tone] : undefined}>
+              <span
+                className={
+                  c.loud || c.id === 'futa' || c.id === 'eyes' ? TONE_TEXT[c.tone] : undefined
+                }
+              >
                 {c.label}
               </span>
             </span>
@@ -278,13 +288,23 @@ export function BodyBlock({
               )}
             </div>
           ))}
-          <p className="text-[11px] text-muted">
-            바꾼 것은 보낼 때만이고 {own}은 그대로입니다.{' '}
-            {reassembly
-              ? '설정의 「후타 자동 재조립」을 끄면 후타 글 바꾸기가 모두 꺼집니다'
-              : '「후타 자동 재조립」이 꺼져 있어 후타 글은 바꾸지 않습니다'}
-            {counts.some((c) => c.id === 'pink') && ' (pink nipples 는 이 설정과 무관합니다)'}.
-          </p>
+          {eyesOnly ? (
+            <p className="text-[11px] text-muted">
+              뺀 것은 보낼 때만이고 카드(캐릭터 탭)의 글은 그대로입니다. 눈 감음은 설정이 따로
+              없습니다.
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted">
+              바꾼 것은 보낼 때만이고 {own}은 그대로입니다.{' '}
+              {reassembly
+                ? '설정의 「후타 자동 재조립」을 끄면 후타 글 바꾸기가 모두 꺼집니다'
+                : '「후타 자동 재조립」이 꺼져 있어 후타 글은 바꾸지 않습니다'}
+              {counts.some((c) => c.id === 'pink') && ' (pink nipples 는 이 설정과 무관합니다)'}
+              {counts.some((c) => c.id === 'eyes') &&
+                ' (눈 감음으로 뺀 눈 외형 태그는 설정이 따로 없고 카드의 글은 그대로입니다)'}
+              .
+            </p>
+          )}
         </div>
       )}
     </section>
