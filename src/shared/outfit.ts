@@ -203,9 +203,13 @@ export function splitPromptTokens(prompt: string): string[] {
     if (!inWeight) {
       const m = /^-?\d*\.?\d+::/.exec(prompt.slice(i))
       if (m && !/[\w.]$/.test(buf)) {
-        // 가중치 묶음이 새로 열린다 — 앞에 쉼표 없이 단어가 있었으면 따로 뗀다
+        // 가중치 묶음이 새로 열린다 — 앞에 쉼표 없이 단어가 있었으면 따로 뗀다.
+        // 단어·마침표 바로 뒤의 음수 가중치(lidded.-3::smile:: · word-2::x::)는 「-」가 앞 단어에 남아
+        // 묶음이 +3 으로 읽히면 안 된다 — 앞에 붙은 「-」를 묶음 쪽으로 옮긴다
+        const minus = !m[0].startsWith('-') && buf.endsWith('-')
+        if (minus) buf = buf.slice(0, -1)
         flush()
-        buf = m[0]
+        buf = (minus ? '-' : '') + m[0]
         inWeight = true
         i += m[0].length
         continue

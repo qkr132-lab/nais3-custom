@@ -63,7 +63,7 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
   acts: DEFAULT_EXPOSE_ACTS,
   stripOnNude: true,
   exposeWorn: true,
-  futaReassembly: true,
+  futaReassembly: false,
   futaViewFix: true,
   kinds: {},
 
@@ -95,7 +95,8 @@ export const useOutfitsStore = create<OutfitsState>((set, get) => ({
       acts,
       stripOnNude: strip.value !== '0',
       exposeWorn: expose.value !== '0',
-      futaReassembly: futa.value !== '0',
+      // 기본 꺼짐 (p.45) — 켜 둔 사람만 1 로 저장돼 있다. 사용자가 맞춰 둔 후타 씬의 공수가 뒤바뀌어 옵트인으로 돌림
+      futaReassembly: futa.value === '1',
       futaViewFix: futaView.value !== '0',
       loaded: true
     })

@@ -1,7 +1,7 @@
 import { useOutfitsStore } from '../stores/outfits-store'
 
 /**
- * 「후타 자동 재조립」 (설정 키 futa_reassembly, 기본 켬) — 끄면 후타 재조립 전부 꺼져
+ * 「후타 자동 재조립」 (설정 키 futa_reassembly, 기본 꺼짐 — p.45) — 끄면 후타 재조립 전부 꺼져
  * 출력이 이 기능이 없던 때와 글자 단위로 같다. 설정 창·씬 상세·메인 탭이 같은 값을 본다.
  */
 export function useFutaReassembly(): [boolean, (on: boolean) => void] {

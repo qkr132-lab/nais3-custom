@@ -42,10 +42,11 @@ describe('생성 중 편집 자동 반영 — 입은 옷 자동 젖힘', () => {
 
   it('후타 재조립 설정과 시점·구도 설정을 바꾸면 다시 만든다', () => {
     waitingQueue()
-    useOutfitsStore.setState({ futaReassembly: false })
+    // 후타 재조립은 기본 꺼짐(p.45) — 지금 값의 반대로 바꾼다
+    useOutfitsStore.setState({ futaReassembly: !useOutfitsStore.getState().futaReassembly })
     vi.advanceTimersByTime(600)
     expect(resync).toHaveBeenCalledTimes(1)
-    useOutfitsStore.setState({ futaViewFix: false })
+    useOutfitsStore.setState({ futaViewFix: !useOutfitsStore.getState().futaViewFix })
     vi.advanceTimersByTime(600)
     expect(resync).toHaveBeenCalledTimes(2)
   })
