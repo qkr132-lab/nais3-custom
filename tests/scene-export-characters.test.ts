@@ -101,7 +101,10 @@ describe('씬 JSON 내보내기', () => {
             roles: { [added]: 'source' },
             charTags: { [added]: 'blush', [tagged]: 'smile' },
             partnerTags: { [added]: 'tears' },
-            slots: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }],
+            slots: [
+              { x: 0.5, y: 0.5 },
+              { x: 0.1, y: 0.9 }
+            ],
             slotChars: { 0: added },
             slotRoles: { 0: 'target', 1: 'source' },
             slotTags: { 0: 'upper body', 1: 'standing' }
@@ -125,7 +128,10 @@ describe('씬 JSON 내보내기', () => {
     expect(s.setup).toEqual({
       characters: [],
       useCoords: true,
-      slots: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }],
+      slots: [
+        { x: 0.5, y: 0.5 },
+        { x: 0.1, y: 0.9 }
+      ],
       // 앉은 카드는 이름으로만 — 가져오는 쪽의 같은 이름 카드가 앉는다 (카드 내용은 안 실림)
       slotCharNames: { 0: 'added' },
       slotRoles: { 0: 'target', 1: 'source' },
@@ -159,7 +165,9 @@ describe('씬 JSON 가져오기 — 캐릭터 탭에 있는 카드', () => {
   const cardCount = (): number =>
     (db.prepare('SELECT COUNT(*) AS n FROM character_prompts').get() as { n: number }).n
   const folders = (): string[] =>
-    (db.prepare('SELECT name FROM character_folders').all() as { name: string }[]).map((f) => f.name)
+    (db.prepare('SELECT name FROM character_folders').all() as { name: string }[]).map(
+      (f) => f.name
+    )
 
   it('이름·태그가 똑같은 카드가 다른 폴더에 있으면 새로 만들지 않고 그 카드를 씬에 건다', async () => {
     const presetId = createPreset('p')
@@ -185,12 +193,113 @@ describe('씬 JSON 가져오기 — 캐릭터 탭에 있는 카드', () => {
     state.open = join(dir, 'in.json')
     writeFileSync(
       state.open,
-      bundle([{ uid: 'c9', name: '알몸남자', prompt: '1boy, nude, muscular', negativePrompt: '' }], ['c9'])
+      bundle(
+        [{ uid: 'c9', name: '알몸남자', prompt: '1boy, nude, muscular', negativePrompt: '' }],
+        ['c9']
+      )
     )
     const before = cardCount()
     const r = await importScenesJson(presetId)
     expect(cardCount()).toBe(before + 1)
     expect(r.additions[0].setup.characterIds).not.toEqual([mine])
     expect(folders()).toContain('가져온 폴더')
+  })
+})
+
+describe('씬 JSON — 씬별 옷 벗기기 값', () => {
+  const sceneIds = (presetId: number): number[] =>
+    (
+      db
+        .prepare(
+          'SELECT id FROM gen_scenes WHERE preset_id = ? AND deleted_at IS NULL ORDER BY sort_order, id'
+        )
+        .all(presetId) as { id: number }[]
+    ).map((r) => r.id)
+
+  it('내보내기: 둘 다(true)·안 벗김(false)은 옛 파일 모양 그대로, 남캐만·여캐만은 문자열, 값이 없거나 모르는 값은 싣지 않는다', async () => {
+    const presetId = createPreset('p')
+    const [both, none, male, female, , junk] = [
+      'both',
+      'none',
+      'male',
+      'female',
+      'unset',
+      'junk'
+    ].map((name) => scene(presetId, name))
+    state.extras = JSON.stringify({
+      nudeStrips: {
+        [presetId]: {
+          [both]: true,
+          [none]: false,
+          [male]: 'male',
+          [female]: 'female',
+          [junk]: 'everyone'
+        }
+      }
+    })
+    await exportScenesJson(presetId)
+    const file = JSON.parse(readFileSync(state.save, 'utf-8'))
+    const byName = Object.fromEntries(
+      file.scenes.map((s: { name: string; nudeStrip?: unknown }) => [s.name, s])
+    )
+    expect(byName.both.nudeStrip).toBe(true)
+    expect(byName.none.nudeStrip).toBe(false)
+    expect(byName.male.nudeStrip).toBe('male')
+    expect(byName.female.nudeStrip).toBe('female')
+    expect(byName.unset).not.toHaveProperty('nudeStrip')
+    expect(byName.junk).not.toHaveProperty('nudeStrip')
+  })
+
+  it('가져오기: 옛 boolean 은 그대로, 새 문자열도 읽고, 모르는 값은 건너뛴다', async () => {
+    const presetId = createPreset('p')
+    const names = ['t', 'f', 'm', 'w', 'b', 'x', 'none']
+    const values: unknown[] = [true, false, 'male', 'female', 'both', 'junk', undefined]
+    state.open = join(dir, 'in.json')
+    writeFileSync(
+      state.open,
+      JSON.stringify({
+        version: 2,
+        characterFolder: 'f',
+        characters: [],
+        scenes: names.map((name, i) => ({
+          name,
+          prompt: 'x',
+          ...(values[i] === undefined ? {} : { nudeStrip: values[i] })
+        }))
+      })
+    )
+    const r = await importScenesJson(presetId)
+    const ids = sceneIds(presetId)
+    expect(r.nudeStrip).toEqual([
+      { sceneId: ids[0], value: true },
+      { sceneId: ids[1], value: false },
+      { sceneId: ids[2], value: 'male' },
+      { sceneId: ids[3], value: 'female' },
+      // both 는 옛 true 와 같은 뜻
+      { sceneId: ids[4], value: true }
+    ])
+  })
+
+  it('내보냈다가 가져오면 같은 값으로 돌아온다 (옛 boolean 포함)', async () => {
+    const from = createPreset('from')
+    const a = scene(from, 'a')
+    const b = scene(from, 'b')
+    const c = scene(from, 'c')
+    const d = scene(from, 'd')
+    scene(from, 'e')
+    state.extras = JSON.stringify({
+      nudeStrips: { [from]: { [a]: true, [b]: false, [c]: 'male', [d]: 'female' } }
+    })
+    await exportScenesJson(from)
+    state.open = state.save
+    const to = createPreset('to')
+    const r = await importScenesJson(to)
+    const ids = sceneIds(to)
+    expect(r.nudeStrip).toEqual([
+      { sceneId: ids[0], value: true },
+      { sceneId: ids[1], value: false },
+      { sceneId: ids[2], value: 'male' },
+      { sceneId: ids[3], value: 'female' }
+    ])
   })
 })

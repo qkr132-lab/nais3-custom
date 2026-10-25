@@ -61,6 +61,129 @@ export function nudeTrigger(contexts: string[]): string | null {
   return null
 }
 
+/** 옷 벗기기를 가를 때의 남캐·여캐 */
+export type NudeStripSex = 'male' | 'female'
+
+/**
+ * 씬의 「옷 벗기기」 값 (커스텀) — 누구를 벗길지.
+ * true = 둘 다(옛 값 그대로) · false = 안 벗김 · 'male' = 남캐만 · 'female' = 여캐만.
+ * 값이 없으면(undefined) 설정 창의 전체 설정을 따른다 — 장면 태그에 nude 가 있을 때만 벗기는 쪽.
+ * 옛 파일·DB 에 든 true/false 가 그대로 읽히도록 「둘 다」를 새 문자열로 바꾸지 않고 true 로 둔다.
+ */
+export type NudeStripSetting = boolean | NudeStripSex
+
+/**
+ * 저장·파일에서 읽은 값을 정리한다 — 알 수 없는 값은 undefined(= 전체 설정 따름).
+ * 'both' 는 옛 true 와 같은 뜻으로 받아 준다 (쓰지는 않는다).
+ */
+export function normalizeNudeStrip(value: unknown): NudeStripSetting | undefined {
+  if (typeof value === 'boolean') return value
+  if (value === 'male' || value === 'female') return value
+  if (value === 'both') return true
+  return undefined
+}
+
+/** 고를 수 있는 값 — 메뉴 순서. value 가 undefined 면 「전체 설정 따름」 */
+export const NUDE_STRIP_CHOICES: readonly { value: NudeStripSetting | undefined; label: string }[] =
+  [
+    { value: undefined, label: '전체 설정 따름' },
+    { value: false, label: '안 벗김' },
+    { value: true, label: '둘 다' },
+    { value: 'male', label: '남캐만' },
+    { value: 'female', label: '여캐만' }
+  ]
+
+/** 값의 이름 — 버튼·안내 문구에 쓴다 */
+export function nudeStripLabel(value: NudeStripSetting | undefined): string {
+  return NUDE_STRIP_CHOICES.find((c) => c.value === value)?.label ?? '전체 설정 따름'
+}
+
+/** 버튼에 마우스를 올렸을 때 보이는 설명 — 지금 값이 무슨 뜻인지 */
+export function nudeStripTitle(value: NudeStripSetting | undefined, globalOn: boolean): string {
+  const head = '옷 벗기기'
+  if (value === undefined) {
+    return `${head}: 전체 설정 따름 (${globalOn ? '켬 — 누드 태그가 있는 캐릭터를 벗김 · 씬 전체 태그는 당하는쪽, 역할이 없는 씬이면 전원' : '끔'}) · 눌러서 이 씬만 고름`
+  }
+  if (value === false) return `${head}: 이 씬은 안 벗김 (눌러서 바꿈)`
+  if (value === true) {
+    return `${head}: 남캐·여캐 모두 — 누드 태그가 없어도 옷 태그를 빼고 nude, completely nude를 붙임 (눌러서 바꿈)`
+  }
+  const who =
+    value === 'male'
+      ? '남캐만 알몸 — 하는쪽(역할이 없으면 카드에 boy·male 태그가 있는 캐릭터), 여캐는 이 씬에서 벗기지 않음'
+      : '여캐만 알몸 — 당하는쪽(역할이 없으면 그 밖의 캐릭터), 남캐는 이 씬에서 벗기지 않음'
+  return `${head}: ${who} (눌러서 바꿈)`
+}
+
+/** 이 씬에서 옷 벗기기가 한 명이라도 켜질 수 있는지 — 옷 분류를 미리 받아둘지·버튼 색 판단용 */
+export function nudeStripOn(
+  setting: NudeStripSetting | undefined,
+  globalEnabled: boolean
+): boolean {
+  return setting === undefined ? globalEnabled : setting !== false
+}
+
+/**
+ * 이 캐릭터에게 걸리는 옷 벗기기 — enabled = 장면 태그의 nude 로 벗기는 판정을 켤지,
+ * force = 태그가 없어도 알몸으로 만들지.
+ * 씬에서 한쪽만 골랐으면 반대쪽은 이 씬에서 벗기지 않는다 (태그 판정도 끈다).
+ */
+export function nudeStripFor(
+  setting: NudeStripSetting | undefined,
+  globalEnabled: boolean,
+  sex: NudeStripSex
+): { enabled: boolean; force: boolean } {
+  if (setting === undefined) return { enabled: globalEnabled, force: false }
+  if (typeof setting === 'boolean') return { enabled: setting, force: setting }
+  const mine = setting === sex
+  return { enabled: mine, force: mine }
+}
+
+/** 남캐로 볼 낱말 — 태그의 마지막(또는 첫) 낱말이 이것이면 남자다 (mature male · old man · multiple boys · male focus) */
+const MALE_WORD = /^(?:\d+\+?)?(?:boys?|males?|man|men)$/
+
+/** 남자 태그로 볼 최대 낱말 수 — 'she is with a man' 같은 문장은 끝 낱말이 man 이어도 남자 태그가 아니다 */
+const MAX_MALE_TAG_WORDS = 4
+
+/** 가중치가 0 인 묶음 (0::1boy::) — 효과를 없애는 표기라 빼달라는 음수 가중치와 같이 본다 */
+const isZeroWeight = (token: string): boolean => /^\+?0*\.?0+::/.test(token.trim())
+
+/** 태그 하나가 남자를 가리키는지 — 낱말 단위라 female·tomboy·man bun 은 걸리지 않는다 */
+function isMaleTag(tag: string): boolean {
+  const list = norm(tag)
+    .replace(/^[\s{}[\]()]+|[\s{}[\]()]+$/g, '')
+    .split(' ')
+    .filter(Boolean)
+  if (!list.length || list.length > MAX_MALE_TAG_WORDS) return false
+  return MALE_WORD.test(list[list.length - 1]) || (list.length > 1 && list[0] === 'male')
+}
+
+/**
+ * 카드 프롬프트에 남자 태그(1boy·2boys·male·mature male·male focus·man·men …)가 있는지.
+ * 실제로 보내는 글과 같게 본다 — 주석은 지우고, 랜덤 선택지·와일드카드·빼달라는 음수·0 가중치는 신호로 치지 않는다.
+ */
+export function hasMaleTag(prompt: string): boolean {
+  const live = removeComments(prompt ?? '').replace(/\([^()]+\/[^()]+\)/g, ' ')
+  for (const token of splitPromptTokens(live)) {
+    if (isNegativeWeight(token) || isZeroWeight(token) || /[/<>|]/.test(token)) continue
+    if (tokenTags(token).some(isMaleTag)) return true
+  }
+  return false
+}
+
+/**
+ * 옷 벗기기를 남녀로 나눌 때 이 캐릭터가 어느 쪽인지 — 역할 기준.
+ * 하는쪽(source) = 남캐, 당하는쪽(target) = 여캐. 역할이 없는 캐릭터만 카드 프롬프트의 남자 태그로 가린다.
+ */
+export function characterSex(
+  role: 'source' | 'target' | null | undefined,
+  cardPrompt: string
+): NudeStripSex {
+  if (role === 'source') return 'male'
+  if (role === 'target') return 'female'
+  return hasMaleTag(cardPrompt) ? 'male' : 'female'
+}
+
 /**
  * 옷으로 분류돼도 벗기지 않는 것 — 머리끈·머리 장식(머리 모양의 일부)과
  * 머리·얼굴 장비(가면·복면·베일·안대·고글·모자·두건·헬멧 — 얼굴을 정하는 캐릭터 설정)

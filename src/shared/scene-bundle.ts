@@ -1,5 +1,6 @@
 import type { CharRole } from './types'
 import type { OutfitChoice, OutfitPiece } from './outfit'
+import type { NudeStripSetting } from './nude-strip'
 
 /**
  * 씬 구성 직렬화 (커스텀) — 씬 JSON·캐릭터 백업·전체 백업이 함께 쓴다.
@@ -454,8 +455,8 @@ export interface SceneExtrasFile {
   additions?: Record<string, Record<string, SceneSetup>>
   /** 프리셋 id → 씬 id → 이 씬만 투명 배경 켬/끔 */
   transparentBackgrounds?: Record<string, Record<string, boolean>>
-  /** 씬별 누드면 옷 벗기기 (커스텀) */
-  nudeStrips?: Record<string, Record<string, boolean>>
+  /** 씬별 옷 벗기기 (커스텀) — true/false(옛 값)·'male'·'female' */
+  nudeStrips?: Record<string, Record<string, NudeStripSetting>>
 }
 
 /** 지워진 캐릭터를 가리키는 항목을 구성에서 걷어낸다 */
@@ -552,8 +553,8 @@ export interface SceneBundle {
     transparentBackground?: boolean
     /** 부위별 검열 태그 가중치 (커스텀) — 없으면 전부 1 */
     censorTagWeights?: Record<string, number>
-    /** 씬별 누드면 옷 벗기기 (커스텀) — 없으면 전체 설정 따름 */
-    nudeStrip?: boolean
+    /** 씬별 옷 벗기기 (커스텀) — true 둘 다(옛 값)·false 안 벗김·'male' 남캐만·'female' 여캐만. 없으면 전체 설정 따름 */
+    nudeStrip?: NudeStripSetting
     /** 씬별 캐릭터 추가 — 없으면 캐릭터 없이 씬만 */
     setup?: FileSetup
   })[]

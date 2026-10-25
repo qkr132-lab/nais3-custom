@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NUDE_STRIP_CHOICES,
+  characterSex,
+  hasMaleTag,
   isNudePiece,
+  normalizeNudeStrip,
+  nudeStripFor,
+  nudeStripLabel,
+  nudeStripOn,
   nudeTrigger,
   promptTags,
   stripClothing,
@@ -328,5 +335,140 @@ describe('옷 분류를 물어볼 태그', () => {
     expect(promptTags(['She wears a black blazer over a white shirt'])).not.toContain(
       'she wears a black blazer over a white shirt'
     )
+  })
+})
+
+describe('옷 벗기기 값 — 둘 다·안 벗김·남캐만·여캐만', () => {
+  it('옛 true/false 는 그대로, 새 값은 male·female 만 받고, 모르는 값은 버린다', () => {
+    expect(normalizeNudeStrip(true)).toBe(true)
+    expect(normalizeNudeStrip(false)).toBe(false)
+    expect(normalizeNudeStrip('male')).toBe('male')
+    expect(normalizeNudeStrip('female')).toBe('female')
+    // both 는 옛 true 와 같은 뜻으로만 받는다
+    expect(normalizeNudeStrip('both')).toBe(true)
+    for (const bad of [undefined, null, 0, 1, '', 'MALE', 'all', {}, []]) {
+      expect(normalizeNudeStrip(bad)).toBeUndefined()
+    }
+  })
+
+  it('메뉴는 전체 설정 따름 · 안 벗김 · 둘 다 · 남캐만 · 여캐만 순서', () => {
+    expect(NUDE_STRIP_CHOICES.map((c) => c.label)).toEqual([
+      '전체 설정 따름',
+      '안 벗김',
+      '둘 다',
+      '남캐만',
+      '여캐만'
+    ])
+    expect(NUDE_STRIP_CHOICES.map((c) => c.value)).toEqual([
+      undefined,
+      false,
+      true,
+      'male',
+      'female'
+    ])
+    expect(nudeStripLabel(undefined)).toBe('전체 설정 따름')
+    expect(nudeStripLabel(true)).toBe('둘 다')
+    expect(nudeStripLabel('male')).toBe('남캐만')
+  })
+
+  it('한 명이라도 켜질 수 있는지 — 씬 값이 없으면 전체 설정, 있으면 안 벗김만 꺼짐', () => {
+    expect(nudeStripOn(undefined, true)).toBe(true)
+    expect(nudeStripOn(undefined, false)).toBe(false)
+    expect(nudeStripOn(false, true)).toBe(false)
+    expect(nudeStripOn(true, false)).toBe(true)
+    expect(nudeStripOn('male', false)).toBe(true)
+    expect(nudeStripOn('female', false)).toBe(true)
+  })
+
+  it('캐릭터마다 판정을 켤지·태그 없이 알몸으로 만들지', () => {
+    // 값 없음 = 전체 설정 (태그 판정만, 강제는 없음)
+    expect(nudeStripFor(undefined, true, 'male')).toEqual({ enabled: true, force: false })
+    expect(nudeStripFor(undefined, false, 'female')).toEqual({ enabled: false, force: false })
+    // 둘 다 · 안 벗김
+    expect(nudeStripFor(true, false, 'male')).toEqual({ enabled: true, force: true })
+    expect(nudeStripFor(true, false, 'female')).toEqual({ enabled: true, force: true })
+    expect(nudeStripFor(false, true, 'male')).toEqual({ enabled: false, force: false })
+    expect(nudeStripFor(false, true, 'female')).toEqual({ enabled: false, force: false })
+    // 한쪽만 — 반대쪽은 판정도 끈다
+    expect(nudeStripFor('male', true, 'male')).toEqual({ enabled: true, force: true })
+    expect(nudeStripFor('male', true, 'female')).toEqual({ enabled: false, force: false })
+    expect(nudeStripFor('female', false, 'female')).toEqual({ enabled: true, force: true })
+    expect(nudeStripFor('female', false, 'male')).toEqual({ enabled: false, force: false })
+  })
+})
+
+describe('남캐 판정 — 역할 먼저, 역할이 없으면 카드의 boy·male 태그', () => {
+  it('boy·male 계열 태그를 찾는다', () => {
+    for (const prompt of [
+      '1boy',
+      '2boys, solo',
+      '6+boys',
+      'boy, blue eyes',
+      'male',
+      'mature male, beard',
+      'male focus',
+      'man',
+      'men',
+      'old man',
+      'multiple boys',
+      'faceless male',
+      'Male_Focus',
+      'blue eyes, 1boy, muscular'
+    ]) {
+      expect(hasMaleTag(prompt), prompt).toBe(true)
+    }
+  })
+
+  it('가중치 묶음 안의 태그도 태그 단위로 본다', () => {
+    expect(hasMaleTag('1.2::mature male::, suit')).toBe(true)
+    expect(hasMaleTag('0.9::muscular, 1boy::')).toBe(true)
+    expect(hasMaleTag('1.1::male focus, muscular::')).toBe(true)
+  })
+
+  it('여자·비슷한 낱말·빼달라는 가중치·주석·랜덤 선택지는 남캐가 아니다', () => {
+    for (const prompt of [
+      '',
+      '1girl, long hair',
+      'female',
+      '1girl, tomboy',
+      'woman, mature female',
+      'man bun',
+      'boyfriend shirt',
+      'snowman',
+      '-1::1boy::',
+      '# 1boy\n1girl',
+      '1girl # 1boy',
+      '(1boy/1girl), blue eyes',
+      '1boy/1girl',
+      '<wildcard male>'
+    ]) {
+      expect(hasMaleTag(prompt), prompt).toBe(false)
+    }
+  })
+
+  it('끝 낱말만 man 인 긴 문장과 가중치 0 묶음은 남캐의 근거가 아니다', () => {
+    for (const prompt of [
+      '1girl, she is with a man',
+      'standing next to a tall man',
+      '0::1boy::, 1girl',
+      '0.0::mature male::'
+    ]) {
+      expect(hasMaleTag(prompt), prompt).toBe(false)
+    }
+    // 짧은 수식어가 붙은 남자 태그는 그대로 남캐
+    expect(hasMaleTag('muscular older man')).toBe(true)
+    expect(hasMaleTag('0.5::1boy::')).toBe(true)
+  })
+
+  it('역할이 있으면 카드 태그와 상관없이 하는쪽 = 남캐, 당하는쪽 = 여캐', () => {
+    expect(characterSex('source', '1girl')).toBe('male')
+    expect(characterSex('target', '1boy')).toBe('female')
+  })
+
+  it('역할이 없으면 카드의 남자 태그로 — 없으면 여캐', () => {
+    expect(characterSex(null, '1boy, short hair')).toBe('male')
+    expect(characterSex(undefined, 'mature male')).toBe('male')
+    expect(characterSex(null, '1girl, long hair')).toBe('female')
+    expect(characterSex(undefined, 'blue eyes')).toBe('female')
   })
 })

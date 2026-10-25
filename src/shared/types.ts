@@ -4,6 +4,7 @@
 import type { OpusUsage } from './opus-usage'
 import type { SceneSetup } from './scene-bundle'
 import type { Outfit, OutfitChoice, OutfitPiece, TagKind } from './outfit'
+import type { NudeStripSetting } from './nude-strip'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
 export type { OpusUsage }
@@ -923,7 +924,8 @@ export interface IpcInvokeMap {
       dropped: number
       /** 씬마다 따로 켜고 끈 투명 배경 */
       transparent?: { sceneId: number; enabled: boolean }[]
-      nudeStrip?: { sceneId: number; enabled: boolean }[]
+      /** 씬마다 따로 정한 옷 벗기기 — true 둘 다(옛 값)·false 안 벗김·'male' 남캐만·'female' 여캐만 */
+      nudeStrip?: { sceneId: number; value: NudeStripSetting }[]
     }
   }
   /** 즐겨찾기 이미지 또는 각 씬 최상단 이미지를 ZIP으로 (파일 다이얼로그) */

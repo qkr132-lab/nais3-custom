@@ -1,6 +1,7 @@
 import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
+import { useOutfitsStore } from '../stores/outfits-store'
 import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { toast } from '../stores/toast-store'
@@ -64,9 +65,15 @@ export function initLiveResync(): void {
       s.additions !== p.additions ||
       s.additionsEnabled !== p.additionsEnabled ||
       s.entries !== p.entries ||
-      s.sequenceEnabled !== p.sequenceEnabled
+      s.sequenceEnabled !== p.sequenceEnabled ||
+      // 옷 벗기기 값(둘 다·남캐만·여캐만 …)을 바꾸면 대기 중인 씬도 새 값으로 다시 만든다
+      s.nudeStrips !== p.nudeStrips
     )
       schedule()
+  })
+  // 옷 벗기기 전체 설정 — 「전체 설정 따름」인 씬의 대기 항목에 반영
+  useOutfitsStore.subscribe((s, p) => {
+    if (s.stripOnNude !== p.stripOnNude) schedule()
   })
   // 바이브 / 캐릭레퍼 (enabled·강도·타입 등)
   useVibesStore.subscribe((s, p) => {

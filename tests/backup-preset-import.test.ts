@@ -115,7 +115,9 @@ function currentSchemaBackup(name = 'auto-current.db', wal = false): string {
   `)
   setSetting(b, 'scene_extras', {
     additions: { 5: { 10: SETUP_1, 11: SETUP_2, 12: SETUP_2 } },
-    transparentBackgrounds: { 5: { 10: true } }
+    transparentBackgrounds: { 5: { 10: true } },
+    // 씬별 옷 벗기기 — 옛 boolean 과 남캐만·여캐만 문자열이 함께 (휴지통 씬 12 것은 빠진다)
+    nudeStrips: { 5: { 10: 'male', 11: true, 12: 'female' } }
   })
   setSetting(b, 'r2_sync_cfg_5', { enabled: true, bucket: 'b', prefix: 'p/' })
   setSetting(b, 'r2_sync_state_5', { version: 2, targets: { x: { 99: 'p/01.png' } } })
@@ -228,6 +230,7 @@ describe('프리셋 가져오기', () => {
     const extras = extrasNow()
     expect(extras.additions).toEqual({ 5: { 10: SETUP_1, 11: SETUP_2 } })
     expect(extras.transparentBackgrounds).toEqual({ 5: { 10: true } })
+    expect(extras.nudeStrips).toEqual({ 5: { 10: 'male', 11: true } })
   })
 
   it('id가 차 있으면 새 id를 받고, 씬별 설정도 새 id로 옮긴다', () => {
@@ -255,6 +258,7 @@ describe('프리셋 가져오기', () => {
     expect(extras.additions[5]).toEqual({ 10: SETUP_2 })
     expect(extras.additions[preset.id]).toEqual({ [s1.id]: SETUP_1, 11: SETUP_2 })
     expect(extras.transparentBackgrounds[preset.id]).toEqual({ [s1.id]: true })
+    expect(extras.nudeStrips[preset.id]).toEqual({ [s1.id]: 'male', 11: true })
   })
 
   it('지금 있는 씬별 설정은 덮어쓰지 않고, 나머지 설정도 그대로 둔다', () => {

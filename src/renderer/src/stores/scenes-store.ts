@@ -22,12 +22,12 @@ import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './chara
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
-import { undressForNude, wornOutfitTags } from '@shared/nude-strip'
+import { characterSex, nudeStripFor, undressForNude, wornOutfitTags } from '@shared/nude-strip'
 import {
   anyNudeStrip,
   enabledEntries,
   hasAddition,
-  sceneNudeStrip,
+  sceneNudeStripSetting,
   useSceneExtrasStore,
   type SequenceEntry,
   type SceneAdditionTransfer
@@ -247,10 +247,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   // 복장 (커스텀) — 씬(또는 큐 항목)에서 고른 옷 > 카드 기본 복장 > 없음
   const outfits = outfitMap()
   const exposeActs = useOutfitsStore.getState().acts
-  // 씬에서 따로 켜고 껐으면 그 값, 아니면 설정 창의 전체 설정
-  const stripOnNude = sceneNudeStrip(scene.presetId, scene.id)
-  // 씬에서 옷 벗기기를 켰으면 누드 태그가 없어도 이 씬은 알몸 (온천처럼 nude를 안 적은 씬) — 하는쪽·당하는쪽 모두
-  const forceNude = useSceneExtrasStore.getState().nudeStrips[scene.presetId]?.[scene.id] === true
+  // 씬에서 따로 정했으면 그 값(둘 다·안 벗김·남캐만·여캐만), 아니면 설정 창의 전체 설정
+  const nudeStripSetting = sceneNudeStripSetting(scene.presetId, scene.id)
+  const globalStripOnNude = useOutfitsStore.getState().stripOnNude
   const kindOf = clothKindOf()
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
   const sourceContexts = [
@@ -319,16 +318,19 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // 누드면 옷 벗기기 (커스텀) — 장면에 nude가 있으면 기본 복장을 빼고 카드의 옷 태그를
     // 걷어낸다. 씬·큐 항목에서 직접 고른 복장은 그대로 둔다
     // 복장의 누드 조각이 켜졌으면 다른 조각의 옷을 빼고, 카드의 옷도 걷어낸다
-    const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, stripOnNude, kindOf, auto)
+    // 씬의 「옷 벗기기」 버튼은 하는쪽까지 벗긴다 (2026-10-25 유저 「옷벗기기 버튼 누르면 둘 다 벗기란 말이야」).
+    // 장면 태그의 누드는 씬 전체 태그처럼 당하는쪽(역할 없는 씬이면 전원)에게만 걸린다.
+    // 남캐만·여캐만을 골랐으면 반대쪽은 이 씬에서 벗기지 않는다 — 남녀는 역할 기준(하는쪽=남캐, 당하는쪽=여캐),
+    // 역할이 없는 캐릭터만 카드의 남자 태그(1boy 등)로 가린다
+    const strip = nudeStripFor(nudeStripSetting, globalStripOnNude, characterSex(role, c.prompt))
+    const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, strip.enabled, kindOf, auto)
     const dressed = undressForNude({
       card: c.prompt,
       outfit: worn,
       outfitNegative: resolveOutfitNegative(c.outfitId, outfitChoice, outfits),
       explicitOutfit: !!outfitChoice,
-      // 장면 태그의 누드는 씬 전체 태그처럼 당하는쪽(역할 없는 씬이면 전원)에게만 걸리지만,
-      // 씬의 「옷 벗기기」 버튼은 하는쪽까지 전원을 벗긴다 (2026-10-25 유저 「옷벗기기 버튼 누르면 둘 다 벗기란 말이야」)
-      contexts: [...sceneContexts, worn, ...(forceNude ? ['completely nude'] : [])],
-      enabled: stripOnNude,
+      contexts: [...sceneContexts, worn, ...(strip.force ? ['completely nude'] : [])],
+      enabled: strip.enabled,
       kindOf
     })
     const outfitTag = dressed.outfit

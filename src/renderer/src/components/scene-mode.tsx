@@ -64,6 +64,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { dropBlock, sameOrder } from '@shared/scene-order'
+import { nudeStripLabel, type NudeStripSetting } from '@shared/nude-strip'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   memo,
@@ -109,6 +110,7 @@ import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
 import { ResolutionPicker } from './resolution-picker'
 import { R2SyncDialog } from './r2-sync-dialog'
+import { NudeStripMenu } from './nude-strip-menu'
 import { SceneDetail } from './scene-detail'
 import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
@@ -1019,7 +1021,7 @@ function SceneGrid(): React.JSX.Element {
       if (nudeStrip?.length) {
         await useSceneExtrasStore.getState().load()
         for (const t of nudeStrip) {
-          useSceneExtrasStore.getState().setSceneNudeStrip(activePresetId, [t.sceneId], t.enabled)
+          useSceneExtrasStore.getState().setSceneNudeStrip(activePresetId, [t.sceneId], t.value)
         }
       }
       // 캐릭터탭 포함 파일 (커스텀): 만들어진 카드를 "씬별 캐릭터 추가"로 연결
@@ -1908,6 +1910,7 @@ function BulkBar({
   const bulkExportZip = useScenesStore((s) => s.bulkExportZip)
   const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
   const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
+  const globalStripOnNude = useOutfitsStore((s) => s.stripOnNude)
   const moveScenesToEdge = useScenesStore((s) => s.moveScenesToEdge)
   const moveScenesToPosition = useScenesStore((s) => s.moveScenesToPosition)
   const total = useScenesStore((s) => s.scenes.length)
@@ -1930,14 +1933,11 @@ function BulkBar({
     await moveScenesToPosition([...selection], pos)
   }
 
-  // 누드면 옷 벗기기 (커스텀) — 선택한 씬만 켜고 끈다. 전체 설정 따름 = 씬에서 정한 값을 지움
-  const bulkNudeStrip = (enabled: boolean | undefined): void => {
+  // 옷 벗기기 (커스텀) — 선택한 씬에만 적용. 전체 설정 따름 = 씬에서 정한 값을 지움
+  const bulkNudeStrip = (value: NudeStripSetting | undefined): void => {
     if (activePresetId == null) return
-    setSceneNudeStrip(activePresetId, [...selection], enabled)
-    toast(
-      `선택한 ${n}개 씬: 누드면 옷 벗기기 ${enabled === undefined ? '전체 설정 따름' : enabled ? '켬' : '끔'}`,
-      'success'
-    )
+    setSceneNudeStrip(activePresetId, [...selection], value)
+    toast(`선택한 ${n}개 씬: 옷 벗기기 · ${nudeStripLabel(value)}`, 'success')
   }
   const disabled = n === 0
 
@@ -2028,21 +2028,17 @@ function BulkBar({
       >
         V+ 해제
       </Button>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => bulkNudeStrip(true)}>
-        <Shirt size={13} /> 옷 벗기기 켬
-      </Button>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => bulkNudeStrip(false)}>
-        옷 벗기기 끔
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={disabled}
-        onClick={() => bulkNudeStrip(undefined)}
-        title="선택한 씬에서 따로 정한 값을 지우고 설정 창의 전체 설정을 따름"
-      >
-        전체 설정 따름
-      </Button>
+      {/* 옷 벗기기 일괄 (커스텀) — 누르면 메뉴: 전체 설정 따름 / 안 벗김 / 둘 다 / 남캐만 / 여캐만 */}
+      <NudeStripMenu current={null} globalOn={globalStripOnNude} onPick={bulkNudeStrip}>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={disabled}
+          title="선택한 씬의 옷 벗기기를 정함 — 전체 설정 따름 · 안 벗김 · 둘 다 · 남캐만 · 여캐만"
+        >
+          <Shirt size={13} /> 옷 벗기기
+        </Button>
+      </NudeStripMenu>
       {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
       <Button
         size="sm"

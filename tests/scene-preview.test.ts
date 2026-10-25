@@ -386,6 +386,233 @@ describe('outfit nsfw pieces turn on from the scene tags', () => {
     expect(s2).toContain('nude, completely nude')
   })
 
+  describe('옷 벗기기 — 남캐만·여캐만 (남녀는 역할 기준)', () => {
+    const KINDS = {
+      'school swimsuit': 'cloth',
+      suit: 'cloth',
+      'white shirt': 'cloth',
+      'black dress': 'cloth'
+    } as const
+    const draw = (prompt: string, setting?: boolean | 'male' | 'female'): string[] => {
+      useSceneExtrasStore.setState({
+        nudeStrips: setting === undefined ? {} : { 1: { 4: setting } }
+      })
+      const drawn = buildSceneRequest({ ...scene, prompt, censorKinds: [] }).characterPrompts
+      return drawn.map((c) => c.prompt)
+    }
+    const nude = (prompt: string): boolean => /\bcompletely nude\b/.test(prompt)
+
+    describe('역할이 있는 두 명 — 당하는쪽 = 여캐, 하는쪽 = 남캐', () => {
+      beforeEach(() => {
+        useOutfitsStore.setState({ kinds: { ...KINDS }, stripOnNude: false })
+        // 카드 태그에 boy 가 없어도 하는쪽이면 남캐 — 역할이 남녀를 가른다
+        useCharactersStore.setState({
+          items: [
+            { ...card(1, 'blue eyes, school swimsuit', true), outfitId: 9, role: 'target' },
+            { ...card(2, 'green eyes, suit', true), role: 'source' }
+          ]
+        })
+      })
+
+      it('둘 다(true)는 전원을 벗긴다 — 옛 true 값 그대로', () => {
+        const [target, source] = draw('onsen, bathing', true)
+        expect(nude(target)).toBe(true)
+        expect(target).not.toContain('school swimsuit')
+        expect(nude(source)).toBe(true)
+        expect(source).not.toContain('suit')
+      })
+
+      it('남캐만은 하는쪽만 벗기고 여캐(당하는쪽)는 옷을 입은 채', () => {
+        const [target, source] = draw('onsen, bathing', 'male')
+        expect(nude(source)).toBe(true)
+        expect(source).not.toContain('suit')
+        expect(nude(target)).toBe(false)
+        expect(target).toContain('school swimsuit')
+        expect(target).toContain('pleated skirt')
+      })
+
+      it('여캐만은 당하는쪽만 벗기고 남캐(하는쪽)는 옷을 입은 채', () => {
+        const [target, source] = draw('onsen, bathing', 'female')
+        expect(nude(target)).toBe(true)
+        expect(target).not.toContain('school swimsuit')
+        expect(nude(source)).toBe(false)
+        expect(source).toContain('suit')
+      })
+
+      it('남캐만을 골랐으면 여캐는 장면 태그에 nude 가 있어도 벗기지 않는다 (태그 판정도 끔)', () => {
+        useOutfitsStore.setState({ stripOnNude: true })
+        // 전체 설정만 켜진 상태 — 장면 태그의 nude 는 당하는쪽을 벗긴다
+        const base = draw('bath, nude')
+        expect(nude(base[0])).toBe(true)
+        expect(base[1]).toContain('suit')
+        // 남캐만 — 여캐는 그대로, 남캐는 태그가 없어도 벗는다
+        const male = draw('bath, nude', 'male')
+        expect(nude(male[0])).toBe(false)
+        expect(male[0]).toContain('school swimsuit')
+        expect(nude(male[1])).toBe(true)
+        // 여캐만 — 여캐는 벗고 남캐는 그대로
+        const female = draw('bath, nude', 'female')
+        expect(nude(female[0])).toBe(true)
+        expect(female[1]).toContain('suit')
+        expect(nude(female[1])).toBe(false)
+      })
+
+      it('안 벗김(false)은 전체 설정이 켜져 있어도 아무도 안 벗긴다', () => {
+        useOutfitsStore.setState({ stripOnNude: true })
+        const prompts = draw('bath, nude', false)
+        expect(prompts[0]).toContain('school swimsuit')
+        expect(prompts[1]).toContain('suit')
+        expect(prompts.some(nude)).toBe(false)
+      })
+
+      it('값이 없으면(전체 설정 따름) 전체 설정대로 — 끄면 안 벗기고, 켜면 당하는쪽만', () => {
+        expect(draw('bath, nude').some(nude)).toBe(false)
+        useOutfitsStore.setState({ stripOnNude: true })
+        const [target, source] = draw('bath, nude')
+        expect(nude(target)).toBe(true)
+        expect(nude(source)).toBe(false)
+      })
+
+      it('남캐만·여캐만도 벗는 쪽의 복장 조각은 같은 규칙으로 걷는다', () => {
+        const male = draw('onsen, bathing', 'male')
+        // 안 벗긴 여캐는 복장 조각 그대로 · 벗은 남캐는 입은 것이 없다
+        expect(male[0]).toContain('white panties')
+        expect(male[1]).not.toContain('white panties')
+        const female = draw('onsen, bathing', 'female')
+        expect(female[0]).not.toContain('white panties')
+      })
+    })
+
+    describe('역할이 없는 캐릭터 — 카드 프롬프트의 boy·male 태그로 가른다', () => {
+      beforeEach(() => {
+        useOutfitsStore.setState({ kinds: { ...KINDS }, stripOnNude: false })
+      })
+      const withCards = (...prompts: string[]): void =>
+        useCharactersStore.setState({
+          items: prompts.map((p, i) => card(i + 1, p, true))
+        })
+
+      it('boy 태그가 있으면 남캐, 없으면 여캐', () => {
+        withCards('1boy, short hair, suit', '1girl, long hair, school swimsuit')
+        const male = draw('onsen, bathing', 'male')
+        expect(nude(male[0])).toBe(true)
+        expect(nude(male[1])).toBe(false)
+        expect(male[1]).toContain('school swimsuit')
+        const female = draw('onsen, bathing', 'female')
+        expect(nude(female[0])).toBe(false)
+        expect(female[0]).toContain('suit')
+        expect(nude(female[1])).toBe(true)
+      })
+
+      it('가중치 표기(N::태그::) 안의 male 계열 태그도 남캐로 본다', () => {
+        withCards(
+          '1.2::mature male::, suit',
+          '0.9::male focus, muscular::, white shirt',
+          'black dress'
+        )
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([true, true, false])
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([false, false, true])
+      })
+
+      it('빼달라는 음수 가중치·주석·랜덤 선택지의 boy 는 남캐의 근거가 아니다', () => {
+        withCards(
+          '-1::1boy::, black dress',
+          '# 1boy\n1girl, white shirt',
+          '(1boy/1girl), school swimsuit',
+          'tomboy, man bun, suit'
+        )
+        // 넷 다 여캐 — 남캐만이면 아무도 안 벗는다
+        expect(draw('onsen, bathing', 'male').some(nude)).toBe(false)
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([true, true, true, true])
+      })
+
+      it('역할이 있으면 카드 태그보다 역할이 먼저다', () => {
+        useCharactersStore.setState({
+          items: [
+            { ...card(1, '1boy, suit', true), role: 'target' },
+            { ...card(2, '1girl, black dress', true), role: 'source' }
+          ]
+        })
+        // 1boy 카드지만 당하는쪽 = 여캐, 1girl 카드지만 하는쪽 = 남캐
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([false, true])
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([true, false])
+      })
+
+      it('역할이 있는 캐릭터와 없는 캐릭터가 섞여도 각자 기준대로', () => {
+        useCharactersStore.setState({
+          items: [
+            { ...card(1, 'blue eyes, school swimsuit', true), role: 'target' },
+            { ...card(2, '1boy, suit', true) },
+            { ...card(3, 'long hair, black dress', true) }
+          ]
+        })
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([false, true, false])
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([true, false, true])
+      })
+    })
+
+    describe('자리 역할·씬별 역할이 카드 역할·태그보다 먼저다', () => {
+      beforeEach(() => {
+        useOutfitsStore.setState({ kinds: { ...KINDS }, stripOnNude: false })
+      })
+
+      it('같은 카드가 하는쪽 자리와 당하는쪽 자리에 앉으면 자리마다 따로 가른다', () => {
+        useCharactersStore.setState({
+          items: [card(1, '1girl, school swimsuit', true)]
+        })
+        useSceneExtrasStore.setState({
+          additionsEnabled: true,
+          additions: {
+            1: {
+              4: {
+                characterIds: [1],
+                charRefIds: [],
+                vibeIds: [],
+                slots: [
+                  { x: 0.3, y: 0.5 },
+                  { x: 0.7, y: 0.5 }
+                ],
+                slotChars: { 0: 1, 1: 1 },
+                slotRoles: { 0: 'source' as const, 1: 'target' as const }
+              }
+            }
+          }
+        })
+        // 0번 자리 = 하는쪽 = 남캐, 1번 자리 = 당하는쪽 = 여캐 — 카드는 1girl 하나뿐이다
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([true, false])
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([false, true])
+        expect(draw('onsen, bathing', true).map(nude)).toEqual([true, true])
+      })
+
+      it('씬별 추가의 역할이 카드 역할을 뒤집으면 뒤집힌 대로 따른다', () => {
+        useCharactersStore.setState({
+          items: [
+            { ...card(1, 'blue eyes, school swimsuit', true), role: 'target' },
+            { ...card(2, '1boy, suit', true), role: 'source' }
+          ]
+        })
+        // 카드 역할대로면 1번 = 여캐, 2번 = 남캐
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([false, true])
+        useSceneExtrasStore.setState({
+          additionsEnabled: true,
+          additions: {
+            1: {
+              4: {
+                characterIds: [1, 2],
+                charRefIds: [],
+                vibeIds: [],
+                roles: { 1: 'source' as const, 2: 'target' as const }
+              }
+            }
+          }
+        })
+        // 이 씬에서는 1번이 하는쪽(남캐), 2번이 당하는쪽(여캐) — 2번 카드의 1boy 태그는 상관없다
+        expect(draw('onsen, bathing', 'male').map(nude)).toEqual([true, false])
+        expect(draw('onsen, bathing', 'female').map(nude)).toEqual([false, true])
+      })
+    })
+  })
+
   it('하는쪽 태그의 행위(breast punch)로 당하는쪽 가슴 조각이 켜진다', () => {
     useCharactersStore.setState({
       items: [

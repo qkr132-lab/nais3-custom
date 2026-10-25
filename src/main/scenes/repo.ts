@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, join, relative } from 'path'
 import sharp from 'sharp'
 import JSZip from 'jszip'
 import type { Scene, SceneImage, ScenePreset } from '../../shared/types'
+import { normalizeNudeStrip, type NudeStripSetting } from '../../shared/nude-strip'
 import {
   changeCensors,
   normalizeCensors,
@@ -934,6 +935,7 @@ export async function exportScenesJson(presetId: number): Promise<{
       const layout = layoutOf(Number(s.id))
       const sourcePos = parsePos(s.source_pos as string | null)
       const targetPos = parsePos(s.target_pos as string | null)
+      const strip = normalizeNudeStrip(nudeStrips[String(s.id)])
       return {
         name: s.name as string,
         prompt: s.prompt,
@@ -944,10 +946,9 @@ export async function exportScenesJson(presetId: number): Promise<{
         ...(typeof transparent[String(s.id)] === 'boolean'
           ? { transparentBackground: transparent[String(s.id)] }
           : {}),
-        // 씬별 누드면 옷 벗기기 — 따로 정한 씬만 (없으면 가져온 쪽의 전체 설정을 따른다)
-        ...(typeof nudeStrips[String(s.id)] === 'boolean'
-          ? { nudeStrip: nudeStrips[String(s.id)] }
-          : {}),
+        // 씬별 옷 벗기기 — 따로 정한 씬만 (없으면 가져온 쪽의 전체 설정을 따른다).
+        // true/false 는 옛 파일과 같고, 남캐만·여캐만은 'male'·'female' 문자열
+        ...(strip !== undefined ? { nudeStrip: strip } : {}),
         // 행위 태그 (커스텀) — 없으면 필드 생략해 기존 포맷과 호환 유지
         ...((s.source_tags as string)?.trim() ? { sourceTags: s.source_tags } : {}),
         ...((s.target_tags as string)?.trim() ? { targetTags: s.target_tags } : {}),
@@ -985,7 +986,8 @@ export interface SceneImportResult {
   dropped: number
   /** 씬마다 따로 켜고 끈 투명 배경 — 렌더러가 씬 설정에 넣는다 */
   transparent?: { sceneId: number; enabled: boolean }[]
-  nudeStrip?: { sceneId: number; enabled: boolean }[]
+  /** 씬마다 따로 정한 옷 벗기기 — true 둘 다(옛 값)·false 안 벗김·'male' 남캐만·'female' 여캐만 */
+  nudeStrip?: { sceneId: number; value: NudeStripSetting }[]
 }
 
 export async function importScenesJson(presetId: number): Promise<SceneImportResult> {
@@ -1297,7 +1299,8 @@ function importSceneBundle(
       if (typeof s.transparentBackground === 'boolean') {
         transparent.push({ sceneId, enabled: s.transparentBackground })
       }
-      if (typeof s.nudeStrip === 'boolean') nudeStrip.push({ sceneId, enabled: s.nudeStrip })
+      const strip = normalizeNudeStrip(s.nudeStrip)
+      if (strip !== undefined) nudeStrip.push({ sceneId, value: strip })
     }
   })()
 
