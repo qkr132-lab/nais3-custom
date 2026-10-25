@@ -51,7 +51,7 @@ describe('생성 중 편집 자동 반영 — 입은 옷 자동 젖힘', () => {
     expect(resync).toHaveBeenCalledTimes(2)
   })
 
-  it('눈 감으면 눈 태그 빼기·알몸일 때 pink nipples 설정을 바꾸면 다시 만든다 (둘 다 기본 꺼짐)', () => {
+  it('눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples 설정을 바꾸면 다시 만든다 (둘 다 기본 꺼짐)', () => {
     waitingQueue()
     useOutfitsStore.setState({ eyesClosedStrip: !useOutfitsStore.getState().eyesClosedStrip })
     vi.advanceTimersByTime(600)

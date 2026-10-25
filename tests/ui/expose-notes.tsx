@@ -39,12 +39,12 @@ import './placement.css'
  *   ?mode=addition   실제 씬별 추가 창 → 넓게 배치 (배치 창 배지는 실제 계산 결과)
  *   ?mode=picker     실제 복장 선택 (카드에 직접 적은 옷 / 복장 있음)
  *   ?mode=outfit     실제 복장 탭 (카드 글에서 읽은 옷 구역)
- *   ?mode=settings   실제 설정 창 (생성 탭의 「입은 옷 자동 젖힘」·「후타 자동 재조립」·「후타 시점·구도 정리」·「알몸일 때 pink nipples」·「눈 감으면 눈 태그 빼기」 스위치)
+ *   ?mode=settings   실제 설정 창 (생성 탭의 「입은 옷 자동 젖힘」·「후타 자동 재조립」·「후타 시점·구도 정리」·「알몸일 때 pink nipples」·「눈이 안 보이면 눈 태그 빼기」 스위치)
  *   ?mode=body       접이식 「몸·후타」 블록에 종류 7가지를 전부 넣은 합성 메모
  *   ?mode=main       메인 탭 블록 (실제 메인 요청 조립 · &futa=1 이면 후타 카드가 있어 「몸·후타」도 나온다)
  *   &enabled=0       설정 「입은 옷 자동 젖힘」 꺼짐
  *   &futa=0          설정 「후타 자동 재조립」 꺼짐 (settings 에서 시점·구도 스위치가 잠기는지)
- *   &eyes=0 · &pink=0  설정 「눈 감으면 눈 태그 빼기」 · 「알몸일 때 pink nipples」 꺼짐 (실제 기본은 둘 다 꺼짐이지만 이 화면은 메모를 보려고 켜 둔다)
+ *   &eyes=0 · &pink=0  설정 「눈이 안 보이면 눈 태그 빼기」 · 「알몸일 때 pink nipples」 꺼짐 (실제 기본은 둘 다 꺼짐이지만 이 화면은 메모를 보려고 켜 둔다)
  *   &fake=1          (main) 핵심 모듈 없이 메인 탭 배선만 보려고 buildMainRequest 결과에 합성 몸·후타 메모와 후타 2명 계획을 얹는다
  *   &futacard=1      재조립 설정과 상관없이 합성 후타 카드(E)만 더한다 — &futa=0 과 함께면 「재조립 꺼짐」 한 줄이 나오는지 (detail)
  *   &futa=1          합성 후타 카드(E)를 더한다 — detail·main 에서 실제 요청 조립이 「몸·후타」 메모를 만든다
@@ -451,7 +451,7 @@ useOutfitsStore.setState({
   exposeWorn: enabled,
   futaReassembly: params.get('futa') !== '0',
   futaViewFix: true,
-  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples 는 실제 기본이 꺼짐이지만, 이 화면은 두 기능의 메모를 보려고 켜 둔다
+  // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples 는 실제 기본이 꺼짐이지만, 이 화면은 두 기능의 메모를 보려고 켜 둔다
   // (&eyes=0 · &pink=0 으로 끈 채 볼 수 있다)
   eyesClosedStrip: params.get('eyes') !== '0',
   nudePinkNipples: params.get('pink') !== '0'
@@ -1105,9 +1105,9 @@ async function runChecks(): Promise<Check[]> {
       !!viewFix && viewFix.hasAttribute('disabled') === !futaOn
     )
     const pinkSwitch = switchOf('알몸일 때 pink nipples')
-    const eyesSwitch = switchOf('눈 감으면 눈 태그 빼기')
+    const eyesSwitch = switchOf('눈이 안 보이면 눈 태그 빼기')
     ok(
-      '설정 생성 탭에 「알몸일 때 pink nipples」·「눈 감으면 눈 태그 빼기」 스위치가 있고 설정값(기본 꺼짐)을 따른다',
+      '설정 생성 탭에 「알몸일 때 pink nipples」·「눈이 안 보이면 눈 태그 빼기」 스위치가 있고 설정값(기본 꺼짐)을 따른다',
       pinkSwitch?.getAttribute('aria-checked') === String(params.get('pink') !== '0') &&
         eyesSwitch?.getAttribute('aria-checked') === String(params.get('eyes') !== '0'),
       `${pinkSwitch?.getAttribute('aria-checked') ?? '없음'} / ${eyesSwitch?.getAttribute('aria-checked') ?? '없음'}`
@@ -1120,7 +1120,7 @@ async function runChecks(): Promise<Check[]> {
     ok(
       '안내 글에 「당신」이 없고, 기본 꺼짐으로 바뀐 세 설정은 「기본 꺼짐」과 「끄면 이 기능이 없을 때와 똑같이」를 쓴다',
       hints.every((t) => !t.includes('당신')) &&
-        ['입은 옷 자동 젖힘', '알몸일 때 pink nipples', '눈 감으면 눈 태그 빼기'].every(
+        ['입은 옷 자동 젖힘', '알몸일 때 pink nipples', '눈이 안 보이면 눈 태그 빼기'].every(
           (label) =>
             hintOf(label).includes('기본 꺼짐') &&
             hintOf(label).includes('끄면 이 기능이 없을 때와 똑같이')

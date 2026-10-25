@@ -160,7 +160,7 @@ function GenerationSection(): React.JSX.Element {
   // 후타 자동 재조립 + 시점·구도 정리 (커스텀, 재조립은 기본 꺼짐)
   const [futaReassembly, setFutaReassembly] = useFutaReassembly()
   const [futaViewFix, setFutaViewFix] = useFutaViewFix()
-  // 알몸일 때 pink nipples · 눈 감으면 눈 태그 빼기 (커스텀, 둘 다 기본 꺼짐)
+  // 알몸일 때 pink nipples · 눈이 안 보이면 눈 태그 빼기 (커스텀, 둘 다 기본 꺼짐)
   const [nudePinkNipples, setNudePinkNipples] = useNudePinkNipples()
   const [eyesClosedStrip, setEyesClosedStrip] = useEyesClosedStrip()
   // 확인 창 전역 끄기 (커스텀)
@@ -259,11 +259,11 @@ function GenerationSection(): React.JSX.Element {
         />
       </Row>
       <Row
-        label="눈 감으면 눈 태그 빼기"
-        hint="그 캐릭터의 장면 태그에 closed eyes·eyes closed(영어 문장 her eyes are closed 포함)가 있으면 카드 글의 눈 색·동공·흰자·빛나는 눈·눈동자 무늬 태그를 보낼 때만 뺌 · 카드 원문은 그대로 · 뺀 것은 씬 상세·메인 탭의 「눈 감음」(다른 메모와 같이 있으면 「몸·후타」)에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
+        label="눈이 안 보이면 눈 태그 빼기"
+        hint="그 캐릭터의 장면 태그에 눈 감음(closed eyes·^_^)·잠듦(sleeping·she is asleep)·눈 가림(blindfold·눈을 덮은 sleep mask)이 있거나 입은 복장이 눈을 가리면, 카드 글에서 눈을 떠야만 보이는 태그(눈 색·동공·흰자·빛나는 눈·기호 눈·눈 상태·시선)를 보낼 때만 뺌 · 카드 원문은 그대로 · 이 캐릭터의 글에 눈 뜬 표현이 따로 있으면 빼지 않음 · 뺀 것은 씬 상세·메인 탭의 「눈 감음」·「잠듦」·「눈 가림」(다른 메모와 같이 있으면 「몸·후타」)에서 확인 · 기본 꺼짐, 켜야 동작함 · 끄면 이 기능이 없을 때와 똑같이 나감"
       >
         <Switch
-          aria-label="눈 감으면 눈 태그 빼기"
+          aria-label="눈이 안 보이면 눈 태그 빼기"
           checked={eyesClosedStrip}
           onCheckedChange={setEyesClosedStrip}
         />

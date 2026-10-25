@@ -1,11 +1,14 @@
 import { useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { EYE_CAUSE_LABEL } from '@shared/eyes'
 import type { BodyNote } from '@shared/types'
 import {
   KIND_META,
   bodyCharBadge,
   bodyNoteLine,
+  eyeHeading,
   groupBodyRounds,
+  isEyeCountId,
   isEyeNote,
   mergeBodyRows,
   mergedBodyCounts,
@@ -168,7 +171,7 @@ export function FutaCharBadges({
         item(k, k === 'suspect' ? '후타 의심' : `후타 ${KIND_META[k].label}`, KIND_META[k].tone)
       )}
       {badge.pink && !badge.futa && item('pink', 'pink nipples', 'ok')}
-      {badge.eyes && item('eyes', '눈 감음', 'ok')}
+      {badge.eyes && item('eyes', EYE_CAUSE_LABEL[badge.eyeCause ?? 'closed'], 'ok')}
     </span>
   )
 }
@@ -236,7 +239,7 @@ export function BodyBlock({
     )
   }
   const own = scope === 'main' ? '메인에 적은 글' : '씬에 적힌 글'
-  // 눈 감음 메모뿐이면(후타도 pink nipples 도 없다) 후타 설명을 붙이지 않는다 — 카드의 눈 외형만 뺀 것이다
+  // 눈 메모(눈 감음·잠듦·눈 가림)뿐이면(후타도 pink nipples 도 없다) 후타 설명을 붙이지 않는다 — 카드의 눈 외형만 뺀 것이다
   const eyesOnly =
     !counts.some((c) => c.id === 'futa' || c.id === 'off') &&
     groups.every((g) => g.notes.every(isEyeNote))
@@ -253,7 +256,9 @@ export function BodyBlock({
           size={13}
           className={cn('shrink-0 transition-transform', open && 'rotate-90')}
         />
-        <span className="shrink-0 font-medium">{eyesOnly ? '눈 감음' : '몸·후타'}</span>
+        <span className="shrink-0 font-medium">
+          {eyesOnly ? eyeHeading(groups.flatMap((g) => g.notes)) : '몸·후타'}
+        </span>
         {/* 접힌 줄이 길어져도 잘리지 않고 줄바꿈 — 충돌·후타 의심이 말줄임에 가려지지 않게 */}
         <span
           data-testid="body-summary"
@@ -266,7 +271,7 @@ export function BodyBlock({
               {/* 바뀐 것과 눈여겨볼 것은 접어도 색으로 보인다 */}
               <span
                 className={
-                  c.loud || c.id === 'futa' || c.id === 'eyes' ? TONE_TEXT[c.tone] : undefined
+                  c.loud || c.id === 'futa' || isEyeCountId(c.id) ? TONE_TEXT[c.tone] : undefined
                 }
               >
                 {c.label}
@@ -301,8 +306,8 @@ export function BodyBlock({
                 : '「후타 자동 재조립」이 꺼져 있어 후타 글은 바꾸지 않습니다'}
               {counts.some((c) => c.id === 'pink') &&
                 ' (pink nipples 는 「알몸일 때 pink nipples」 설정에서 끕니다)'}
-              {counts.some((c) => c.id === 'eyes') &&
-                ' (눈 감음으로 뺀 눈 외형 태그는 「눈 감으면 눈 태그 빼기」 설정에서 끄며 카드의 글은 그대로입니다)'}
+              {counts.some((c) => isEyeCountId(c.id)) &&
+                ' (눈이 안 보여 뺀 눈 외형 태그는 「눈이 안 보이면 눈 태그 빼기」 설정에서 끄며 카드의 글은 그대로입니다)'}
               .
             </p>
           )}

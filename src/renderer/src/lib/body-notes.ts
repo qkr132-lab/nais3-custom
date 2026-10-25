@@ -1,4 +1,5 @@
 import { readBody } from '@shared/body'
+import { EYE_CAUSE_LABEL, type EyeCause } from '@shared/eyes'
 import type { BodyNote, ExposeNote } from '@shared/types'
 import type { NoteTone } from './expose-notes'
 
@@ -29,7 +30,7 @@ export const KIND_META: Record<BodyKind, KindMeta> = {
   removed: {
     label: '뺌',
     tone: 'ok',
-    hint: '후타 구성에 맞지 않거나 눈을 감아 안 보이는 태그를 빼고 보냄 · 적어 둔 원본은 그대로'
+    hint: '후타 구성에 맞지 않거나 눈이 안 보여(감음·잠듦·가림) 필요 없는 태그를 빼고 보냄 · 적어 둔 원본은 그대로'
   },
   added: {
     label: '더함',
@@ -105,11 +106,31 @@ export const isPinkNote = (n: BodyNote): boolean =>
           .toLowerCase() === 'pink nipples'
     )
 
-/** 눈 감음 때문에 카드의 눈 외형 태그를 뺀 메모인가 — 후타와 상관없이 어느 카드에나 생긴다 */
+/** 눈이 안 보여서(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그를 뺀 메모인가 — 후타와 상관없이 어느 카드에나 생긴다 */
 export const isEyeNote = (n: BodyNote): boolean => n.topic === 'eyes'
 
-/** 눈 외형 태그를 실제로 뺀 눈 감음 메모 — 뺄 수 없어 둔 것(kept)은 「안 바꿈」으로 센다 */
+/** 눈 외형 태그를 실제로 뺀 눈 메모 — 뺄 수 없어 둔 것(kept)은 「안 바꿈」으로 센다 */
 const isEyeRemoved = (n: BodyNote): boolean => n.topic === 'eyes' && n.kind === 'removed'
+
+/** 눈 메모가 말하는 까닭 — 없으면 눈 감음 (예전에 저장된 메모) */
+export const eyeCauseOf = (n: BodyNote): EyeCause => n.cause ?? 'closed'
+
+/** 눈 메모뿐인 블록의 이름 — 까닭이 하나면 그 말(눈 감음·잠듦·눈 가림), 섞여 있으면 「눈 안 보임」 */
+export function eyeHeading(notes: readonly BodyNote[]): string {
+  const causes = [...new Set(notes.filter(isEyeNote).map(eyeCauseOf))]
+  return causes.length === 1 ? EYE_CAUSE_LABEL[causes[0]] : '눈 안 보임'
+}
+
+/** 요약 조각 id 로 쓰는 눈 까닭 — eyes = 눈 감음 */
+export type EyeCountId = 'eyes' | 'eyesAsleep' | 'eyesCovered'
+const EYE_COUNT_CAUSE: Record<EyeCountId, EyeCause> = {
+  eyes: 'closed',
+  eyesAsleep: 'asleep',
+  eyesCovered: 'covered'
+}
+const EYE_COUNT_IDS = Object.keys(EYE_COUNT_CAUSE) as EyeCountId[]
+export const isEyeCountId = (id: string): id is EyeCountId =>
+  Object.prototype.hasOwnProperty.call(EYE_COUNT_CAUSE, id)
 
 /**
  * 후타 때문에 생긴 메모인가 — 알몸에 더한 pink nipples(여캐도 받는다), 눈 감음으로 뺀 눈 외형, 눈여겨볼 상태(의심·충돌·못 읽음)는 뺀다.
@@ -201,7 +222,7 @@ export function mergeBodyRows(notes: readonly BodyNote[]): BodyRow[] {
 
 /** 요약 한 칸 — 개수 말고도 후타 명수 같은 글자가 들어 있다 */
 export interface BodyCount {
-  id: 'futa' | 'off' | BodyKind | 'pink' | 'eyes'
+  id: 'futa' | 'off' | BodyKind | 'pink' | EyeCountId
   label: string
   tone: NoteTone
   /** 접힌 줄에서 색으로 눈에 띄어야 하는가 (바뀐 것·눈여겨볼 것) */
@@ -217,14 +238,29 @@ const COUNT_ORDER: BodyCount['id'][] = [
   'added',
   'pink',
   'eyes',
+  'eyesAsleep',
+  'eyesCovered',
   'conflict',
   'suspect',
   'unreadable',
   'kept'
 ]
 
+/** 눈 외형을 뺀 카드(캐릭터) 수를 까닭마다 — 같은 카드의 태그가 여럿이어도 한 명 */
+function eyeAmounts(notes: readonly BodyNote[]): Record<EyeCountId, number> {
+  const out = { eyes: 0, eyesAsleep: 0, eyesCovered: 0 }
+  for (const id of EYE_COUNT_IDS) {
+    out[id] = new Set(
+      notes
+        .filter((n) => isEyeRemoved(n) && eyeCauseOf(n) === EYE_COUNT_CAUSE[id])
+        .map((n) => n.charId ?? n.charIndex ?? n.name ?? '')
+    ).size
+  }
+  return out
+}
+
 /**
- * 한 줄 요약 조각들 — 「후타 1명」 「바꿈 3」 「안 바꿈 2」 「pink nipples 1」.
+ * 한 줄 요약 조각들 — 「후타 1명」 「바꿈 3」 「안 바꿈 2」 「pink nipples 1」 「눈 감음 2명」 「잠듦 1명」 「눈 가림 1명」.
  * futaDrawn 은 요청의 재조립 계획(futaPlan.counts.futa)이 알려 주는 그려지는 후타 수다.
  * 메모로 후타를 짐작하지 않는다 — 상대 여캐의 글을 바꾼 메모도 같은 모양이라 후타가 아닌 캐릭터를 세게 된다
  */
@@ -240,9 +276,8 @@ export function bodyCounts(
     removed: notes.filter((n) => n.kind === 'removed' && !isEyeNote(n)).length,
     added: notes.filter((n) => n.kind === 'added' && !isPinkNote(n)).length,
     pink: notes.filter(isPinkNote).length,
-    // 눈 감음은 태그 수가 아니라 눈 외형을 뺀 카드(캐릭터) 수로 센다
-    eyes: new Set(notes.filter(isEyeRemoved).map((n) => n.charId ?? n.charIndex ?? n.name ?? ''))
-      .size,
+    // 눈 감음·잠듦·눈 가림은 태그 수가 아니라 눈 외형을 뺀 카드(캐릭터) 수로, 까닭마다 따로 센다
+    ...eyeAmounts(notes),
     conflict: notes.filter((n) => n.kind === 'conflict').length,
     suspect: notes.filter((n) => n.kind === 'suspect').length,
     unreadable: notes.filter((n) => n.kind === 'unreadable').length,
@@ -256,8 +291,10 @@ export function bodyCounts(
       return n < 0
         ? []
         : [{ id, label: `후타 카드 ${n}장 · 재조립 꺼짐`, tone: 'mute', loud: false }]
-    if (id === 'eyes')
-      return n <= 0 ? [] : [{ id, label: `눈 감음 ${n}명`, tone: 'ok', loud: false }]
+    if (isEyeCountId(id))
+      return n <= 0
+        ? []
+        : [{ id, label: `${EYE_CAUSE_LABEL[EYE_COUNT_CAUSE[id]]} ${n}명`, tone: 'ok', loud: false }]
     if (n <= 0) return []
     const meta = id === 'pink' ? { label: 'pink nipples', tone: 'ok' as const } : KIND_META[id]
     return [{ id, label: `${meta.label} ${n}`, tone: meta.tone, loud: id !== 'kept' }]
@@ -311,8 +348,10 @@ export interface BodyCharBadge {
   /** 이 카드가 후타로 읽혔는가 (요청의 futaPlan.chars) */
   futa: boolean
   pink: boolean
-  /** 눈 감음으로 카드의 눈 외형 태그를 뺐다 */
+  /** 눈이 안 보여서(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그를 뺐다 */
   eyes: boolean
+  /** 눈 외형을 뺀 까닭 — 배지 글(「눈 감음」「잠듦」「눈 가림」)이 이걸 따른다. 뺀 것이 없으면 null */
+  eyeCause: EyeCause | null
   /** 눈여겨볼 종류 (충돌·후타 의심·못 읽음) */
   attention: BodyKind[]
   /** 배지 하나의 호버 글 — 그 배지가 가리키는 메모만 한 줄씩 */
@@ -331,14 +370,17 @@ export function bodyCharBadge(notes: readonly BodyNote[], futa = false): BodyCha
   )
   const lines = (list: readonly BodyNote[], head = '몸·후타'): string =>
     list.length ? [head, ...sorted(list).map(bodyNoteLine)].join('\n') : ''
+  const removedEye = notes.find(isEyeRemoved)
+  const eyeCause = removedEye ? eyeCauseOf(removedEye) : null
   return {
     futa,
     pink: notes.some(isPinkNote),
-    eyes: notes.some(isEyeRemoved),
+    eyes: !!removedEye,
+    eyeCause,
     attention,
     titleOf: (id) =>
       id === 'eyes'
-        ? lines(notes.filter(isEyeNote), '눈 감음')
+        ? lines(notes.filter(isEyeNote), EYE_CAUSE_LABEL[eyeCause ?? 'closed'])
         : lines(
             id === 'futa'
               ? notes.filter(isFutaNote)

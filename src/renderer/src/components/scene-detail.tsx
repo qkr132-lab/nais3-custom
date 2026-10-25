@@ -69,7 +69,7 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   // 후타 자동 재조립 (커스텀) — 설정이 바뀌어도 미리보기를 다시 계산
   const [futaReassembly] = useFutaReassembly()
   const [futaViewFix] = useFutaViewFix()
-  // 눈 감으면 눈 태그 빼기·알몸일 때 pink nipples (커스텀, 기본 꺼짐) — 설정이 바뀌어도 미리보기를 다시 계산
+  // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples (커스텀, 기본 꺼짐) — 설정이 바뀌어도 미리보기를 다시 계산
   const [eyesClosedStrip] = useEyesClosedStrip()
   const [nudePinkNipples] = useNudePinkNipples()
   const outfitItems = useOutfitsStore((s) => s.items)

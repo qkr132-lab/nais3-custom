@@ -10,7 +10,10 @@ import {
   bodyNotesOfChar,
   bodySummaryText,
   futaCardsOff,
+  eyeCauseOf,
+  eyeHeading,
   groupBodyRounds,
+  isEyeCountId,
   isEyeNote,
   isFutaNote,
   isPinkNote,
@@ -494,6 +497,97 @@ describe('눈 감음 메모 — 카드의 눈 외형 태그를 뺀 것', () => {
     expect(badge.titleOf('kept')).toContain('(blue eyes/red eyes)')
     expect(isFutaNote(kept)).toBe(false)
     expect(opensByDefault(bodyCounts([kept]))).toBe(false)
+  })
+
+  const asleep = (charIndex: number, name: string, before: string): BodyNote => ({
+    ...eye(charIndex, name, before),
+    cause: 'asleep',
+    evidence: 'sleeping',
+    reason: '잠듦 — 눈 색 뺌'
+  })
+  const covered = (charIndex: number, name: string, before: string): BodyNote => ({
+    ...eye(charIndex, name, before),
+    cause: 'covered',
+    evidence: '복장 black blindfold',
+    reason: '눈 가림 — 눈 색 뺌'
+  })
+
+  it('잠듦·눈 가림은 요약과 배지에 그 말이 보인다 — 까닭마다 카드 수를 따로 센다', () => {
+    const notes = [
+      eye(0, 'A', 'blue eyes'),
+      asleep(1, 'B', 'blue eyes'),
+      asleep(1, 'B', 'slit pupils'),
+      covered(2, 'C', 'red eyes'),
+      note({ kind: 'removed', where: 'scene', before: '1boy' })
+    ]
+    expect(bodyCounts(notes).map((c) => c.label)).toEqual([
+      '뺌 1',
+      '눈 감음 1명',
+      '잠듦 1명',
+      '눈 가림 1명'
+    ])
+    expect(bodyCounts([asleep(1, 'B', 'blue eyes')]).map((c) => [c.id, c.label])).toEqual([
+      ['eyesAsleep', '잠듦 1명']
+    ])
+    // 접힌 줄의 색은 눈 감음과 같고, 처음부터 펴지 않는다
+    expect(bodyCounts([covered(2, 'C', 'red eyes')])[0]).toMatchObject({ tone: 'ok', loud: false })
+    expect(
+      opensByDefault(bodyCounts([asleep(1, 'B', 'blue eyes'), covered(2, 'C', 'red eyes')]))
+    ).toBe(false)
+    // 배지 글은 그 캐릭터의 까닭을 따른다
+    expect(bodyCharBadge([eye(0, 'A', 'blue eyes')])).toMatchObject({
+      eyes: true,
+      eyeCause: 'closed'
+    })
+    expect(bodyCharBadge([asleep(1, 'B', 'blue eyes')])).toMatchObject({
+      eyes: true,
+      eyeCause: 'asleep'
+    })
+    expect(bodyCharBadge([covered(2, 'C', 'red eyes')])).toMatchObject({
+      eyes: true,
+      eyeCause: 'covered'
+    })
+    expect(bodyCharBadge([]).eyeCause).toBeNull()
+    expect(
+      bodyCharBadge([asleep(1, 'B', 'blue eyes')])
+        .titleOf('eyes')
+        .split('\n')[0]
+    ).toBe('잠듦')
+    expect(
+      bodyCharBadge([covered(2, 'C', 'red eyes')])
+        .titleOf('eyes')
+        .split('\n')[0]
+    ).toBe('눈 가림')
+    // 예전에 저장된 메모(cause 가 없다)는 눈 감음이다
+    expect(eyeCauseOf(eye(0, 'A', 'blue eyes'))).toBe('closed')
+    expect(eyeCauseOf(asleep(1, 'B', 'blue eyes'))).toBe('asleep')
+    // 같은 카드의 메모는 후타 쪽에 들지 않는다
+    expect(isFutaNote(asleep(1, 'B', 'blue eyes'))).toBe(false)
+    expect(isEyeCountId('eyesAsleep')).toBe(true)
+    expect(isEyeCountId('removed')).toBe(false)
+    expect(isEyeCountId('toString')).toBe(false)
+    // 눈 메모뿐인 블록의 이름 — 까닭이 하나면 그 말, 섞이면 「눈 안 보임」
+    expect(eyeHeading([eye(0, 'A', 'blue eyes')])).toBe('눈 감음')
+    expect(eyeHeading([asleep(1, 'B', 'blue eyes'), asleep(2, 'C', 'red eyes')])).toBe('잠듦')
+    expect(eyeHeading([covered(2, 'C', 'red eyes')])).toBe('눈 가림')
+    expect(eyeHeading([eye(0, 'A', 'blue eyes'), covered(2, 'C', 'red eyes')])).toBe('눈 안 보임')
+  })
+
+  it('인셋 자리에 눈 뜬 표현이 있어 둔 눈 외형은 「안 바꿈」이고 눈 감음 배지·카드 수에 들지 않는다', () => {
+    const keptOpen = note({
+      kind: 'kept',
+      where: 'char',
+      topic: 'eyes',
+      charIndex: 1,
+      charId: 1,
+      name: 'A',
+      before: 'blue eyes',
+      evidence: 'closed eyes',
+      reason: '눈 감음 — 인셋 자리에 눈 뜬 표현(rolling eyes)이 있어 그대로 둠'
+    })
+    expect(bodyCounts([keptOpen]).map((c) => c.label)).toEqual(['안 바꿈 1'])
+    expect(bodyCharBadge([keptOpen]).eyes).toBe(false)
+    expect(bodyCharBadge([keptOpen]).titleOf('kept')).toContain('인셋 자리에 눈 뜬 표현')
   })
 
   it('같은 태그를 뺀 줄은 위치를 모아 한 줄로 보인다', () => {

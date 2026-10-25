@@ -18,7 +18,7 @@ import { useOutfitsStore } from '../src/renderer/src/stores/outfits-store'
 import { useCharRefsStore, useVibesStore } from '../src/renderer/src/stores/refs-store'
 
 /**
- * 기본 꺼짐 설정 셋 — 입은 옷 자동 젖힘(expose_worn_clothes) · 눈 감으면 눈 태그 빼기(eyes_closed_strip) ·
+ * 기본 꺼짐 설정 셋 — 입은 옷 자동 젖힘(expose_worn_clothes) · 눈이 안 보이면 눈 태그 빼기(eyes_closed_strip) ·
  * 알몸일 때 pink nipples(nude_pink_nipples). 저장값이 '1' 일 때만 켜지고, 끄면 그 기능이 없을 때와 출력이 글자 단위로 같다.
  * 합성 카드·합성 씬만 쓴다 (사용자 데이터 없음).
  */

@@ -50,8 +50,8 @@ interface OutfitsState {
   futaViewFix: boolean
   setFutaViewFix: (v: boolean) => void
   /**
-   * 눈 감으면 눈 태그 빼기 — 그 캐릭터에게 걸린 장면 태그에 closed eyes 가 있으면 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈·눈동자 무늬)를
-   * 보낼 때만 뺀다 (설정 eyes_closed_strip, 기본 꺼짐 — 저장값 '1' 일 때만 켬). 뺀 것은 요청의 bodyNotes 로 화면에 보인다.
+   * 눈이 안 보이면 눈 태그 빼기 — 그 캐릭터에게 걸린 장면 태그에 눈 감음·잠듦·눈 가림이 있거나 입은 복장이 눈을 가리면,
+   * 카드에서 눈을 떠야만 보이는 태그(눈 색·동공·흰자·빛나는 눈·눈동자 무늬·기호 눈·눈 상태·시선)를 보낼 때만 뺀다 (설정 eyes_closed_strip, 기본 꺼짐 — 저장값 '1' 일 때만 켬). 뺀 것은 요청의 bodyNotes 로 화면에 보인다.
    * 끄면 카드 글을 읽지 않아 이 기능이 없던 때와 글자 단위로 같다
    */
   eyesClosedStrip: boolean
