@@ -6,6 +6,7 @@ import type { R2TransferStatus } from '../../shared/types'
 import { r2CacheRoot } from '../images/storage'
 import { broadcast } from '../ipc'
 import { listAllKeys, r2DeleteObject, r2GetObject } from './client'
+import { isInsideDir, localRelative } from './local-path'
 
 /**
  * R2 둘러보기 (커스텀) — 올린 그림을 앱 안에서 보고, 내려받고, 지운다.
@@ -32,19 +33,6 @@ export async function previewPath(
   const path = join(dir, cacheName(bucket, key, lastModified))
   if (!existsSync(path)) writeFileSync(path, await r2GetObject(bucket, key))
   return path
-}
-
-/**
- * 내려받을 때의 상대 경로 — 지금 보고 있는 폴더(base)를 기준으로 하위 구조를 그대로 둔다.
- * Windows에서 못 쓰는 글자는 `_`로.
- */
-export function localRelative(key: string, base: string): string {
-  const rel = base && key.startsWith(base) ? key.slice(base.length) : key
-  return rel
-    .split('/')
-    .filter(Boolean)
-    .map((seg) => seg.replace(/[\\:*?"<>|]/g, '_'))
-    .join('/')
 }
 
 const transfer: R2TransferStatus = { running: false, kind: 'download', done: 0, total: 0 }
@@ -123,7 +111,11 @@ export async function downloadSelection(
     if (r.canceled || r.filePaths.length === 0) return canceled
     dir = r.filePaths[0]
     const all = [...new Set([...keys, ...(await filesUnder(bucket, folders))])]
-    targets = all.map((key) => ({ key, path: join(dir, localRelative(key, base)) }))
+    // 고른 폴더 밖을 가리키는 길은 쓰지 않는다 (path 가 빈 문자열이면 아래에서 건너뛴다)
+    targets = all.map((key) => {
+      const path = join(dir, localRelative(key, base))
+      return { key, path: isInsideDir(dir, path) ? path : '' }
+    })
   }
   transfer.running = true
   transfer.kind = 'download'
@@ -135,6 +127,7 @@ export async function downloadSelection(
   try {
     await runWorkers(targets, 3, async (t) => {
       try {
+        if (!t.path) throw new Error('내려받을 폴더 밖을 가리키는 경로라 건너뜁니다')
         mkdirSync(dirname(t.path), { recursive: true })
         writeFileSync(t.path, await r2GetObject(bucket, t.key))
         saved++
