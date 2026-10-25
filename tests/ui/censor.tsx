@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- 시험 화면 전용 파일: 컴포넌트를 내보내지 않고 바로 화면에 그린다 */
 import { createRoot } from 'react-dom/client'
 import type { GenerationRequest, IpcInvokeMap, Scene, SceneImage } from '../../src/shared/types'
 import { PageNav } from '../../src/renderer/src/components/page-nav'

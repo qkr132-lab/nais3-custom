@@ -21,7 +21,9 @@ vi.mock('node:worker_threads', async () => {
         super()
         this.engine = new TagSearchEngine(options.workerData.path)
       }
-      unref(): void {}
+      unref(): void {
+        // 시험용 가짜 워커: 할 일 없음
+      }
       terminate(): Promise<number> {
         this.engine.close()
         return Promise.resolve(0)

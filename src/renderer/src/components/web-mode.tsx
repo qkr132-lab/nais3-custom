@@ -330,6 +330,7 @@ export function WebMode(): React.JSX.Element {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ref={webviewRef as any}
         src={startUrl}
+        // eslint-disable-next-line react/no-unknown-property -- Electron <webview> 속성
         partition="persist:webmode"
         className="min-h-0 w-full flex-1"
       />
