@@ -2381,7 +2381,7 @@ const SceneCard = memo(function SceneCard({
   const sceneClipboard = useScenesStore((s) => s.sceneClipboard)
   const selectionActive = editMode || selection.size > 0
   // Shift/Ctrl 제스처는 아래 pointerdown에서 따로 가로채고, 일반 드래그는 편집 중에도 재정렬에 쓴다.
-  // 고른 카드를 끌면 고른 전부가 함께 간다 (2026-10-12 유저 「멀티 선택 드래그」)
+  // 고른 카드를 끌면 고른 전부가 함께 간다
   const sortable = useSortable({ id: `scene-${scene.id}` })
 
   // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지

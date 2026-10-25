@@ -3,7 +3,7 @@ import { splitPromptTokens } from '../src/shared/outfit'
 import { mapTags } from '../src/shared/futa'
 
 // 단어·마침표 바로 뒤에 붙여 쓴 음수 가중치 — 「-」가 앞 단어에 남으면 묶음이 +3 으로 읽히고,
-// 재조립이 줄을 다시 이을 때 「-, 3::」이 되어 억제가 강조로 뒤집힌다 (p.44 에서 난 일)
+// 재조립이 줄을 다시 이을 때 「-, 3::」이 되어 억제가 강조로 뒤집힌다
 describe('붙여 쓴 음수 가중치', () => {
   it('마침표·단어 뒤의 -N:: 은 「-」까지 한 묶음으로 뗀다', () => {
     expect(splitPromptTokens('eyes half lidded.-3::smile, happy::, 3::surprised::')).toEqual([

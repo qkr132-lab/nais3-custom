@@ -1,7 +1,6 @@
 /**
- * 성격·분위기·주제 묶음 (커스텀) — tag-data/build_tag_groups.py 가 만든다. 손으로 고치지 말 것.
- * 재료: 단보루 위키 tag group(face/eyes/gestures/posture/symbols), 로컬 태그 사전 채굴, 커뮤니티 정리글 36곳,
- * 아카 AI그림 채널 위키. 모든 태그는 단보루 사전에 있고 사용 수 300 이상이다.
+ * 성격·분위기·주제 묶음 (커스텀) — 단보루 태그 이름으로 만든 묶음 목록이다. 직접 고쳐도 된다.
+ * 모든 태그는 단보루 사전에 있고 사용 수 300 이상이다.
  * keepOrder=true 인 묶음은 대표 태그 → 표정 → 눈 → 입 → 손짓·자세 → 기호 순서를 그대로 보여 준다.
  */
 import type { TagGroup } from './tag-groups'

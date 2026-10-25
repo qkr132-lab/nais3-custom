@@ -226,7 +226,7 @@ export function sceneContextsFor(input: {
 }
 
 /**
- * 씬 프롬프트는 3분할의 맨 뒤(디테일 뒤)에 붙는다 (2026-10-11 유저 「씬은 이제 제일 뒤에 오게 하자」).
+ * 씬 프롬프트는 3분할의 맨 뒤(디테일 뒤)에 붙는다.
  * 예전엔 가변 칸에 넣었는데, 그러면 디테일(화풍·품질)이 씬 내용 뒤에 와서 장면 묘사가 묻혔다.
  */
 export function mergeSceneIntoPromptParts(parts: PromptParts, scenePrompt: string): PromptParts {

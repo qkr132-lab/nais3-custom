@@ -72,7 +72,6 @@ describe('대기 씬 요청 최신화', () => {
     })
 
     // 분할 사용 시 전송 프롬프트는 예약 당시 원문 파츠에서 재조립 — 옛 씬은 사라지고 새 씬이 맨 뒤에
-    // (2026-10-11 유저 「씬은 이제 제일 뒤에」)
     expect(refreshed.prompt).toBe('base, variable, base detail, 6::new tag::')
     expect(refreshed.negativePrompt).toBe('base negative, new negative')
     expect(refreshed.promptParts?.additional).toBe('variable')

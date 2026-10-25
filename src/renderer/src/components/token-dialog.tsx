@@ -156,7 +156,7 @@ function GenerationSection(): React.JSX.Element {
   const setStripOnNude = useOutfitsStore((s) => s.setStripOnNude)
   // 입은 옷 자동 젖힘 (커스텀, 기본 켜짐)
   const [exposeWorn, setExposeWorn] = useExposeWorn()
-  // 후타 자동 재조립 + 시점·구도 정리 (커스텀, 재조립은 기본 꺼짐 — p.45)
+  // 후타 자동 재조립 + 시점·구도 정리 (커스텀, 재조립은 기본 꺼짐)
   const [futaReassembly, setFutaReassembly] = useFutaReassembly()
   const [futaViewFix, setFutaViewFix] = useFutaViewFix()
   // 확인 창 전역 끄기 (커스텀)
