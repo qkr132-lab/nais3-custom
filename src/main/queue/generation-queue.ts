@@ -296,11 +296,15 @@ export class GenerationQueue extends EventEmitter {
   /**
    * 이 계정들을 곧바로 다시 판정받게 한다 (충전 아이템을 쓴 뒤 — 커스텀). 한도로 쉬던 작업자는
    * 쉬는 시간을 끊고, 모든 계정이 빠져 멈춰 있었으면 작업자를 다시 띄운다. 판정은 새로 조회한
-   * 한도로 한다 (부르는 쪽이 그 계정의 한도 기록을 먼저 버린다).
+   * 한도로 한다 (부르는 쪽이 그 계정의 한도 기록을 먼저 버린다). 새 판정이 나오기 전에 다른 계정이
+   * 빠져도 옛 빠짐 판정으로 「모두 빠짐」이 되지 않게 판정 기록도 무른다.
    */
   recheck(accountIds: string[]): void {
     for (const lane of this.lanes.values()) {
-      if (lane.accountId !== null && accountIds.includes(lane.accountId)) lane.restUntil = 0
+      if (lane.accountId !== null && accountIds.includes(lane.accountId)) {
+        lane.restUntil = 0
+        lane.judged = false
+      }
     }
     this.reconcile()
   }

@@ -131,7 +131,10 @@ export async function fetchInventory(token: string): Promise<InventoryItem[] | n
  * 본문 없는 POST, 웹도 응답 본문을 읽지 않는다. 되돌릴 수 없는 요청이라 실패해도 다시 보내지 않는다.
  */
 export async function consumeItem(token: string, id: string): Promise<void> {
-  const res = await fetch(ENDPOINTS.consume(id), { method: 'POST', headers: headers(token) })
+  const res = await fetch(`${ENDPOINTS.inventory}/${encodeURIComponent(id)}/consume`, {
+    method: 'POST',
+    headers: headers(token)
+  })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`사용 실패 ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`)

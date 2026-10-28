@@ -15,6 +15,7 @@ import { cn } from '../lib/utils'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { useUpdateStore } from '../stores/update-store'
+import { keepOpenWhileBusy } from '../stores/refill-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { estimateAnlas } from '@shared/anlas'
 import type { OpusUsage } from '@shared/types'
@@ -127,10 +128,14 @@ function AnlasChips({
  * Opus 무료 V5 생성 한도 게이지. Opus 구독이 아니면(usage 없음) 표시하지 않는다.
  * 계산식은 웹과 동일 — shared/opus-usage.ts 참조. 일반분·추가분(충전 아이템)을 두 색으로 그리고,
  * 누르면 충전 아이템 작은 창이 열린다 (커스텀).
+ * 열림 상태는 안쪽 칩이 갖는다 — 한도 정보가 잠깐 사라지면 상태도 함께 버려져, 돌아왔을 때 저절로 열리지 않는다.
  */
-function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Element | null {
+export function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Element | null {
+  return usage ? <OpusUsageChipPopover usage={usage} /> : null
+}
+
+export function OpusUsageChipPopover({ usage }: { usage: OpusUsage }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  if (!usage) return null
   const percent = usagePercent(usage)
   const extra = usagePurchasedPercent(usage)
   const low = usageIsLow(usage)
@@ -172,7 +177,7 @@ function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Elemen
           </span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-3">
+      <PopoverContent align="start" className="w-72 p-3" onInteractOutside={keepOpenWhileBusy}>
         <OpusUsagePanel usage={usage} />
       </PopoverContent>
     </Popover>

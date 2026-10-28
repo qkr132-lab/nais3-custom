@@ -17,7 +17,6 @@ export const REFILL_SHOP_URL = 'https://novelai.net/image'
 export interface RefillTarget {
   /** 등록 계정 id. 계정 목록 없이 토큰만 넣어 쓰면 null (지금 쓰는 계정) */
   accountId: string | null
-  label: string
   /** 더해지는 양(%) */
   amount: number
 }
@@ -31,7 +30,7 @@ interface RefillState {
 
 export const useRefillStore = create<RefillState>((set, get) => ({
   busy: false,
-  confirmAndUse: async ({ accountId, label, amount }) => {
+  confirmAndUse: async ({ accountId, amount }) => {
     if (get().busy) {
       toast('충전 아이템을 쓰는 중입니다', 'info')
       return 'cancel'
@@ -39,7 +38,7 @@ export const useRefillStore = create<RefillState>((set, get) => ({
     set({ busy: true })
     try {
       const ok = await askConfirm('충전 아이템을 쓸까요?', {
-        message: `Opus 한도에 ${amount}%가 더해지고 되돌릴 수 없습니다${label ? `\n계정: ${label}` : ''}`,
+        message: `Opus 한도에 ${amount}%가 더해지고 되돌릴 수 없습니다`,
         confirmLabel: '사용',
         important: true
       })
@@ -62,6 +61,14 @@ export const useRefillStore = create<RefillState>((set, get) => ({
     }
   }
 }))
+
+/**
+ * 게이지 칩 작은 창의 바깥 상호작용 처리기 — 쓰는 중(확인 창이 떠 있는 동안 포함)에는 닫지 않는다.
+ * 확인 창으로 포커스가 넘어가도 창이 열린 채로 남아 처리 중 표시·사용 뒤 갱신이 그 자리에서 보인다.
+ */
+export function keepOpenWhileBusy(e: Event): void {
+  if (useRefillStore.getState().busy) e.preventDefault()
+}
 
 /** 구매 안내 한 줄 */
 export function refillShopGuide(label: string): string {

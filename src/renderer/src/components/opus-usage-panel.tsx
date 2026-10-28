@@ -90,11 +90,7 @@ export function OpusUsagePanel({ usage }: { usage: OpusUsage }): React.JSX.Eleme
 
   const onUse = async (): Promise<void> => {
     if (!status?.ok || status.blocked !== null) return
-    const result = await confirmAndUse({
-      accountId: status.accountId,
-      label: status.label,
-      amount: status.amount
-    })
+    const result = await confirmAndUse({ accountId: status.accountId, amount: status.amount })
     if (result === 'cancel') return
     setLoading(true)
     void load()
@@ -102,20 +98,10 @@ export function OpusUsagePanel({ usage }: { usage: OpusUsage }): React.JSX.Eleme
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[12.5px] font-semibold text-ink">Opus 무료 V5 생성</p>
-        {status?.label && (
-          <span className="min-w-0 truncate text-[11px] text-faint">{status.label}</span>
-        )}
-      </div>
+      <p className="text-[12.5px] font-semibold text-ink">Opus 무료 V5 생성</p>
       <UsageGauge usage={usage} className="mt-2 h-2 w-full" />
       <p className="mt-1.5 text-[12px] text-ink">{usageSummary(usage)}</p>
       {refill && <p className="text-[11px] text-muted">{refill}</p>}
-      {usage.isNegative && (
-        <p className="mt-0.5 text-[11px] text-danger">
-          무료 생성분을 다 썼습니다 — 지금 생성하면 Anlas가 나갑니다
-        </p>
-      )}
 
       <div className="my-2.5 h-px bg-line" />
 

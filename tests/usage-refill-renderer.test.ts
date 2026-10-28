@@ -34,8 +34,14 @@ const env = vi.hoisted(() => {
   })
   return { handlers, invoke, open }
 })
+// 타이틀바의 칩만 본다 — 테마·페이지 이동 부품은 DOM 이 있어야 해서 빈 부품으로 바꾼다
+vi.mock('../src/renderer/src/components/theme-toggle', () => ({ ThemeToggle: () => null }))
+vi.mock('../src/renderer/src/components/page-nav', () => ({ PageNav: () => null }))
 
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
+  keepOpenWhileBusy,
   offerRefill,
   REFILL_SHOP_URL,
   refillShopGuide,
@@ -43,7 +49,13 @@ import {
 } from '../src/renderer/src/stores/refill-store'
 import { setConfirmsDisabled, useDialogStore } from '../src/renderer/src/stores/dialog-store'
 import { useToastStore } from '../src/renderer/src/stores/toast-store'
-import { bindGenerationEvents } from '../src/renderer/src/stores/generation-store'
+import {
+  bindGenerationEvents,
+  useGenerationStore
+} from '../src/renderer/src/stores/generation-store'
+import { usageSummary } from '../src/shared/opus-usage'
+import { OpusUsagePanel } from '../src/renderer/src/components/opus-usage-panel'
+import { OpusUsageChip, OpusUsageChipPopover } from '../src/renderer/src/components/titlebar'
 
 const status = (patch: Partial<RefillStatus>): RefillStatus => ({
   ok: true,
@@ -105,14 +117,13 @@ beforeEach(() => {
 describe('사용 — 언제나 확인 창을 거친다', () => {
   it('확인 창에서 아니오를 누르면 사용 요청은 0번', async () => {
     route({ use: () => ({ ok: true, amount: 100, label: '계정 1' }) })
-    const done = useRefillStore
-      .getState()
-      .confirmAndUse({ accountId: 'a1', label: '계정 1', amount: 100 })
+    const done = useRefillStore.getState().confirmAndUse({ accountId: 'a1', amount: 100 })
     await flush()
     expect(confirmOpen()).toBe(true)
+    // 정해 둔 문구 그대로 — 계정 줄 같은 덧붙임은 없다
     expect(useDialogStore.getState().confirm).toMatchObject({
       title: '충전 아이템을 쓸까요?',
-      message: 'Opus 한도에 100%가 더해지고 되돌릴 수 없습니다\n계정: 계정 1',
+      message: 'Opus 한도에 100%가 더해지고 되돌릴 수 없습니다',
       confirmLabel: '사용'
     })
     expect(calls('refill:use')).toHaveLength(0)
@@ -125,9 +136,7 @@ describe('사용 — 언제나 확인 창을 거친다', () => {
   it('「확인 창 끄기」를 켜 두어도 묻는다', async () => {
     setConfirmsDisabled(true)
     route({ use: () => ({ ok: true, amount: 100, label: '계정 1' }) })
-    const done = useRefillStore
-      .getState()
-      .confirmAndUse({ accountId: 'a1', label: '계정 1', amount: 100 })
+    const done = useRefillStore.getState().confirmAndUse({ accountId: 'a1', amount: 100 })
     await flush()
     expect(confirmOpen()).toBe(true)
     expect(calls('refill:use')).toHaveLength(0)
@@ -143,20 +152,16 @@ describe('사용 — 언제나 확인 창을 거친다', () => {
     let finish!: (r: RefillUseResult) => void
     route({ use: () => new Promise<RefillUseResult>((r) => (finish = r)) })
     const store = useRefillStore.getState()
-    const first = store.confirmAndUse({ accountId: 'a1', label: '계정 1', amount: 100 })
+    const first = store.confirmAndUse({ accountId: 'a1', amount: 100 })
     await flush()
     const firstConfirm = useDialogStore.getState().confirm
-    expect(await store.confirmAndUse({ accountId: 'a2', label: '계정 2', amount: 100 })).toBe(
-      'cancel'
-    )
+    expect(await store.confirmAndUse({ accountId: 'a2', amount: 100 })).toBe('cancel')
     expect(useDialogStore.getState().confirm).toBe(firstConfirm)
     answer(true)
     await flush()
     expect(useRefillStore.getState().busy).toBe(true)
     // 요청이 끝나기 전 또 눌러도 나가지 않는다
-    expect(await store.confirmAndUse({ accountId: 'a1', label: '계정 1', amount: 100 })).toBe(
-      'cancel'
-    )
+    expect(await store.confirmAndUse({ accountId: 'a1', amount: 100 })).toBe('cancel')
     finish({ ok: true, amount: 100, label: '계정 1' })
     expect(await first).toBe('ok')
     expect(calls('refill:use')).toHaveLength(1)
@@ -165,11 +170,9 @@ describe('사용 — 언제나 확인 창을 거친다', () => {
 
   it('실패하면 오류 토스트만 — 다시 보내지 않는다', async () => {
     route({ use: () => ({ ok: false, error: '사용 실패 500' }) })
-    const done = useRefillStore
-      .getState()
-      .confirmAndUse({ accountId: null, label: '', amount: 100 })
+    const done = useRefillStore.getState().confirmAndUse({ accountId: null, amount: 100 })
     await flush()
-    // 계정 목록 없이 쓰는 경우 — 계정 줄 없이 묻고, id 없이 보낸다
+    // 계정 목록 없이 쓰는 경우 — 같은 문구로 묻고, id 없이 보낸다
     expect(useDialogStore.getState().confirm?.message).toBe(
       'Opus 한도에 100%가 더해지고 되돌릴 수 없습니다'
     )
@@ -200,7 +203,9 @@ describe('소진 알림 버튼', () => {
     // 누르면 같은 확인 창 → 그 계정으로
     useToastStore.getState().toasts[0].action?.run()
     await flush()
-    expect(useDialogStore.getState().confirm?.message).toContain('계정: 계정 2')
+    expect(useDialogStore.getState().confirm?.message).toBe(
+      'Opus 한도에 100%가 더해지고 되돌릴 수 없습니다'
+    )
     expect(calls('refill:use')).toHaveLength(0)
     answer(true)
     await flush()
@@ -300,6 +305,27 @@ describe('이벤트 연결 — 어떤 알림이 어떤 계정을 조회하나', 
     expect(calls('refill:use')).toHaveLength(0)
   })
 
+  it('충전 아이템을 쓴 뒤의 잔액 갱신은 「직전 생성 실제 차감」을 덮지 않는다', () => {
+    useGenerationStore.setState({ anlasBalance: 1000, lastAnlasDelta: null })
+    emit('anlas:balance', { anlas: 980, opusUsage: null })
+    expect(useGenerationStore.getState().lastAnlasDelta).toBe(20)
+    const refilled = {
+      percent: 0,
+      purchasedPercent: 100,
+      isNegative: false,
+      timeUntilNextPercent: 60
+    }
+    emit('anlas:balance', { anlas: 980, opusUsage: refilled, keepDelta: true })
+    expect(useGenerationStore.getState()).toMatchObject({
+      anlasBalance: 980,
+      opusUsage: refilled,
+      lastAnlasDelta: 20
+    })
+    // 생성 뒤 갱신은 예전 그대로 — 잔액이 그대로면 무료로 나간 것
+    emit('anlas:balance', { anlas: 980, opusUsage: refilled })
+    expect(useGenerationStore.getState().lastAnlasDelta).toBe(0)
+  })
+
   it('모두 빠짐·자동 전환의 모두 소진은 등록 계정 전부를 조회한다', async () => {
     route({ statusAll: () => [status({})] })
     emit('turbo:notice', { kind: 'allDropped' })
@@ -308,5 +334,54 @@ describe('이벤트 연결 — 어떤 알림이 어떤 계정을 조회하나', 
     expect(calls('refill:statusAll').length).toBeGreaterThanOrEqual(1)
     expect(toasts().map((t) => t.action)).toEqual(['구매', '구매'])
     expect(calls('refill:use')).toHaveLength(0)
+  })
+})
+
+describe('게이지 칩 작은 창', () => {
+  const outsidePrevented = (): boolean => {
+    const e = new Event('focusOutside', { cancelable: true })
+    keepOpenWhileBusy(e)
+    return e.defaultPrevented
+  }
+
+  it('확인 창이 떠 있는 동안과 처리 중에는 바깥으로 포커스가 나가도 닫지 않는다 — 끝나면 평소대로', async () => {
+    let finish!: (r: RefillUseResult) => void
+    route({ use: () => new Promise<RefillUseResult>((r) => (finish = r)) })
+    expect(outsidePrevented()).toBe(false)
+    const used = useRefillStore.getState().confirmAndUse({ accountId: 'a1', amount: 100 })
+    await flush()
+    expect(confirmOpen()).toBe(true)
+    expect(outsidePrevented()).toBe(true)
+    answer(true)
+    await flush()
+    expect(outsidePrevented()).toBe(true)
+    finish({ ok: true, amount: 100, label: '계정 1' })
+    expect(await used).toBe('ok')
+    expect(outsidePrevented()).toBe(false)
+
+    // 아니오를 눌러도 창은 열린 채로 돌아오고, 그 뒤로는 평소대로 닫힌다
+    const cancelled = useRefillStore.getState().confirmAndUse({ accountId: 'a1', amount: 100 })
+    await flush()
+    expect(outsidePrevented()).toBe(true)
+    answer(false)
+    expect(await cancelled).toBe('cancel')
+    expect(outsidePrevented()).toBe(false)
+  })
+
+  it('정해 둔 항목만 그린다 — 소진 경고 줄 없음', () => {
+    const spent = { percent: 0, purchasedPercent: 0, isNegative: true, timeUntilNextPercent: 3600 }
+    const html = renderToStaticMarkup(createElement(OpusUsagePanel, { usage: spent }))
+    expect(html).toContain(usageSummary(spent))
+    expect(html).toContain('충전 아이템')
+    expect(html).not.toContain('무료 생성분을 다 썼습니다')
+    expect(html).not.toContain('Anlas')
+  })
+
+  it('한도 정보가 사라지면 열림 상태를 가진 안쪽 칩을 그리지 않는다 — 돌아와도 닫힌 채로 시작', () => {
+    const u = { percent: 50, purchasedPercent: 0, isNegative: false, timeUntilNextPercent: 60 }
+    expect(OpusUsageChip({ usage: null })).toBeNull()
+    const el = OpusUsageChip({ usage: u })
+    expect(el?.type).toBe(OpusUsageChipPopover)
+    expect(el?.props).toEqual({ usage: u })
   })
 })

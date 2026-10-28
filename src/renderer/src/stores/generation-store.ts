@@ -795,11 +795,11 @@ export function bindGenerationEvents(): () => void {
       ...(e.previewPng ? { previewPng: e.previewPng } : {})
     })
   })
-  const offAnlas = window.nais.on('anlas:balance', ({ anlas, opusUsage }) => {
+  const offAnlas = window.nais.on('anlas:balance', ({ anlas, opusUsage, keepDelta }) => {
     // 잔액 차이가 곧 실제 차감액 — 무료로 나갔는지 추정 없이 확인할 수 있다.
-    // 충전·구매로 잔액이 늘어난 구간은 차감으로 보지 않는다.
+    // 충전·구매로 잔액이 늘어난 구간은 차감으로 보지 않는다. 생성이 아닌 갱신(keepDelta)도 그대로 둔다.
     const prev = useGenerationStore.getState().anlasBalance
-    const drop = prev !== null && anlas !== null ? prev - anlas : null
+    const drop = !keepDelta && prev !== null && anlas !== null ? prev - anlas : null
     useGenerationStore.setState({
       anlasBalance: anlas,
       opusUsage,

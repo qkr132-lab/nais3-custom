@@ -116,7 +116,13 @@ afterAll(() => {
 })
 
 import { consumeRefill, refillStatus, refillStatusAll } from '../src/main/nai/usage-refill'
-import { ensureQuotaAccount, probeAccount, resetProbeCache } from '../src/main/nai/account-switch'
+import { ENDPOINTS } from '../src/main/nai/endpoints'
+import {
+  ensureQuotaAccount,
+  forgetProbe,
+  probeAccount,
+  resetProbeCache
+} from '../src/main/nai/account-switch'
 import { turboHooks, turboVerdict } from '../src/main/nai/turbo'
 import { GenerationQueue, type LaneInfo } from '../src/main/queue/generation-queue'
 
@@ -483,6 +489,12 @@ describe('충전 아이템 사용 (메인)', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('엔드포인트 표는 문자열만 — 사용 주소는 인벤토리 주소 뒤에 붙인다 (모바일 대체본과 키·값 대조)', () => {
+    expect(Object.values(ENDPOINTS).every((v) => typeof v === 'string')).toBe(true)
+    expect(ENDPOINTS.inventory).toBe('https://image.novelai.net/user/inventory')
+    expect('consume' in ENDPOINTS).toBe(false)
+  })
+
   it('토큰이 없는 계정은 아무것도 보내지 않는다', async () => {
     state.tokens.delete('a2')
     expect(await consumeRefill('a2', hooks())).toEqual({ ok: false, error: '계정 토큰이 없습니다' })
@@ -613,6 +625,75 @@ describe('사용 뒤 고속 모드 재판정', () => {
     await waitFor(() => sent.length === 2)
     expect(sent).toEqual(['a1', 'a2'])
     release()
+    await waitFor(() => !q.status().running)
+  })
+
+  it('충전한 계정이 새 한도를 조회하는 사이 다른 계정이 바닥나도 멈추지 않는다 — 옛 빠짐 판정을 믿지 않는다', async () => {
+    state.settings.set('turbo_mode', '1')
+    nai.subs.set('test-token-1', {
+      tier: 3,
+      usage: { percent: 80, purchasedPercent: 0, isNegative: false, timeUntilNextPercent: 60 }
+    })
+    let releaseA1!: () => void
+    const holdA1 = new Promise<void>((r) => (releaseA1 = r))
+    const sent: string[] = []
+    const generate = async (
+      _r: GenerationRequest,
+      _id: string,
+      _s: AbortSignal,
+      lane: LaneInfo
+    ): Promise<string> => {
+      sent.push(lane.accountId ?? 'default')
+      if (lane.accountId === 'a1') {
+        await holdA1
+        // a1 은 이번 장으로 바닥난다 (생성 뒤 갱신이 새 한도를 읽은 것처럼)
+        nai.subs.set('test-token-1', { tier: 3, usage: spentUsage() })
+        forgetProbe('a1')
+      }
+      return '/img.png'
+    }
+    const q = new GenerationQueue(generate, turboHooks())
+    q.setDelayMs(0)
+    const notices: TurboNotice[] = []
+    q.on('turbo', (_s: unknown, notice?: TurboNotice) => {
+      if (notice) notices.push(notice)
+    })
+    const v5req = { model: 'nai-diffusion-5-full', seed: 0 } as unknown as GenerationRequest
+    q.enqueueMany([v5req, v5req, v5req])
+    // a1 은 첫 장을 생성 중, a2 는 소진으로 빠져 쉬는 중
+    await waitFor(() => q.turboStatus().accounts.some((a) => a.id === 'a2' && a.excluded))
+    expect(sent).toEqual(['a1'])
+
+    // 충전 뒤 a2 의 새 한도 조회를 붙잡아 둔다
+    let releaseA2!: () => void
+    const holdA2 = new Promise<void>((r) => (releaseA2 = r))
+    nai.inv.set('test-token-2', [item({ id: 'x' })])
+    let a2Reads = 0
+    const result = await consumeRefill('a2', {
+      changed: ({ accountIds }) => {
+        a2Reads = subscriptionCalls('test-token-2')
+        nai.holdSubscription.set('test-token-2', holdA2)
+        q.recheck(accountIds)
+      }
+    })
+    expect(result.ok).toBe(true)
+    await waitFor(() => subscriptionCalls('test-token-2') > a2Reads)
+    expect(subscriptionCalls('test-token-2')).toBe(a2Reads + 1)
+
+    // 그사이 a1 이 바닥나 빠진다 — a2 의 판정은 아직 안 나왔으니 「모두 빠짐」이 아니다
+    releaseA1()
+    await waitFor(() => notices.length === 2)
+    expect(notices.map((n) => n.kind)).toEqual(['dropped', 'dropped'])
+    expect(notices[1]).toMatchObject({ kind: 'dropped', id: 'a1' })
+
+    releaseA2()
+    await waitFor(() => q.status().items.every((i) => i.state === 'done'))
+    expect(sent).toEqual(['a1', 'a2', 'a2'])
+    expect(notices.some((n) => n.kind === 'allDropped')).toBe(false)
+    expect(q.turboStatus().accounts.map((a) => [a.id, a.excluded])).toEqual([
+      ['a1', true],
+      ['a2', false]
+    ])
     await waitFor(() => !q.status().running)
   })
 })

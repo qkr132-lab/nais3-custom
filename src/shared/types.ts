@@ -1263,8 +1263,8 @@ export interface R2UploadStatus {
 /** 메인 → 렌더러 이벤트 채널 */
 export interface IpcEventMap {
   'queue:changed': QueueStatusLite
-  /** 생성 완료 등으로 잔액이 갱신될 때 */
-  'anlas:balance': { anlas: number; opusUsage: OpusUsage | null }
+  /** 생성 완료 등으로 잔액이 갱신될 때. keepDelta 는 생성이 아닌 갱신(충전 아이템 사용 뒤 — 커스텀) — 직전 생성 차감을 그대로 둔다 */
+  'anlas:balance': { anlas: number; opusUsage: OpusUsage | null; keepDelta?: boolean }
   /** 한도가 바닥나 다른 계정으로 갈아탔을 때 (커스텀) */
   'accounts:switched': { label: string }
   /** 등록한 계정이 전부 한도를 소진했을 때 — 이후 생성은 Anlas가 나간다 */

@@ -321,7 +321,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
           const { anlas, opusUsage } = await fetchAnlasBalance(token)
           if (anlas !== null) {
             logBalance(anlas)
-            broadcast('anlas:balance', { anlas, opusUsage })
+            // 생성이 아니다 — 칩의 「직전 생성 실제 차감」은 그대로 둔다
+            broadcast('anlas:balance', { anlas, opusUsage, keepDelta: true })
           }
         }
         // 고속 모드에서 빠졌거나 모두 빠져 멈췄으면 새 한도로 다시 판정받는다
