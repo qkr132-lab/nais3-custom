@@ -70,6 +70,12 @@ import {
   refreshAccountUsage,
   resetProbeCache
 } from '../src/main/nai/account-switch'
+import { GenerationQueue, type LaneInfo } from '../src/main/queue/generation-queue'
+import { accountToken, activeAccountId } from '../src/main/db/accounts'
+import { getNaiToken } from '../src/main/db/settings'
+import { fetchAnlasBalance } from '../src/main/nai/client'
+import { quotaState } from '../src/shared/opus-usage'
+import type { TurboNotice } from '../src/shared/types'
 
 /** 모델·소스만 가진 최소 요청 (판정은 그 둘만 본다) */
 const req = (patch: object): GenerationRequest => patch as unknown as GenerationRequest
@@ -379,5 +385,65 @@ describe('작업자로 쓸 계정', () => {
     const after = turboHooks().accounts()
     expect(after.map((a) => a.id)).toEqual(['a1', 'y'])
     expect(after[1].key).toBe(before[1].key)
+  })
+})
+
+describe('켜는 교대 구간의 한도 기록', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  async function waitIdle(q: GenerationQueue): Promise<void> {
+    for (let i = 0; i < 200 && q.status().running; i++) await sleep(5)
+  }
+
+  it('평소 작업자가 자동 전환으로 고른 계정은 그 장이 끝난 뒤 새로 조회한다 — 생성 전 「남음」 기록으로 소진 계정에 V5 가 나가지 않는다', async () => {
+    state.settings.set('auto_switch_account', '1')
+    state.usage.set('a1', spent)
+    state.usage.set('a2', free(1)) // 한 장 남았다
+    /** V5 를 보낸 계정과 그때 무료분이 남아 있었는가 */
+    const sent: { account: string; free: boolean }[] = []
+    const send = (account: string): void => {
+      sent.push({ account, free: quotaState(state.usage.get(account) ?? null) === 'available' })
+      state.usage.set(account, spent) // 이 장으로 바닥난다
+    }
+    // 생성 파이프라인(index.ts)과 같은 순서 — 꺼짐: 자동 전환 → claim → 생성 → 잔액 조회 / 고속: 자기 계정 → 생성 → 한도 갱신
+    const generate = async (
+      _request: GenerationRequest,
+      _id: string,
+      _signal: AbortSignal,
+      lane: LaneInfo
+    ): Promise<string> => {
+      if (lane.accountId) {
+        send(lane.accountId)
+        void refreshAccountUsage(lane.accountId, accountToken(lane.accountId) ?? '')
+      } else {
+        await ensureQuotaAccount(v5.model)
+        const token = getNaiToken() ?? ''
+        lane.claim?.()
+        send(activeAccountId() ?? '')
+        void fetchAnlasBalance(token)
+      }
+      return '/img.png'
+    }
+    const q = new GenerationQueue(generate, turboHooks())
+    q.setDelayMs(0)
+    const notices: TurboNotice[] = []
+    q.on('turbo', (_status: unknown, notice?: TurboNotice) => {
+      if (notice) notices.push(notice)
+    })
+    // 자동 전환의 a1 조회를 붙잡아 둔다
+    let release!: () => void
+    state.tokenGates.set('test-token-1', new Promise<void>((r) => (release = r)))
+    q.enqueueMany([{ ...v5 }, { ...v5 }])
+    await sleep(10)
+    // 그 조회를 기다리는 사이 번개를 켠다 (turbo:set 과 같은 순서)
+    clearProbeStamps()
+    state.settings.set('turbo_mode', '1')
+    q.reconcile()
+    await sleep(10)
+    release()
+    await waitIdle(q)
+    // 첫 장은 자동 전환이 고른 a2 로 나갔고, a2 는 그 장으로 바닥났다 — 두 번째 장은 나가지 않는다
+    expect(sent).toEqual([{ account: 'a2', free: true }])
+    expect(q.status().items.map((i) => i.state)).toEqual(['done', 'pending'])
+    expect(notices.map((n) => n.kind)).toEqual(['dropped', 'allDropped'])
   })
 })

@@ -836,6 +836,67 @@ describe('고속 모드 — 멈춤과 교대 구간', () => {
     expect(r.overlap).toBe(false)
   })
 
+  it('켜는 교대 구간에 평소 작업자가 마친 장의 계정은 한도 기록을 버린다 — 그 계정 작업자의 첫 판정보다 먼저', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    const choose = deferred()
+    // 자동 전환: a1 이 소진이라 a2 로 바꾼 뒤 보낸다
+    r.beforeClaim.set('A', async () => {
+      await choose.p
+      w.active = 'a2'
+    })
+    const ga = r.hold('A')
+    const gb = r.hold('B')
+    /** a2 작업자가 판정받을 때 a2 기록이 이미 버려져 있었는가 */
+    const forgotFirst: boolean[] = []
+    w.verdict = (id) => {
+      if (id === 'a2') forgotFirst.push(w.forgot.includes('a2'))
+      return OK
+    }
+    q.enqueueMany([mk('A'), mk('B'), mk('C')])
+    await settle()
+    w.enabled = true
+    q.reconcile()
+    choose.resolve()
+    await settle()
+    expect(w.forgot).toEqual([])
+    ga.resolve()
+    await settle()
+    // 평소 작업자가 a2 로 보낸 장이 끝났다 — a2 만 버리고, a1(그 장에 안 쓴 계정)은 건드리지 않는다
+    expect(w.forgot).toEqual(['a2'])
+    gb.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done'])
+    expect(forgotFirst).toEqual([true])
+    expect(r.overlap).toBe(false)
+  })
+
+  it('켜는 교대 구간에 평소 작업자의 장이 실패해도 그 계정의 한도 기록을 버린다', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    const g = r.hold('A')
+    r.failOnce.set('A', (lane) => (lane.accountId === null ? new Error('스트림 끊김') : null))
+    q.enqueueMany([mk('A'), mk('B')])
+    await settle()
+    w.enabled = true
+    q.reconcile()
+    await settle()
+    g.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['failed', 'done'])
+    expect(w.forgot).toEqual(['a1'])
+  })
+
+  it('꺼진 상태는 평소 작업자의 장이 끝나도 한도 기록을 버리지 않는다 — 자동 전환 20초 캐시 그대로', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    r.failOnce.set('B', () => new Error('스트림 끊김'))
+    q.enqueueMany([mk('A'), mk('B'), mk('C')])
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'failed', 'done'])
+    expect(w.forgot).toEqual([])
+  })
+
   it('같은 토큰의 계정 중 생성 중인 쪽을 지우면 남은 쪽이 그 작업자를 이어받는다 — 같은 토큰으로 두 장이 겹치지 않게', async () => {
     const w = world({
       accounts: [

@@ -469,6 +469,12 @@ export class GenerationQueue extends EventEmitter {
           }
         } finally {
           this.controllers.delete(next.id)
+          // 켜는 교대 구간에 평소 작업자가 마친 장 — 자동 전환이 이 장을 보내기 전에 찍은 그 계정의
+          // 한도 기록은 믿지 않는다 (그 계정 작업자의 첫 판정이 새로 조회하게. 성공·실패 모두)
+          if (lane.accountId === null && lane.retire && lane.using != null) {
+            const used = this.specs.find((s) => s.key === lane.using)?.accountId
+            if (used) this.hooks?.forget?.(used)
+          }
           lane.busy = false
           this.wakeAll()
         }
