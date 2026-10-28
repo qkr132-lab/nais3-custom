@@ -13,6 +13,7 @@ import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './charact
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
 import { useTurboStore } from './turbo-store'
+import { offerRefill } from './refill-store'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -822,8 +823,11 @@ export function bindGenerationEvents(): () => void {
     toast(`한도 소진 — "${label}" 계정으로 바꿔 생성합니다`, 'success')
     void useGenerationStore.getState().refreshAnlas()
   })
+  // 무료분 소진 알림에는 충전 아이템 버튼을 단다 — 쓸 수 있으면 「충전 아이템 쓰기」, 없으면 「구매」.
+  // 알림이 뜰 때 계정마다 인벤토리를 한 번 읽을 뿐, 누르기 전에는 아무것도 하지 않는다 (커스텀)
   const offExhausted = window.nais.on('accounts:allExhausted', () => {
-    toast('등록한 계정이 모두 한도를 소진했습니다 — 이제 Anlas가 나갑니다', 'error')
+    const id = toast('등록한 계정이 모두 한도를 소진했습니다 — 이제 Anlas가 나갑니다', 'error')
+    void offerRefill(id)
   })
   // 고속 모드 (커스텀) — 상태는 두 번개 버튼이 함께 보고, 계정이 빠지거나 전부 빠져 멈추면 한 번씩 알린다
   const offTurboStatus = window.nais.on('turbo:status', (status) => {
@@ -832,12 +836,17 @@ export function bindGenerationEvents(): () => void {
   const offTurboNotice = window.nais.on('turbo:notice', (notice) => {
     if (notice.kind === 'dropped') {
       const why = notice.reason === 'exhausted' ? '무료분 소진' : '무료분 확인 불가'
-      toast(`"${notice.label}" ${why} — 고속 모드에서 뺐습니다 (×${notice.active})`, 'info')
+      const id = toast(
+        `"${notice.label}" ${why} — 고속 모드에서 뺐습니다 (×${notice.active})`,
+        'info'
+      )
+      if (notice.id) void offerRefill(id, notice.id)
     } else {
-      toast(
+      const id = toast(
         '모든 계정 무료분 소진 — 고속 모드 생성을 멈췄습니다. 번개를 끄면 평소대로 이어집니다',
         'error'
       )
+      void offerRefill(id)
     }
   })
   return () => {

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Coins,
   Download,
@@ -18,15 +19,18 @@ import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { estimateAnlas } from '@shared/anlas'
 import type { OpusUsage } from '@shared/types'
 import {
+  formatUsagePercent,
   quotaState,
-  refillEta,
-  refillPercentPerDay,
-  usageImages,
   usageIsLow,
-  usagePercent
+  usagePercent,
+  usagePurchasedPercent,
+  usageRefillLine,
+  usageSummary
 } from '@shared/opus-usage'
 import { PageNav } from './page-nav'
 import { ThemeToggle } from './theme-toggle'
+import { OpusUsagePanel, UsageGauge } from './opus-usage-panel'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 
 const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
@@ -121,40 +125,57 @@ function AnlasChips({
 
 /**
  * Opus 무료 V5 생성 한도 게이지. Opus 구독이 아니면(usage 없음) 표시하지 않는다.
- * 계산식은 웹과 동일 — shared/opus-usage.ts 참조.
+ * 계산식은 웹과 동일 — shared/opus-usage.ts 참조. 일반분·추가분(충전 아이템)을 두 색으로 그리고,
+ * 누르면 충전 아이템 작은 창이 열린다 (커스텀).
  */
 function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
   if (!usage) return null
   const percent = usagePercent(usage)
+  const extra = usagePurchasedPercent(usage)
   const low = usageIsLow(usage)
-  const refill = refillPercentPerDay(usage)
-  const eta = refillEta(usage)
+  const refill = usageRefillLine(usage)
   const title = usage.isNegative
-    ? 'Opus 무료 생성분을 다 썼습니다 — 지금 생성하면 Anlas가 나갑니다'
+    ? 'Opus 무료 생성분을 다 썼습니다 — 지금 생성하면 Anlas가 나갑니다\n눌러서 충전 아이템 보기'
     : [
-        `Opus 무료 V5 생성 ${percent}% 남음 (약 ${usageImages(percent).toLocaleString()}장)`,
-        refill > 0 ? `하루 ${refill}%씩 회복 (약 ${usageImages(refill).toLocaleString()}장)` : '',
-        eta ? `다음 1% 회복까지 ${eta}` : '',
-        percent === 0 ? '0%로 보여도 소수점 이하가 남아 있으면 몇 장은 무료로 나갑니다' : '',
-        'V4.5는 이 한도와 무관 — 통상 해상도·28스텝 이하면 계속 무료입니다'
+        `Opus 무료 V5 생성 ${usageSummary(usage)}`,
+        refill,
+        percent === 0 && extra === 0
+          ? '0%로 보여도 소수점 이하가 남아 있으면 몇 장은 무료로 나갑니다'
+          : '',
+        'V4.5는 이 한도와 무관 — 통상 해상도·28스텝 이하면 계속 무료입니다',
+        '눌러서 충전 아이템 보기'
       ]
         .filter(Boolean)
         .join('\n')
   return (
-    <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden" title={title}>
-      <InfinityIcon size={15} className={low ? 'text-danger' : 'text-accent'} />
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-2">
-        <div
-          className={cn('h-full rounded-full transition-[width]', low ? 'bg-danger' : 'bg-accent')}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <span
-        className={cn('font-mono text-[12.5px] font-semibold', low ? 'text-danger' : 'text-muted')}
-      >
-        {percent < 10 ? percent.toFixed(1) : Math.round(percent)}%
-      </span>
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Opus 한도와 충전 아이템"
+          className="no-drag mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-2 max-[900px]:hidden"
+          title={open ? undefined : title}
+        >
+          <InfinityIcon size={15} className={low ? 'text-danger' : 'text-accent'} />
+          <UsageGauge usage={usage} className="h-1.5 w-16" />
+          <span
+            className={cn(
+              'font-mono text-[12.5px] font-semibold',
+              low ? 'text-danger' : 'text-muted'
+            )}
+          >
+            {formatUsagePercent(percent)}%
+            {extra > 0 && (
+              <span className="text-sky-600 dark:text-sky-400"> +{formatUsagePercent(extra)}%</span>
+            )}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-3">
+        <OpusUsagePanel usage={usage} />
+      </PopoverContent>
+    </Popover>
   )
 }
 
