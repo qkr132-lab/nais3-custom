@@ -71,6 +71,7 @@ import { anlasUsage, logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance } from './nai/client'
 import { clearProbeStamps, resetProbeCache } from './nai/account-switch'
 import { TURBO_KEY } from './nai/turbo'
+import { consumeRefill, refillStatus, refillStatusAll } from './nai/usage-refill'
 import {
   addAccount,
   adoptLegacyToken,
@@ -307,6 +308,27 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     ctx.queue.reconcile()
     return ctx.queue.turboStatus()
   })
+
+  // 충전 아이템(Opus Usage Boost) — 조회·사용 (커스텀). 렌더러는 계정 id 만 넘기고 토큰은 메인 안에서만 쓴다
+  handle('refill:status', (req) => refillStatus(req?.accountId))
+  handle('refill:statusAll', async () => ({ items: await refillStatusAll() }))
+  handle('refill:use', (req) =>
+    consumeRefill(req?.accountId, {
+      changed: async ({ accountIds, active }) => {
+        // 게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다
+        const token = active ? getNaiToken() : null
+        if (token) {
+          const { anlas, opusUsage } = await fetchAnlasBalance(token)
+          if (anlas !== null) {
+            logBalance(anlas)
+            broadcast('anlas:balance', { anlas, opusUsage })
+          }
+        }
+        // 고속 모드에서 빠졌거나 모두 빠져 멈췄으면 새 한도로 다시 판정받는다
+        ctx.queue.recheck(accountIds)
+      }
+    })
+  )
 
   handle('queue:enqueue', ({ request, count }) => ({ ids: ctx.queue.enqueue(request, count) }))
   handle('queue:enqueueMany', ({ requests }) => ({ ids: ctx.queue.enqueueMany(requests) }))

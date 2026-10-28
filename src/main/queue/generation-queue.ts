@@ -293,6 +293,18 @@ export class GenerationQueue extends EventEmitter {
     this.emitTurbo()
   }
 
+  /**
+   * 이 계정들을 곧바로 다시 판정받게 한다 (충전 아이템을 쓴 뒤 — 커스텀). 한도로 쉬던 작업자는
+   * 쉬는 시간을 끊고, 모든 계정이 빠져 멈춰 있었으면 작업자를 다시 띄운다. 판정은 새로 조회한
+   * 한도로 한다 (부르는 쪽이 그 계정의 한도 기록을 먼저 버린다).
+   */
+  recheck(accountIds: string[]): void {
+    for (const lane of this.lanes.values()) {
+      if (lane.accountId !== null && accountIds.includes(lane.accountId)) lane.restUntil = 0
+    }
+    this.reconcile()
+  }
+
   /** 새 항목이 들어왔을 때 — 멈춰 있었다면 풀고 작업자를 띄운다 */
   private kick(): void {
     this.stopped = false
@@ -536,7 +548,7 @@ export class GenerationQueue extends EventEmitter {
     this.excluded.set(id, reason)
     if (this.stopIfAllOut()) return true
     if (first)
-      this.emitTurbo({ kind: 'dropped', label: lane.label, reason, active: this.activeCount() })
+      this.emitTurbo({ kind: 'dropped', id, label: lane.label, reason, active: this.activeCount() })
     else this.emitTurbo()
     return false
   }

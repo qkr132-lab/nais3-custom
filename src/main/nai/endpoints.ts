@@ -17,6 +17,9 @@ export const ENDPOINTS = {
   userData: `${NAI_HOST}/user/data`,
   userInfo: `${NAI_HOST}/user/information`,
   subscription: `${NAI_HOST}/user/subscription`,
+  // 충전 아이템(Opus Usage Boost) 등 인벤토리 — 웹 번들 실측 (2026-10-29)
+  inventory: `${NAI_HOST}/user/inventory`,
+  consume: (id: string): string => `${NAI_HOST}/user/inventory/${encodeURIComponent(id)}/consume`,
   // 예외: image 호스트에는 없음 (404). api 호스트에 잔존.
   upscale: 'https://api.novelai.net/ai/upscale'
 } as const

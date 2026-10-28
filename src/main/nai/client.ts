@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { GenerationRequest, SubscriptionInfo } from '../../shared/types'
 import { ENDPOINTS } from './endpoints'
 import { parseOpusUsage, type OpusUsage } from '../../shared/opus-usage'
+import { parseInventory, type InventoryItem } from '../../shared/usage-refill'
 import { buildGenerateImagePayload, type BuildOptions } from './payload'
 import { readImageStream } from './stream'
 
@@ -74,28 +75,66 @@ export async function verifyToken(
  * 현재 Anlas 잔액(fixed + purchased)·구독 tier·Opus 무료 생성 한도. 실패 시 전부 null.
  *
  * usage는 Opus(tier 3) 구독에만 내려온다 (웹도 tier<3이면 게이지를 그리지 않는다).
+ * opusActive 는 Opus 구독이 아직 살아 있는가 — 충전 아이템을 쓸 수 있는 조건 (커스텀, 웹과 같은 판정)
  */
-export async function fetchAnlasBalance(
-  token: string
-): Promise<{ anlas: number | null; tier: string | null; opusUsage: OpusUsage | null }> {
+export async function fetchAnlasBalance(token: string): Promise<{
+  anlas: number | null
+  tier: string | null
+  opusUsage: OpusUsage | null
+  opusActive: boolean
+}> {
   try {
     const res = await fetch(ENDPOINTS.subscription, { headers: headers(token) })
-    if (!res.ok) return { anlas: null, tier: null, opusUsage: null }
+    if (!res.ok) return { anlas: null, tier: null, opusUsage: null, opusActive: false }
     const data = (await res.json()) as {
       tier?: number
+      active?: boolean
+      expiresAt?: number
       trainingStepsLeft?: { fixedTrainingStepsLeft?: number; purchasedTrainingSteps?: number }
       usage?: unknown
     }
     const tierNames = ['paper', 'tablet', 'scroll', 'opus'] as const
+    const opus = (data.tier ?? 0) >= 3
     return {
       anlas:
         (data.trainingStepsLeft?.fixedTrainingStepsLeft ?? 0) +
         (data.trainingStepsLeft?.purchasedTrainingSteps ?? 0),
       tier: tierNames[data.tier ?? 0] ?? 'paper',
-      opusUsage: (data.tier ?? 0) >= 3 ? parseOpusUsage(data.usage) : null
+      opusUsage: opus ? parseOpusUsage(data.usage) : null,
+      // 웹: 만료 시각(초)이 지나지 않았으면 활성. 만료 시각이 없으면 active 값을 따른다
+      opusActive:
+        opus &&
+        (typeof data.expiresAt === 'number'
+          ? data.expiresAt > Date.now() / 1000
+          : data.active !== false)
     }
   } catch {
-    return { anlas: null, tier: null, opusUsage: null }
+    return { anlas: null, tier: null, opusUsage: null, opusActive: false }
+  }
+}
+
+/**
+ * 인벤토리 (충전 아이템 등 — 커스텀). 실패하면 null. 웹과 같이 items 가 없으면 빈 목록.
+ */
+export async function fetchInventory(token: string): Promise<InventoryItem[] | null> {
+  try {
+    const res = await fetch(ENDPOINTS.inventory, { headers: headers(token) })
+    if (!res.ok) return null
+    return parseInventory(await res.json())
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 인벤토리 아이템 하나를 쓴다 (커스텀 — 충전 아이템이면 Opus 한도 추가분이 늘어난다).
+ * 본문 없는 POST, 웹도 응답 본문을 읽지 않는다. 되돌릴 수 없는 요청이라 실패해도 다시 보내지 않는다.
+ */
+export async function consumeItem(token: string, id: string): Promise<void> {
+  const res = await fetch(ENDPOINTS.consume(id), { method: 'POST', headers: headers(token) })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`사용 실패 ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`)
   }
 }
 

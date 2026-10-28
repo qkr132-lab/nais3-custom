@@ -256,8 +256,8 @@ describe('번개 버튼 상태와 알림', () => {
 
   it('계정이 빠지면 이름·사유·남은 수를 담은 토스트, 전부 빠지면 오류 토스트', () => {
     const notices: TurboNotice[] = [
-      { kind: 'dropped', label: '계정 1', reason: 'exhausted', active: 1 },
-      { kind: 'dropped', label: '계정 2', reason: 'unknown', active: 1 },
+      { kind: 'dropped', id: 'a1', label: '계정 1', reason: 'exhausted', active: 1 },
+      { kind: 'dropped', id: 'a2', label: '계정 2', reason: 'unknown', active: 1 },
       { kind: 'allDropped' }
     ]
     for (const n of notices) emit('turbo:notice', n)

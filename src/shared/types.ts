@@ -2,12 +2,13 @@
 // 규칙: 렌더러는 이 타입들로만 메인과 대화한다 (IPC 계약).
 
 import type { OpusUsage } from './opus-usage'
+import type { RefillStatus, RefillUseResult } from './usage-refill'
 import type { SceneSetup } from './scene-bundle'
 import type { Outfit, OutfitChoice, OutfitPiece, TagKind } from './outfit'
 import type { NudeStripSetting } from './nude-strip'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
 
-export type { OpusUsage }
+export type { OpusUsage, RefillStatus, RefillUseResult }
 
 export interface CharacterPromptInput {
   prompt: string
@@ -389,7 +390,7 @@ export interface TurboStatus {
 
 /** 고속 모드 알림 — 상태가 바뀔 때만 한 번 */
 export type TurboNotice =
-  | { kind: 'dropped'; label: string; reason: 'exhausted' | 'unknown'; active: number }
+  | { kind: 'dropped'; id: string; label: string; reason: 'exhausted' | 'unknown'; active: number }
   | { kind: 'allDropped' }
 
 export interface SubscriptionInfo {
@@ -730,6 +731,12 @@ export interface IpcInvokeMap {
   'turbo:status': { req: void; res: TurboStatus }
   /** 고속 모드 켜기/끄기 — 저장하고 큐에 곧바로 반영한다 */
   'turbo:set': { req: { enabled: boolean }; res: TurboStatus }
+  /** 충전 아이템(Opus Usage Boost) 상태 (커스텀) — accountId 가 없으면 지금 쓰는 계정. 토큰은 메인 밖으로 안 나간다 */
+  'refill:status': { req: { accountId?: string }; res: RefillStatus }
+  /** 등록 계정마다 충전 아이템 상태 (같은 토큰은 한 번) — 모든 계정 소진 알림의 버튼을 고를 때 */
+  'refill:statusAll': { req: void; res: { items: RefillStatus[] } }
+  /** 충전 아이템 하나 쓰기 — 렌더러가 확인 창을 받은 뒤에만 부른다. 같은 계정 요청이 겹치면 하나만 */
+  'refill:use': { req: { accountId?: string }; res: RefillUseResult }
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
   'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }

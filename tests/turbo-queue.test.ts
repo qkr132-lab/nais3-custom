@@ -307,7 +307,9 @@ describe('고속 모드 — Anlas 안전 (V5 는 무료분이 남은 계정만)'
     expect(states(q)).toEqual(['done', 'done', 'done'])
     expect(r.started.every((s) => s.accountId === 'a1')).toBe(true)
     // 빠진다는 알림은 한 번, 남은 참여 계정 수(×1)와 함께
-    expect(notices).toEqual([{ kind: 'dropped', label: '계정 2', reason: 'exhausted', active: 1 }])
+    expect(notices).toEqual([
+      { kind: 'dropped', id: 'a2', label: '계정 2', reason: 'exhausted', active: 1 }
+    ])
     expect(q.turboStatus().accounts.map((a) => [a.id, a.excluded])).toEqual([
       ['a1', false],
       ['a2', true]
@@ -323,7 +325,9 @@ describe('고속 모드 — Anlas 안전 (V5 는 무료분이 남은 계정만)'
     q.enqueueMany([mk('A'), mk('B')])
     await waitIdle(q)
     expect(r.started.every((s) => s.accountId === 'a2')).toBe(true)
-    expect(notices).toEqual([{ kind: 'dropped', label: '계정 1', reason: 'unknown', active: 1 }])
+    expect(notices).toEqual([
+      { kind: 'dropped', id: 'a1', label: '계정 1', reason: 'unknown', active: 1 }
+    ])
   })
 
   it('V4.5 이하는 한도와 무관해 모든 계정이 쓴다 — 한도를 확인하지 않았으니 빠진 기록도 건드리지 않는다', async () => {
@@ -1020,7 +1024,9 @@ describe('고속 모드 — 한도와 무관한 항목·등급', () => {
     await waitIdle(q)
     expect(states(q)).toEqual(['done', 'done', 'done'])
     expect(r.started.every((s) => s.accountId === 'a1')).toBe(true)
-    expect(notices).toEqual([{ kind: 'dropped', label: '계정 2', reason: 'unknown', active: 1 }])
+    expect(notices).toEqual([
+      { kind: 'dropped', id: 'a2', label: '계정 2', reason: 'unknown', active: 1 }
+    ])
   })
 
   it('모든 계정이 V4.5 도 쓸 수 없으면 멈추고 알림 한 번 — 한 장도 안 나간다', async () => {
