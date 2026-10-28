@@ -97,7 +97,11 @@ if (busyOrdinal > 0) {
   const target = records.filter((s) => s.presetId === (kind === 'background' ? 3 : 1))[
     busyOrdinal - 1
   ]
-  if (target) useGenerationStore.setState({ generatingSceneId: target.id })
+  if (target)
+    useGenerationStore.setState({
+      generatingBySceneId: { [target.id]: 1 },
+      previewSceneId: target.id
+    })
 }
 
 window.nais = {
@@ -227,7 +231,11 @@ Object.assign(window, {
     /** 프리셋의 현재 순서(씬 이름) */
     names: (presetId: number) => records.filter((s) => s.presetId === presetId).map((s) => s.name),
     ids: (presetId: number) => records.filter((s) => s.presetId === presetId).map((s) => s.id),
-    setGenerating: (id: number | null) => useGenerationStore.setState({ generatingSceneId: id }),
+    setGenerating: (id: number | null) =>
+      useGenerationStore.setState({
+        generatingBySceneId: id == null ? {} : { [id]: 1 },
+        previewSceneId: id
+      }),
     scrollTopOf: () =>
       document.querySelector<HTMLElement>('.no-scrollbar.overflow-y-auto.p-3')?.scrollTop ?? -1,
     /** 기억된 프리셋별 위치(localStorage 원문) */

@@ -35,6 +35,7 @@ import { MainExposeBlock } from './main-expose-block'
 import { FragmentOverlay } from './fragment-overlay'
 import { ParamsDialog } from './params-dialog'
 import { RefOverlay } from './ref-overlay'
+import { TurboButton } from './turbo-button'
 import { TagExplorer } from './tag-explorer'
 import { SOURCE_BANNER_HEIGHT, SourceBanner } from './source-banner'
 import { Button } from './ui/button'
@@ -466,6 +467,8 @@ export function PromptPanel(): React.JSX.Element {
             <Plus size={13} />
           </Button>
         </div>
+        {/* 고속 모드 — 생성 버튼 바로 옆. 씬 화면 위쪽 막대의 번개와 같은 스위치 (씬 생성 대기 중엔 아래 「전체 예약」 뒤) */}
+        {(generating || !isScene) && <TurboButton size="panel" />}
         {generating ? (
           <Button variant="danger" size="lg" className="flex-1" onClick={() => void cancelAll()}>
             <Square size={14} /> 취소 ({queueCount})
@@ -482,6 +485,7 @@ export function PromptPanel(): React.JSX.Element {
             >
               <CalendarPlus size={14} /> 전체 예약
             </Button>
+            <TurboButton size="panel" />
             <Button
               variant="accent"
               size="lg"

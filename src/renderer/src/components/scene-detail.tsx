@@ -87,13 +87,16 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const setSceneTransparentBackground = useSceneExtrasStore((s) => s.setSceneTransparentBackground)
   const effectiveTransparentBackground = transparentOverride ?? transparentBackground
   const canUseTransparentBackground = modelCaps(request.model).transparency
-  const previewPng = useGenerationStore((s) => s.previewPng)
-  const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
-  const streaming = generatingSceneId === scene.id
+  // 고속 모드로 여러 장이 동시에 돌 때 미리보기 프레임은 따라가는 한 장(의 씬)에만 간다.
+  // 이 씬이 생성 중이면 타일은 보이고, 프레임은 따라가는 장이 이 씬일 때만 채운다
+  const previewPng = useGenerationStore((s) =>
+    s.previewSceneId === scene.id ? s.previewPng : null
+  )
+  const streaming = useGenerationStore((s) => (s.generatingBySceneId[scene.id] ?? 0) > 0)
   // 이 씬의 큐 잔여(대기+생성 중) — 생성 중 추가한 예약이 여기 반영돼 숫자가 실시간으로 오른다.
   // 수천 장 큐에서도 O(1) 집계 구독 (커스텀 — 성능)
   const queueRemaining = useGenerationStore(
-    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingSceneId === scene.id ? 1 : 0)
+    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingBySceneId[scene.id] ?? 0)
   )
   // 표시할 예약/잔여 수 = 아직 안 뽑은 예약 + 큐에 든 것 (둘 중 하나만 값이 있음)
   const pendingCount = scene.reserveCount + queueRemaining

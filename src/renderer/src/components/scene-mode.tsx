@@ -1,4 +1,5 @@
 import { SceneBackgroundDialog } from './scene-background-dialog'
+import { TurboButton } from './turbo-button'
 import { BackgroundUseDialog } from './background-use-dialog'
 import { normalizeCensors } from '@shared/censor-tags'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
@@ -995,7 +996,9 @@ function SceneGrid(): React.JSX.Element {
 
   // 스트리밍: 현재 생성 중인 씬과 미리보기 프레임 (해당 씬 카드에만 전달)
   const previewPng = useGenerationStore((s) => s.previewPng)
-  const generatingSceneId = useGenerationStore((s) => s.generatingSceneId)
+  // 고속 모드로 여러 씬이 동시에 생성 중일 수 있다 — 씬마다 생성 중 개수, 미리보기는 따라가는 한 장의 씬에만
+  const generatingBySceneId = useGenerationStore((s) => s.generatingBySceneId)
+  const previewSceneId = useGenerationStore((s) => s.previewSceneId)
 
   async function exportJson(): Promise<void> {
     const r = await window.nais.invoke('scenes:exportJson', { presetId: activePresetId })
@@ -1285,6 +1288,9 @@ function SceneGrid(): React.JSX.Element {
           <TooltipContent>씬별 캐릭터 추가</TooltipContent>
         </Tooltip>
 
+        {/* 고속 모드 — 메인 탭 생성 버튼 옆의 번개와 같은 스위치 */}
+        <TurboButton />
+
         <div className="min-w-4 flex-1" />
 
         {/* 새 씬 기본 해상도 (커스텀 — 프리셋 드롭다운에만 있던 걸 툴바로 노출).
@@ -1493,8 +1499,8 @@ function SceneGrid(): React.JSX.Element {
                       variant={gridView}
                       order={gridView === 'row' ? index + 1 : undefined}
                       found={scene.id === foundId}
-                      live={scene.id === generatingSceneId ? previewPng : null}
-                      generating={scene.id === generatingSceneId}
+                      live={scene.id === previewSceneId ? previewPng : null}
+                      generating={(generatingBySceneId[scene.id] ?? 0) > 0}
                       onOpenAddition={setAdditionSceneIds}
                       onOpenCensors={setCensorSceneIds}
                       onUseBackground={setUseBackground}
@@ -2402,7 +2408,7 @@ const SceneCard = memo(function SceneCard({
   // 생성 중 이 씬의 남은 개수 (메인 큐 pending+generating) — NAIS2처럼 배지가 줄어들며 표시.
   // 큐 반복 사용 시 항목×예약 전체가 반영된다. 수천 장 큐에서도 카드당 O(1) (커스텀 — 성능)
   const queueRemaining = useGenerationStore(
-    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingSceneId === scene.id ? 1 : 0)
+    (s) => (s.pendingBySceneId[scene.id] ?? 0) + (s.generatingBySceneId[scene.id] ?? 0)
   )
   const badgeCount = scene.reserveCount + queueRemaining
 

@@ -100,6 +100,9 @@ window.nais = {
       case 'queue:status':
         result = { items: [], running: false, delayMs: 0 }
         break
+      case 'turbo:status':
+        result = { enabled: false, accounts: [] }
+        break
       case 'images:list':
         result = { items: [], total: 0 }
         break

@@ -12,6 +12,7 @@ import { modelCaps } from '@shared/nai-models'
 import { enabledCharacters, linkedCharRefIds, setMaxCharacters } from './characters-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { toast } from './toast-store'
+import { useTurboStore } from './turbo-store'
 import {
   appendPrompt,
   autoRolePrefix,
@@ -109,8 +110,10 @@ interface GenerationState {
   queue: QueueStatusLite | null
   /** 씬별 대기(pending) 수 미리 집계 (커스텀 — 성능). 카드마다 전체 큐를 필터하지 않게 */
   pendingBySceneId: Record<number, number>
-  /** 지금 생성 중인 항목의 씬 id (커스텀 — 성능) */
-  generatingSceneId: number | null
+  /** 씬별 지금 생성 중인 개수 (커스텀 — 성능). 고속 모드에서는 여러 씬이 동시에 생성 중일 수 있다 */
+  generatingBySceneId: Record<number, number>
+  /** 진행 미리보기가 따라가는 항목의 씬 id — 생성 중인 여럿 중 가장 먼저 시작한 한 장 */
+  previewSceneId: number | null
   /** 진행 중 미리보기 (data URL 아님, base64) */
   previewPng: string | null
   progress: { stepIx: number; totalSteps: number } | null
@@ -182,7 +185,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
   queue: null,
   pendingBySceneId: {},
-  generatingSceneId: null,
+  generatingBySceneId: {},
+  previewSceneId: null,
   previewPng: null,
   progress: null,
   genStartAt: null,
@@ -256,9 +260,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
     syncModelLimits(get().request.model)
     const queue = await window.nais.invoke('queue:status', undefined)
-    set({ queue, ...deriveQueue(queue) })
+    set({ queue, ...deriveQueue(queue, queue.items.find((i) => i.state === 'generating')?.id) })
     await get().refreshHistory()
     void get().refreshAnlas()
+    void useTurboStore.getState().load()
   },
 
   generate: async () => {
@@ -638,28 +643,48 @@ function persistParams(request: GenerationRequest): void {
   }, 400)
 }
 
-/** 큐 요약에서 파생 상태 계산 (커스텀 — 성능): 씬별 대기 수 + 생성 중 씬.
+/** 큐 요약에서 파생 상태 계산 (커스텀 — 성능): 씬별 대기 수 + 씬별 생성 중 수 + 미리보기가 따라가는 씬.
  *  카드들이 전체 items를 각자 필터하는 대신 이 집계만 구독한다 (O(N) 1회 ↔ O(N×카드수)) */
-function deriveQueue(queue: QueueStatusLite): {
+function deriveQueue(
+  queue: QueueStatusLite,
+  followId: string | null | undefined
+): {
   pendingBySceneId: Record<number, number>
-  generatingSceneId: number | null
+  generatingBySceneId: Record<number, number>
+  previewSceneId: number | null
 } {
   const pendingBySceneId: Record<number, number> = {}
-  let generatingSceneId: number | null = null
+  const generatingBySceneId: Record<number, number> = {}
+  let previewSceneId: number | null = null
   for (const i of queue.items) {
     if (i.state === 'pending' && i.sceneId != null) {
       pendingBySceneId[i.sceneId] = (pendingBySceneId[i.sceneId] ?? 0) + 1
-    } else if (i.state === 'generating' && i.sceneId != null) {
-      generatingSceneId = i.sceneId
+    } else if (i.state === 'generating') {
+      if (i.sceneId != null)
+        generatingBySceneId[i.sceneId] = (generatingBySceneId[i.sceneId] ?? 0) + 1
+      if (i.id === followId) previewSceneId = i.sceneId ?? null
     }
   }
-  return { pendingBySceneId, generatingSceneId }
+  return { pendingBySceneId, generatingBySceneId, previewSceneId }
+}
+
+/** 씬별 개수 표가 그대로면 이전 객체를 돌려준다 — 구독하는 씬 화면이 큐가 바뀔 때마다 다시 그려지지 않게 */
+function sameCounts(
+  prev: Record<number, number>,
+  next: Record<number, number>
+): Record<number, number> {
+  const keys = Object.keys(next)
+  if (keys.length !== Object.keys(prev).length) return next
+  return keys.every((k) => prev[Number(k)] === next[Number(k)]) ? prev : next
 }
 
 /** 메인 프로세스 이벤트 구독 — 앱 시작 시 1회 */
 export function bindGenerationEvents(): () => void {
   // 생성 소요 시간 추적 (id별 시작 시각 → 완료 시 평균 갱신)
   const startTimes = new Map<string, number>()
+  // 진행 미리보기가 따라가는 항목 (커스텀 — 고속 모드). 두 장 이상 동시에 생성 중이면 가장 먼저 시작한
+  // 한 장만 따라가고, 그 장이 끝나면 다음 장으로 넘어간다 — 두 장의 프레임이 번갈아 깜빡이지 않게
+  let followId: string | null = null
 
   const offQueue = window.nais.on('queue:changed', (queue) => {
     const prev = useGenerationStore.getState().queue
@@ -671,8 +696,20 @@ export function bindGenerationEvents(): () => void {
         startTimes.set(item.id, Date.now())
       }
     }
-    // 현재 생성 중 항목의 시작 시각(ETA용)
-    const gen = queue.items.find((i) => i.state === 'generating')
+    // 따라갈 항목: 지금 따라가는 장이 아직 생성 중이면 그대로, 아니면 가장 먼저 시작한 생성 중 항목
+    const generating = queue.items.filter((i) => i.state === 'generating')
+    const prevFollowId = followId
+    if (!generating.some((i) => i.id === followId)) {
+      let first: (typeof generating)[number] | null = null
+      for (const i of generating) {
+        if (!first || (startTimes.get(i.id) ?? Infinity) < (startTimes.get(first.id) ?? Infinity)) {
+          first = i
+        }
+      }
+      followId = first?.id ?? null
+    }
+    // 따라가는 항목의 시작 시각(ETA용)
+    const gen = generating.find((i) => i.id === followId)
     const genStartAt = gen ? (startTimes.get(gen.id) ?? Date.now()) : null
 
     // 완료된 항목의 소요 시간으로 평균(EMA) 갱신
@@ -691,7 +728,17 @@ export function bindGenerationEvents(): () => void {
       localStorage.setItem('gen_avg_ms', String(avg))
     }
 
-    useGenerationStore.setState({ queue, genStartAt, avgDurationMs: avg, ...deriveQueue(queue) })
+    const derived = deriveQueue(queue, followId)
+    useGenerationStore.setState({
+      queue,
+      genStartAt,
+      avgDurationMs: avg,
+      ...derived,
+      generatingBySceneId: sameCounts(
+        useGenerationStore.getState().generatingBySceneId,
+        derived.generatingBySceneId
+      )
+    })
     // 새로 실패한 항목은 토스트로 알림 (배지 대신 통합 처리)
     const prevFailed = new Set(prev?.items.filter((i) => i.state === 'failed').map((i) => i.id))
     for (const item of queue.items) {
@@ -704,11 +751,13 @@ export function bindGenerationEvents(): () => void {
     const newlyDone = queue.items.find((i) => i.state === 'done' && !prevDone.has(i.id))
     if (newlyDone?.filePath) {
       const pinned = useGenerationStore.getState().viewPinned
-      useGenerationStore.setState(
-        pinned
-          ? { previewPng: null, progress: null }
-          : { viewingFilePath: newlyDone.filePath, previewPng: null, progress: null }
-      )
+      // 따라가던 장이 끝났거나 생성 중인 장이 없을 때만 진행 표시를 비운다 —
+      // 따라가지 않는 장이 먼저 끝났을 때 아직 도는 장의 미리보기를 지우지 않게
+      const clearStream = followId !== prevFollowId || followId === null
+      useGenerationStore.setState({
+        ...(pinned ? {} : { viewingFilePath: newlyDone.filePath }),
+        ...(clearStream ? { previewPng: null, progress: null } : {})
+      })
       void useGenerationStore.getState().refreshHistory()
     }
     // 큐가 다 끝나면 고정 해제
@@ -718,6 +767,12 @@ export function bindGenerationEvents(): () => void {
     }
   })
   const offProgress = window.nais.on('generation:progress', (e) => {
+    // 따라가는 장이 아직 생성 중이면 다른 장의 진행은 무시한다
+    if (e.id !== followId) {
+      const followed = useGenerationStore.getState().queue?.items.find((i) => i.id === followId)
+      if (followed?.state === 'generating') return
+      followId = e.id
+    }
     useGenerationStore.setState({
       progress: { stepIx: e.stepIx, totalSteps: e.totalSteps },
       ...(e.previewPng ? { previewPng: e.previewPng } : {})
@@ -754,6 +809,21 @@ export function bindGenerationEvents(): () => void {
   const offExhausted = window.nais.on('accounts:allExhausted', () => {
     toast('등록한 계정이 모두 한도를 소진했습니다 — 이제 Anlas가 나갑니다', 'error')
   })
+  // 고속 모드 (커스텀) — 상태는 두 번개 버튼이 함께 보고, 계정이 빠지거나 전부 빠져 멈추면 한 번씩 알린다
+  const offTurboStatus = window.nais.on('turbo:status', (status) => {
+    useTurboStore.getState().apply(status)
+  })
+  const offTurboNotice = window.nais.on('turbo:notice', (notice) => {
+    if (notice.kind === 'dropped') {
+      const why = notice.reason === 'exhausted' ? '무료분 소진' : '무료분 확인 불가'
+      toast(`"${notice.label}" ${why} — 고속 모드에서 뺐습니다 (×${notice.active})`, 'info')
+    } else {
+      toast(
+        '모든 계정 무료분 소진 — 고속 모드 생성을 멈췄습니다. 번개를 끄면 평소대로 이어집니다',
+        'error'
+      )
+    }
+  })
   return () => {
     offQueue()
     offProgress()
@@ -761,6 +831,8 @@ export function bindGenerationEvents(): () => void {
     offVibes()
     offSwitched()
     offExhausted()
+    offTurboStatus()
+    offTurboNotice()
     window.clearInterval(usageTimer)
     document.removeEventListener('visibilitychange', refreshIfVisible)
     window.removeEventListener('focus', refreshIfVisible)
