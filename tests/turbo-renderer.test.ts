@@ -170,6 +170,53 @@ describe('여러 장이 동시에 생성 중일 때의 렌더러 상태', () => 
     emit('queue:changed', queueOf([item('a', 'generating', 4), item('b', 'generating', 5)]))
     expect(state().previewSceneId).toBe(4)
   })
+
+  /** 새로고침 직후 hydrate — onStatus 는 큐를 돌려주기 직전에 부른다 (그 사이 진행 이벤트가 오는 경우) */
+  async function hydrateWith(queue: QueueStatusLite, onStatus?: () => void): Promise<void> {
+    const invoke = window.nais.invoke as ReturnType<typeof vi.fn>
+    const original = invoke.getMockImplementation()
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'settings:get') return { value: null }
+      if (channel === 'queue:status') {
+        onStatus?.()
+        return queue
+      }
+      if (channel === 'images:list') return { items: [], total: 0 }
+      if (channel === 'nai:balance') return { anlas: null, tier: null, opusUsage: null }
+      if (channel === 'turbo:status') return { enabled: false, accounts: [] }
+      throw new Error(`예상하지 못한 IPC: ${channel}`)
+    })
+    try {
+      await state().hydrate()
+    } finally {
+      if (original) invoke.mockImplementation(original)
+    }
+  }
+
+  it('새로고침 직후 진행 이벤트가 큐보다 먼저 오면 hydrate 도 그 장을 따라간다 — 그림과 씬이 어긋나지 않는다', async () => {
+    const queue = queueOf([item('a', 'generating', 1), item('b', 'generating', 2)])
+    await hydrateWith(queue, () => {
+      progress('b', 3, 'frame-b')
+      // 큐를 받기 전이라도 먼저 정한 장을 지킨다 — 두 장이 번갈아 들어오지 않게
+      progress('a', 3, 'frame-a')
+    })
+    expect(state().previewPng).toBe('frame-b')
+    expect(state().previewSceneId).toBe(2)
+    progress('a', 4, 'frame-a2')
+    progress('b', 4, 'frame-b2')
+    expect(state().previewPng).toBe('frame-b2')
+    expect(state().previewSceneId).toBe(2)
+  })
+
+  it('hydrate 가 먼저 정한 장을 진행 이벤트도 따라간다', async () => {
+    await hydrateWith(queueOf([item('a', 'generating', 1), item('b', 'generating', 2)]))
+    expect(state().previewSceneId).toBe(1)
+    progress('b', 3, 'frame-b')
+    progress('a', 3, 'frame-a')
+    progress('b', 4, 'frame-b2')
+    expect(state().previewPng).toBe('frame-a')
+    expect(state().previewSceneId).toBe(1)
+  })
 })
 
 describe('번개 버튼 상태와 알림', () => {

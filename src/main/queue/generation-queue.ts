@@ -25,6 +25,9 @@ const DEFAULT_LANE = 'default'
 export interface LaneInfo {
   accountId: string | null
   label: string
+  /** 기본 작업자가 이 장에 쓸 토큰을 정한 직후 부른다 (await 없이) — 켜고 끄는 교대 구간에
+   *  그 계정의 고속 작업자만 기다리게 한다. 부르기 전에는 모든 계정 작업자가 기다린다 */
+  claim?: () => void
 }
 
 export type GenerateFn = (
@@ -46,12 +49,16 @@ export type TurboVerdict =
 export interface TurboHooks {
   /** 고속 모드 저장값이 켜져 있는가 */
   enabled(): boolean
-  /** 작업자로 쓸 계정 (토큰이 있는 것) */
-  accounts(): { id: string; label: string }[]
-  /** 지금 활성 계정 id — 꺼진 상태의 작업자가 쓰는 계정 */
-  activeId(): string | null
+  /** 작업자로 쓸 계정 (토큰이 있는 것). key 는 작업자 이름 — 같은 NAI 계정이면 같은 값(없으면 id) */
+  accounts(): { id: string; label: string; key?: string }[]
+  /** 지금 활성 계정의 작업자 이름(accounts 의 key) — 꺼진 상태의 작업자가 쓰는 계정 */
+  activeKey(): string | null
   /** 이 계정으로 이 요청을 지금 보내도 되는가 */
   admit(accountId: string, request: GenerationRequest): Promise<TurboVerdict>
+  /** 이 요청이 V5 무료 한도를 쓰는가 — 아니면(V4.5 이하·인페인트 짝 모델) 한도로 빠진 계정도 잡는다 */
+  needsQuota(request: GenerationRequest): boolean
+  /** 요청이 나간 뒤 실패했을 수 있을 때 — 이 계정의 한도 기록을 버려 다음 판정이 새로 조회하게 */
+  forget?(accountId: string): void
 }
 
 interface Lane {
@@ -62,8 +69,17 @@ interface Lane {
   busy: boolean
   /** 그만두는 중 — 지금 장만 마치고 나간다 (고속 모드를 끄거나 계정이 빠질 때) */
   retire: boolean
-  /** 이번에 뜬 뒤로 한도 판정을 한 번 받았다 — 지난 실행의 기록만 믿고 멈추지 않으려고 */
+  /** 이번에 뜬 뒤로 한도 판정을 한 번 받았다 — 지난 실행의 기록만 믿고 멈추지 않으려고.
+   *  한도를 실제로 확인했거나 빠진 판정일 때만 선다 */
   judged: boolean
+  /** 판정에 걸려 이 시각(ms epoch)까지 쉰다 — 그동안 같은 판정을 되풀이하지 않는다 */
+  restUntil: number
+  /** 쉬는 동안에도 한도와 무관한 항목은 잡는다 (V5 한도로만 걸렸을 때) */
+  restFreeOk: boolean
+  /** 한도와 무관한 항목으로 지금 참여 중 — ×N 표시용 (빠짐 기록은 그대로 둔다) */
+  free: boolean
+  /** 기본 작업자가 지금 장에 쓰는 계정의 작업자 이름. undefined 는 아직 고르는 중 */
+  using?: string | null
 }
 
 interface LaneSpec {
@@ -91,7 +107,7 @@ export class GenerationQueue extends EventEmitter {
   private lanes = new Map<string, Lane>()
   /** 지금 있어야 할 작업자 (reconcile 이 갱신) */
   private specs: LaneSpec[] = [{ key: DEFAULT_LANE, accountId: null, label: '' }]
-  /** 고속 모드에서 뺀 계정 (id → 이유). 실행이 끝나도 남겨 ×N 표시와 알림 중복 방지에 쓴다 */
+  /** 고속 모드에서 뺀 계정 (id → 이유). 실행이 끝나도 남겨 ×N 표시와 알림 중복 방지에 쓴다 (새로 켜면 비운다) */
   private excluded = new Map<string, 'exhausted' | 'unknown'>()
   /** 모든 계정이 빠져 멈추는 중 — 작업자들이 지금 장만 마치고 나간다 */
   private stopped = false
@@ -249,7 +265,13 @@ export class GenerationQueue extends EventEmitter {
     const accounts = this.hooks?.accounts() ?? []
     return {
       enabled: this.hooks?.enabled() ?? false,
-      accounts: accounts.map((a) => ({ ...a, excluded: this.excluded.has(a.id) }))
+      // 작업자 이름(key)은 메인 안에서만 쓴다 — 렌더러로 내보내지 않는다.
+      // 한도로 빠진 계정도 한도와 무관한 항목으로 지금 생성 중이면 참여 중으로 센다
+      accounts: accounts.map((a) => ({
+        id: a.id,
+        label: a.label,
+        excluded: this.excluded.has(a.id) && !this.lanes.get(a.key ?? a.id)?.free
+      }))
     }
   }
 
@@ -260,6 +282,8 @@ export class GenerationQueue extends EventEmitter {
    * restart=false 는 이름 바뀜처럼 작업자를 새로 띄울 필요가 없을 때.
    */
   reconcile(restart = true): void {
+    // 작업자 구성이 바뀌면(켜고 끄기·계정 추가·삭제) 멈춤을 풀고 새로 뜬 작업자가 다시 판정받는다
+    if (restart) this.stopped = false
     this.sync(restart)
     // 지워진 계정의 기록 정리
     if (this.excluded.size > 0) {
@@ -276,13 +300,33 @@ export class GenerationQueue extends EventEmitter {
   }
 
   private sync(restart: boolean): void {
+    const wasTurbo = this.specs.some((s) => s.accountId !== null)
     const specs = this.computeSpecs()
     this.specs = specs
+    const turbo = specs.some((s) => s.accountId !== null)
+    // 고속 모드를 새로 켜면 지난번 빠짐 기록은 버리고 다시 판정받는다 (켜자마자 ×0 으로 보이지 않게)
+    if (turbo && !wasTurbo) this.excluded.clear()
+    // 계정 작업자가 없으면 멈출 대상도 없다
+    if (!turbo) this.stopped = false
     const byKey = new Map(specs.map((s) => [s.key, s]))
     for (const lane of this.lanes.values()) {
       const spec = byKey.get(lane.key)
       lane.retire = !spec
-      if (spec) lane.label = spec.label
+      if (!spec) continue
+      lane.label = spec.label
+      if (lane.accountId !== spec.accountId && spec.accountId !== null) {
+        // 같은 NAI 계정(같은 토큰)의 다른 항목이 이어받았다 — 작업자는 그대로 두고 계정 id 만 바꾼다
+        // (지금 장을 마치는 작업자 옆에 같은 토큰으로 새 작업자가 뜨면 한 계정으로 두 장이 겹친다)
+        const old = lane.accountId
+        const reason = old !== null ? this.excluded.get(old) : undefined
+        if (old !== null && reason) {
+          this.excluded.delete(old)
+          this.excluded.set(spec.accountId, reason)
+        }
+        lane.accountId = spec.accountId
+        // 이어받은 id 의 한도 기록은 이 작업자가 쓴 적이 없다 — 다음 판정은 새로 조회한다
+        this.hooks?.forget?.(spec.accountId)
+      }
     }
     if (restart && this.hasPending()) {
       for (const spec of specs) if (!this.lanes.has(spec.key)) this.startLane(spec)
@@ -296,7 +340,7 @@ export class GenerationQueue extends EventEmitter {
       const accounts = hooks.accounts()
       // 계정이 둘 미만이면 고속 모드를 켜 놓았어도 평소 방식으로 돈다
       if (accounts.length >= 2) {
-        return accounts.map((a) => ({ key: a.id, accountId: a.id, label: a.label }))
+        return accounts.map((a) => ({ key: a.key ?? a.id, accountId: a.id, label: a.label }))
       }
     }
     return [{ key: DEFAULT_LANE, accountId: null, label: '' }]
@@ -307,7 +351,15 @@ export class GenerationQueue extends EventEmitter {
   }
 
   private startLane(spec: LaneSpec): void {
-    const lane: Lane = { ...spec, busy: false, retire: false, judged: false }
+    const lane: Lane = {
+      ...spec,
+      busy: false,
+      retire: false,
+      judged: false,
+      restUntil: 0,
+      restFreeOk: true,
+      free: false
+    }
     this.lanes.set(lane.key, lane)
     void this.laneLoop(lane)
   }
@@ -317,9 +369,22 @@ export class GenerationQueue extends EventEmitter {
   private async laneLoop(lane: Lane): Promise<void> {
     try {
       for (;;) {
-        if (lane.retire || this.stopped) break
-        const next = this.nextPending()
-        if (!next) break
+        if (lane.retire) break
+        const first = this.nextPending()
+        if (!first) break
+        let next = first
+        // 모든 계정이 빠져 멈춘 것은 계정 작업자에게만 걸린다 — 번개를 끄면 기본 작업자는 그대로 이어간다.
+        // V5 한도로 빠져 쉬는 동안·멈춘 뒤에는 한도와 무관한 항목만 잡는다 (등급으로 걸렸으면 그것도 쉰다)
+        if (lane.accountId !== null && (this.stopped || lane.restUntil > Date.now())) {
+          const resting = lane.restUntil > Date.now()
+          const free = resting && !lane.restFreeOk ? undefined : this.nextFree()
+          if (!free) {
+            if (this.stopped || this.stopIfAllOut()) break
+            await this.nap(lane.restUntil - Date.now())
+            continue
+          }
+          next = free
+        }
         // 큐 밖 요청(자동 검열 NAI)이 끝날 때까지 새 항목을 쏘지 않는다
         if (this.holds > 0) {
           await this.nap(300)
@@ -343,20 +408,30 @@ export class GenerationQueue extends EventEmitter {
             .admit(lane.accountId, next.request)
             .catch((): TurboVerdict => ({ ok: false, reason: 'unknown' }))
           // 판정을 기다리는 사이 바뀐 것: 다른 작업자가 가져갔거나, 끄거나, 멈췄다
-          if (next.state !== 'pending' || lane.retire || this.stopped) continue
-          lane.judged = true
+          if (next.state !== 'pending' || lane.retire) continue
+          const quota = this.hooks.needsQuota(next.request)
+          if (this.stopped && quota) continue
+          // 한도를 실제로 보지 않은 통과(V4.5 이하)는 판정으로 치지 않는다 — 옛 빠짐 기록으로 멈추지 않게
+          if (!verdict.ok || verdict.checked) lane.judged = true
           if (!verdict.ok) {
-            // 모든 계정이 빠졌으면 멈춘다. 항목은 대기로 남는다
+            lane.restUntil = Date.now() + TURBO_RECHECK_MS
+            lane.restFreeOk = quota
+            this.markFree(lane, false)
+            // 모든 계정이 빠졌고 잡을 수 있는 항목도 없으면 멈춘다. 항목은 대기로 남는다
             if (this.exclude(lane, verdict.reason)) break
-            await this.nap(TURBO_RECHECK_MS)
             continue
           }
-          if (verdict.checked) this.include(lane)
+          if (verdict.checked) {
+            lane.restUntil = 0
+            this.include(lane)
+          }
+          this.markFree(lane, !verdict.checked)
           if (this.holds > 0 || this.cooldownUntil > Date.now() || this.blocked(lane)) continue
         }
 
         next.state = 'generating'
         lane.busy = true
+        if (lane.accountId === null) lane.using = undefined
         const controller = new AbortController()
         this.controllers.set(next.id, controller)
         this.emitChanged()
@@ -365,10 +440,22 @@ export class GenerationQueue extends EventEmitter {
         try {
           next.filePath = await this.generate(next.request, next.id, controller.signal, {
             accountId: lane.accountId,
-            label: lane.label
+            label: lane.label,
+            claim:
+              lane.accountId === null
+                ? () => {
+                    lane.using = this.hooks?.activeKey() ?? null
+                    this.wakeAll()
+                  }
+                : undefined
           })
           next.state = 'done'
         } catch (e) {
+          // 요청이 나간 뒤 끊기거나 취소·저장 실패였을 수 있다 — 이 계정의 한도 기록을 믿지 않는다
+          // (429 는 서버가 받지 않은 것이라 그대로)
+          if (lane.accountId !== null && !(e instanceof RateLimitError)) {
+            this.hooks?.forget?.(lane.accountId)
+          }
           if (controller.signal.aborted || isAbortError(e)) {
             next.state = 'cancelled'
           } else if (
@@ -398,13 +485,22 @@ export class GenerationQueue extends EventEmitter {
 
         this.retries.delete(next.id)
         this.emitChanged()
-        if (this.nextPending() && !lane.retire && !this.stopped) {
+        if (
+          this.nextPending() &&
+          !lane.retire &&
+          !(this.stopped && lane.accountId !== null && !this.nextFree())
+        ) {
           await sleep(this.delayMs)
         }
       }
     } finally {
       this.lanes.delete(lane.key)
+      const halted = this.stopped
       if (this.lanes.size === 0) this.stopped = false
+      // 그만두던 작업자 뒤에 대기 항목이 남았으면(교대 구간에 마지막 장이 429 로 돌아온 경우 등)
+      // 있어야 할 작업자를 띄운다. 모두 빠져 멈춘 경우는 띄우지 않는다 (판정·알림을 되풀이하지 않게)
+      if (lane.retire && !halted && this.hasPending()) this.sync(true)
+      if (lane.free) this.emitTurbo()
       this.wakeAll()
       this.emitChanged()
     }
@@ -413,33 +509,58 @@ export class GenerationQueue extends EventEmitter {
   /**
    * 이 작업자가 지금 시작하면 다른 작업자와 같은 계정으로 겹치는가.
    * 고속 모드를 끄면 기본 작업자(활성 계정)는 계정 작업자들이 다 끝난 뒤에 시작하고,
-   * 켜면 활성 계정의 작업자는 돌던 기본 작업자가 끝난 뒤에 시작한다. 나머지 계정은 곧바로 시작.
+   * 켜면 돌던 기본 작업자가 계정을 고르는 동안은 모든 계정 작업자가, 고른 뒤에는 그 계정의 작업자만
+   * 그 장이 끝나길 기다린다. 기본 작업자가 실제로 쓴 계정을 보므로 그사이 활성 계정이 바뀌어도 겹치지 않는다.
    */
   private blocked(lane: Lane): boolean {
     for (const other of this.lanes.values()) {
       if (other === lane || !other.busy) continue
       if (lane.accountId === null) return true
-      if (other.accountId === null && lane.accountId === this.hooks?.activeId()) return true
+      if (other.accountId === null && (other.using === undefined || other.using === lane.key))
+        return true
     }
     return false
   }
 
-  /** 계정을 뺀다. 참여 계정이 하나도 없게 되면 true(멈춤). 이번에 처음 빠진 것이면 알린다 */
+  /** 계정을 뺀다. 멈추게 되면 true. 이번에 처음 빠진 것이면 알린다 */
   private exclude(lane: Lane, reason: 'exhausted' | 'unknown'): boolean {
     const id = lane.accountId
     if (id === null) return false
     const first = !this.excluded.has(id)
     this.excluded.set(id, reason)
-    if (this.everyoneOut()) {
-      this.stopped = true
-      this.wakeAll()
-      this.emitTurbo({ kind: 'allDropped' })
-      return true
-    }
+    if (this.stopIfAllOut()) return true
     if (first)
       this.emitTurbo({ kind: 'dropped', label: lane.label, reason, active: this.activeCount() })
     else this.emitTurbo()
     return false
+  }
+
+  /**
+   * 모든 계정이 빠졌고, 대기 항목 중 지금 누가 잡을 수 있는 것(한도와 무관한 항목)도 없으면 멈춘다 —
+   * 알림은 한 번. 계정 작업자들은 지금 장만 마치고 나가고, 항목은 대기로 남는다.
+   */
+  private stopIfAllOut(): boolean {
+    if (this.stopped) return true
+    if (!this.everyoneOut()) return false
+    if (this.nextFree()) {
+      const now = Date.now()
+      const someone = this.specs.some((spec) => {
+        const lane = this.lanes.get(spec.key)
+        return !!lane && !lane.retire && (lane.restFreeOk || lane.restUntil <= now)
+      })
+      if (someone) return false
+    }
+    this.stopped = true
+    this.wakeAll()
+    this.emitTurbo({ kind: 'allDropped' })
+    return true
+  }
+
+  /** 한도와 무관한 항목으로 지금 참여 중인지 (×N 표시용) — 바뀔 때만 상태를 보낸다 */
+  private markFree(lane: Lane, free: boolean): void {
+    if (lane.free === free) return
+    lane.free = free
+    this.emitTurbo()
   }
 
   /** 모든 계정이 빠졌는가 — 이번에 아직 판정을 받지 않은 작업자의 옛 기록은 믿지 않는다 */
@@ -456,9 +577,12 @@ export class GenerationQueue extends EventEmitter {
     if (lane.accountId !== null && this.excluded.delete(lane.accountId)) this.emitTurbo()
   }
 
-  /** 지금 참여 중인 계정 수 (×N) */
+  /** 지금 참여 중인 계정 수 (×N) — 번개 버튼과 같은 기준 */
   private activeCount(): number {
-    return this.specs.filter((s) => s.accountId !== null && !this.excluded.has(s.accountId)).length
+    return this.specs.filter(
+      (s) =>
+        s.accountId !== null && (!this.excluded.has(s.accountId) || !!this.lanes.get(s.key)?.free)
+    ).length
   }
 
   private emitTurbo(notice?: TurboNotice): void {
@@ -474,6 +598,16 @@ export class GenerationQueue extends EventEmitter {
   private nextPending(): QueueItem | undefined {
     for (const item of this.items.values()) {
       if (item.state === 'pending') return item
+    }
+    return undefined
+  }
+
+  /** 한도와 무관한 첫 대기 항목 (V4.5 이하·인페인트 짝 모델) */
+  private nextFree(): QueueItem | undefined {
+    const hooks = this.hooks
+    if (!hooks) return undefined
+    for (const item of this.items.values()) {
+      if (item.state === 'pending' && !hooks.needsQuota(item.request)) return item
     }
     return undefined
   }

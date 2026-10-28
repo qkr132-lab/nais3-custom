@@ -6,7 +6,7 @@ import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
-import { accountToken, activeAccountId } from './db/accounts'
+import { accountToken } from './db/accounts'
 import { ensureQuotaAccount, refreshAccountUsage } from './nai/account-switch'
 import { turboHooks } from './nai/turbo'
 import { purgeOldTrashedCharacters, purgeOldTrashedFolders } from './characters/repo'
@@ -181,6 +181,8 @@ app.whenReady().then(async () => {
       if (swap.switched) broadcast('accounts:switched', { label: swap.label ?? '' })
       else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
       token = getNaiToken()
+      // 이 장의 계정이 정해졌다 — 고속 모드를 켜는 교대 구간에 그 계정의 작업자만 기다리게 (await 없이 바로)
+      lane.claim?.()
     }
     if (!token) throw new Error('NAI 토큰이 설정되지 않았습니다')
 
@@ -320,10 +322,12 @@ app.whenReady().then(async () => {
     // 생성 후 잔액 갱신 (실사용량 추적의 진실 공급원) — 실패해도 생성 흐름엔 영향 없음
     if (lane.accountId) {
       // 고속 모드: 이 계정의 한도 기록을 새로 맞춘다 (다음 장 판정이 이 값을 기다린다).
-      // 잔액 기록·방송·게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다
+      // 잔액 기록·방송·게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다.
+      // 활성 여부는 토큰으로 본다 (같은 토큰을 두 계정으로 넣어 두면 작업자 id 가 활성 id 와 다를 수 있다)
       const accountId = lane.accountId
-      void refreshAccountUsage(accountId, token).then(({ anlas, opusUsage }) => {
-        if (anlas !== null && accountId === activeAccountId()) {
+      const sentToken = token
+      void refreshAccountUsage(accountId, sentToken).then(({ anlas, opusUsage }) => {
+        if (anlas !== null && sentToken === getNaiToken()) {
           logBalance(anlas)
           broadcast('anlas:balance', { anlas, opusUsage })
         }

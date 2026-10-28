@@ -260,7 +260,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
     syncModelLimits(get().request.model)
     const queue = await window.nais.invoke('queue:status', undefined)
-    set({ queue, ...deriveQueue(queue, queue.items.find((i) => i.state === 'generating')?.id) })
+    // 진행 이벤트가 먼저 와서 따라갈 장을 정해 두었으면 그 장을 그대로 — 미리보기 그림과 씬이 어긋나지 않게
+    if (!queue.items.some((i) => i.id === previewFollowId && i.state === 'generating')) {
+      previewFollowId = queue.items.find((i) => i.state === 'generating')?.id ?? null
+    }
+    set({ queue, ...deriveQueue(queue, previewFollowId) })
     await get().refreshHistory()
     void get().refreshAnlas()
     void useTurboStore.getState().load()
@@ -678,13 +682,18 @@ function sameCounts(
   return keys.every((k) => prev[Number(k)] === next[Number(k)]) ? prev : next
 }
 
+/**
+ * 진행 미리보기가 따라가는 항목 (커스텀 — 고속 모드). 두 장 이상 동시에 생성 중이면 가장 먼저 시작한
+ * 한 장만 따라가고, 그 장이 끝나면 다음 장으로 넘어간다 — 두 장의 프레임이 번갈아 깜빡이지 않게.
+ * 이벤트 구독과 hydrate 가 같은 값을 본다 (새로고침 직후에도 미리보기 그림과 씬이 짝을 이루게)
+ */
+let previewFollowId: string | null = null
+
 /** 메인 프로세스 이벤트 구독 — 앱 시작 시 1회 */
 export function bindGenerationEvents(): () => void {
   // 생성 소요 시간 추적 (id별 시작 시각 → 완료 시 평균 갱신)
   const startTimes = new Map<string, number>()
-  // 진행 미리보기가 따라가는 항목 (커스텀 — 고속 모드). 두 장 이상 동시에 생성 중이면 가장 먼저 시작한
-  // 한 장만 따라가고, 그 장이 끝나면 다음 장으로 넘어간다 — 두 장의 프레임이 번갈아 깜빡이지 않게
-  let followId: string | null = null
+  previewFollowId = null
 
   const offQueue = window.nais.on('queue:changed', (queue) => {
     const prev = useGenerationStore.getState().queue
@@ -698,18 +707,18 @@ export function bindGenerationEvents(): () => void {
     }
     // 따라갈 항목: 지금 따라가는 장이 아직 생성 중이면 그대로, 아니면 가장 먼저 시작한 생성 중 항목
     const generating = queue.items.filter((i) => i.state === 'generating')
-    const prevFollowId = followId
-    if (!generating.some((i) => i.id === followId)) {
+    const prevFollowId = previewFollowId
+    if (!generating.some((i) => i.id === previewFollowId)) {
       let first: (typeof generating)[number] | null = null
       for (const i of generating) {
         if (!first || (startTimes.get(i.id) ?? Infinity) < (startTimes.get(first.id) ?? Infinity)) {
           first = i
         }
       }
-      followId = first?.id ?? null
+      previewFollowId = first?.id ?? null
     }
     // 따라가는 항목의 시작 시각(ETA용)
-    const gen = generating.find((i) => i.id === followId)
+    const gen = generating.find((i) => i.id === previewFollowId)
     const genStartAt = gen ? (startTimes.get(gen.id) ?? Date.now()) : null
 
     // 완료된 항목의 소요 시간으로 평균(EMA) 갱신
@@ -728,7 +737,7 @@ export function bindGenerationEvents(): () => void {
       localStorage.setItem('gen_avg_ms', String(avg))
     }
 
-    const derived = deriveQueue(queue, followId)
+    const derived = deriveQueue(queue, previewFollowId)
     useGenerationStore.setState({
       queue,
       genStartAt,
@@ -753,7 +762,7 @@ export function bindGenerationEvents(): () => void {
       const pinned = useGenerationStore.getState().viewPinned
       // 따라가던 장이 끝났거나 생성 중인 장이 없을 때만 진행 표시를 비운다 —
       // 따라가지 않는 장이 먼저 끝났을 때 아직 도는 장의 미리보기를 지우지 않게
-      const clearStream = followId !== prevFollowId || followId === null
+      const clearStream = previewFollowId !== prevFollowId || previewFollowId === null
       useGenerationStore.setState({
         ...(pinned ? {} : { viewingFilePath: newlyDone.filePath }),
         ...(clearStream ? { previewPng: null, progress: null } : {})
@@ -768,12 +777,19 @@ export function bindGenerationEvents(): () => void {
   })
   const offProgress = window.nais.on('generation:progress', (e) => {
     // 따라가는 장이 아직 생성 중이면 다른 장의 진행은 무시한다
-    if (e.id !== followId) {
-      const followed = useGenerationStore.getState().queue?.items.find((i) => i.id === followId)
+    let follow: { previewSceneId: number | null } | null = null
+    if (e.id !== previewFollowId) {
+      const queue = useGenerationStore.getState().queue
+      // 큐를 아직 못 받았으면(새로고침 직후) 먼저 정한 장을 지킨다 — 이벤트마다 두 장이 번갈아 들어오지 않게
+      if (previewFollowId !== null && !queue) return
+      const followed = queue?.items.find((i) => i.id === previewFollowId)
       if (followed?.state === 'generating') return
-      followId = e.id
+      previewFollowId = e.id
+      // 따라가는 장이 바뀌면 미리보기 씬도 같이 — 그림과 씬 카드가 짝을 이루게
+      follow = { previewSceneId: queue?.items.find((i) => i.id === e.id)?.sceneId ?? null }
     }
     useGenerationStore.setState({
+      ...follow,
       progress: { stepIx: e.stepIx, totalSteps: e.totalSteps },
       ...(e.previewPng ? { previewPng: e.previewPng } : {})
     })

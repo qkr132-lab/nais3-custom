@@ -43,11 +43,15 @@ function waitIdle(q: GenerationQueue): Promise<void> {
 interface World {
   /** 고속 모드 저장값 */
   enabled: boolean
-  accounts: { id: string; label: string }[]
+  accounts: { id: string; label: string; key?: string }[]
   active: string | null
+  /** 계정 id → 실제 NAI 계정(토큰). 없으면 id 그대로 — 같은 토큰을 두 계정으로 넣은 경우를 흉내 낸다 */
+  tokenOf: Record<string, string>
   /** 계정별 한도 판정 — 기본은 전부 남음 */
   verdict: (accountId: string, model: string) => TurboVerdict
   admitCalls: string[]
+  /** 한도 기록을 버리라고 받은 계정 */
+  forgot: string[]
 }
 
 function world(patch: Partial<World> = {}): World {
@@ -58,21 +62,31 @@ function world(patch: Partial<World> = {}): World {
       { id: 'a2', label: '계정 2' }
     ],
     active: 'a1',
+    tokenOf: {},
     verdict: () => ({ ok: true, checked: true }),
     admitCalls: [],
+    forgot: [],
     ...patch
   }
 }
+
+const isV5Model = (model: string): boolean => model.startsWith('nai-diffusion-5')
+
+/** 이 계정 id 가 실제로 쓰는 NAI 계정 */
+const naiOf = (w: World, id: string | null): string =>
+  id === null ? 'none' : (w.tokenOf[id] ?? id)
 
 function hooksOf(w: World): TurboHooks {
   return {
     enabled: () => w.enabled,
     accounts: () => w.accounts,
-    activeId: () => w.active,
+    activeKey: () => (w.active === null ? null : naiOf(w, w.active)),
     admit: async (id, request) => {
       w.admitCalls.push(id)
       return w.verdict(id, request.model)
-    }
+    },
+    needsQuota: (request) => isV5Model(request.model),
+    forget: (id) => w.forgot.push(id)
   }
 }
 
@@ -82,6 +96,8 @@ interface Rig {
   finishedBy: Map<string, string | null>
   hold: (label: string) => ReturnType<typeof deferred>
   failOnce: Map<string, (lane: LaneInfo) => Error | null>
+  /** 기본 작업자가 계정을 고르는 단계(자동 전환)를 흉내 낸다 — 이게 끝난 뒤에 claim 한다 */
+  beforeClaim: Map<string, () => Promise<void>>
   attempts: Map<string, number>
   /** 동시에 생성 중이던 계정 수의 최댓값 */
   readonly peak: number
@@ -97,6 +113,7 @@ function rig(w: World): Rig {
   const finishedBy = new Map<string, string | null>()
   const gates = new Map<string, ReturnType<typeof deferred>>()
   const failOnce = new Map<string, (lane: LaneInfo) => Error | null>()
+  const beforeClaim = new Map<string, () => Promise<void>>()
   const attempts = new Map<string, number>()
   const live = new Set<string>() // 지금 생성 중인 실제 계정 (기본 레인은 활성 계정)
   let peak = 0
@@ -115,7 +132,11 @@ function rig(w: World): Rig {
     signal: AbortSignal,
     lane: LaneInfo
   ): Promise<string> => {
-    const account = lane.accountId ?? w.active ?? 'none'
+    // 기본 작업자는 실제 생성 파이프라인처럼 계정을 고른 뒤(자동 전환) 그때의 활성 계정으로 보낸다
+    const pre = beforeClaim.get(req.__label)
+    if (pre) await pre()
+    lane.claim?.()
+    const account = lane.accountId !== null ? naiOf(w, lane.accountId) : naiOf(w, w.active)
     if (live.has(account)) overlap = true // 같은 계정으로 두 장이 겹침
     live.add(account)
     peak = Math.max(peak, live.size)
@@ -147,6 +168,7 @@ function rig(w: World): Rig {
     finishedBy,
     hold,
     failOnce,
+    beforeClaim,
     attempts,
     get peak() {
       return peak
@@ -679,5 +701,288 @@ describe('고속 모드 — 상태 알림', () => {
       { id: 'a2', label: '계정 2' }
     ]
     expect(q.turboStatus().accounts[1].excluded).toBe(false)
+  })
+})
+
+const V45 = 'nai-diffusion-4-5-full'
+const OK: TurboVerdict = { ok: true, checked: true }
+const UNCHECKED: TurboVerdict = { ok: true, checked: false }
+const EXHAUSTED: TurboVerdict = { ok: false, reason: 'exhausted' }
+const UNKNOWN: TurboVerdict = { ok: false, reason: 'unknown' }
+const excludedOf = (q: GenerationQueue): boolean[] =>
+  q.turboStatus().accounts.map((a) => a.excluded)
+
+describe('고속 모드 — 멈춤과 교대 구간', () => {
+  it('모두 빠져 멈춘 뒤 다른 계정이 아직 생성 중일 때 번개를 끄면, 그 장이 끝난 뒤 평소대로 이어진다', async () => {
+    const w = world()
+    const spentNow = new Set(['a1'])
+    w.verdict = (id, model) => (!isV5Model(model) ? UNCHECKED : spentNow.has(id) ? EXHAUSTED : OK)
+    const { q, r, notices } = newQueue(w)
+    const gx1 = r.hold('X1')
+    const gy = r.hold('Y')
+    q.enqueueMany([mk('X1'), mk('Y', V45), mk('X2')])
+    await settle(10)
+    // a1 은 X1 에서 빠지고 한도와 무관한 Y 를, a2 는 X1 을 생성 중
+    expect(states(q)).toEqual(['generating', 'generating', 'pending'])
+    spentNow.add('a2')
+    gx1.resolve()
+    await settle(10)
+    // a2 가 X2 판정에서 빠져 모두 빠짐 — 멈추고 알림 한 번 (Y 는 아직 생성 중)
+    expect(notices.map((n) => n.kind)).toEqual(['dropped', 'allDropped'])
+    expect(states(q)).toEqual(['done', 'generating', 'pending'])
+    // 안내대로 번개를 끈다
+    w.enabled = false
+    q.reconcile()
+    gy.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done'])
+    expect(r.finishedBy.get('X2')).toBeNull()
+    expect(r.overlap).toBe(false)
+    expect(r.aborted).toBe(0)
+  })
+
+  it('끄는 교대 구간에 마지막 한 장이 429 로 돌아와도 평소 작업자가 이어받는다', async () => {
+    const w = world()
+    const { q, r } = newQueue(w)
+    const g = r.hold('X')
+    r.failOnce.set('X', (lane) => (lane.accountId !== null ? new RateLimitError(20) : null))
+    q.enqueueMany([mk('X')])
+    await settle()
+    expect(states(q)).toEqual(['generating'])
+    w.enabled = false
+    q.reconcile()
+    g.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done'])
+    expect(r.attempts.get('X')).toBe(2)
+    expect(r.finishedBy.get('X')).toBeNull()
+  })
+
+  it('켜는 교대 구간에 평소 작업자의 마지막 한 장이 429 로 돌아와도 계정 작업자가 이어받는다', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    const g = r.hold('X')
+    r.failOnce.set('X', (lane) => (lane.accountId === null ? new RateLimitError(20) : null))
+    q.enqueueMany([mk('X')])
+    await settle()
+    w.enabled = true
+    q.reconcile()
+    g.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done'])
+    expect(r.attempts.get('X')).toBe(2)
+    expect(r.finishedBy.get('X')).not.toBeNull()
+  })
+
+  it('켜는 교대 구간에 활성 계정을 바꿔도 평소 작업자가 쓴 계정으로는 두 장이 겹치지 않는다', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    const ga = r.hold('A')
+    const gb = r.hold('B')
+    q.enqueueMany([mk('A'), mk('B'), mk('C'), mk('D')])
+    await settle()
+    // 평소 작업자가 활성 a1 으로 A 를 생성 중일 때 켠다
+    w.enabled = true
+    q.reconcile()
+    await settle()
+    expect(r.started.map((s) => [s.label, s.accountId])).toEqual([
+      ['A', null],
+      ['B', 'a2']
+    ])
+    // 계정 화면에서 활성을 a2 로 바꾼다 — a1 작업자는 A(a1 토큰)가 끝날 때까지 기다려야 한다
+    w.active = 'a2'
+    q.reconcile(false)
+    await settle()
+    expect(r.started).toHaveLength(2)
+    ga.resolve()
+    await settle()
+    expect(r.started[2]).toEqual({ label: 'C', accountId: 'a1' })
+    gb.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done', 'done'])
+    expect(r.overlap).toBe(false)
+  })
+
+  it('평소 작업자가 계정을 고르는 동안 켜면 고른 뒤에야 계정 작업자가 들어온다 — 자동 전환으로 바뀐 계정과 겹치지 않게', async () => {
+    const w = world({ enabled: false })
+    const { q, r } = newQueue(w)
+    const choose = deferred()
+    // 자동 전환: a1 이 소진이라 a2 로 바꾼 뒤 보낸다
+    r.beforeClaim.set('A', async () => {
+      await choose.p
+      w.active = 'a2'
+    })
+    const ga = r.hold('A')
+    const gb = r.hold('B')
+    q.enqueueMany([mk('A'), mk('B'), mk('C')])
+    await settle()
+    w.enabled = true
+    q.reconcile()
+    await settle()
+    // 고르는 중에는 어느 계정 작업자도 시작하지 않는다
+    expect(r.started).toEqual([])
+    expect(w.admitCalls).toEqual([])
+    choose.resolve()
+    await settle()
+    // 평소 작업자는 a2 로 보냈다 — a2 작업자는 기다리고 a1 작업자만 들어온다
+    expect(r.started.map((s) => [s.label, s.accountId])).toEqual([
+      ['A', null],
+      ['B', 'a1']
+    ])
+    ga.resolve()
+    gb.resolve()
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done'])
+    expect(r.overlap).toBe(false)
+  })
+
+  it('같은 토큰의 계정 중 생성 중인 쪽을 지우면 남은 쪽이 그 작업자를 이어받는다 — 같은 토큰으로 두 장이 겹치지 않게', async () => {
+    const w = world({
+      accounts: [
+        { id: 'a1', label: '계정 1' },
+        { id: 'x', label: '계정 X', key: 'T2' }
+      ],
+      tokenOf: { x: 'T2', y: 'T2' }
+    })
+    const { q, r } = newQueue(w)
+    const ga = r.hold('A')
+    const gb = r.hold('B')
+    q.enqueueMany([mk('A'), mk('B'), mk('C')])
+    await settle()
+    expect(r.started.map((s) => [s.label, s.accountId])).toEqual([
+      ['A', 'a1'],
+      ['B', 'x']
+    ])
+    // 중복으로 넣어 둔 x 를 지운다 — 같은 토큰의 y 가 남는다
+    w.accounts = [
+      { id: 'a1', label: '계정 1' },
+      { id: 'y', label: '계정 Y', key: 'T2' }
+    ]
+    q.reconcile()
+    await settle()
+    // 같은 토큰으로 새 작업자가 뜨지 않는다
+    expect(r.started).toHaveLength(2)
+    gb.resolve()
+    await settle()
+    // 이어받은 작업자가 y 이름으로 다음 장을 뽑는다
+    expect(r.started[2]).toEqual({ label: 'C', accountId: 'y' })
+    ga.resolve()
+    await waitIdle(q)
+    expect(r.overlap).toBe(false)
+    // 이어받은 id 의 한도 기록은 새로 조회하게
+    expect(w.forgot).toEqual(['y'])
+    // 작업자 이름은 렌더러로 내보내지 않는다
+    expect(q.turboStatus().accounts).toEqual([
+      { id: 'a1', label: '계정 1', excluded: false },
+      { id: 'y', label: '계정 Y', excluded: false }
+    ])
+  })
+})
+
+describe('고속 모드 — 한도와 무관한 항목·등급', () => {
+  it('한도를 보지 않은 V4.5 통과는 판정으로 치지 않는다 — 지난 실행의 빠짐 기록으로 거짓 멈춤이 나지 않는다', async () => {
+    const w = world()
+    const spentNow = new Set(['a2'])
+    w.verdict = (id, model) => (!isV5Model(model) ? UNCHECKED : spentNow.has(id) ? EXHAUSTED : OK)
+    const { q, r, notices } = newQueue(w)
+    q.enqueueMany([mk('Xa'), mk('Xb')])
+    await waitIdle(q)
+    expect(excludedOf(q)).toEqual([false, true])
+    // 시간이 지나 a2 는 돌아오고 a1 이 바닥났다
+    spentNow.clear()
+    spentNow.add('a1')
+    q.enqueueMany([mk('Ya', V45), mk('Yb', V45), mk('X1'), mk('X2')])
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done', 'done', 'done', 'done'])
+    expect(r.finishedBy.get('X1')).toBe('a2')
+    expect(r.finishedBy.get('X2')).toBe('a2')
+    expect(notices.filter((n) => n.kind === 'allDropped')).toEqual([])
+    expect(excludedOf(q)).toEqual([true, false])
+  })
+
+  it('V5 무료분이 모두 바닥나도 한도와 무관한 항목은 뽑고 V5 만 대기로 남긴다 — 멈춤 알림은 한 번', async () => {
+    const w = world({ verdict: (_id, model) => (isV5Model(model) ? EXHAUSTED : UNCHECKED) })
+    const { q, r, notices } = newQueue(w)
+    q.enqueueMany([mk('X'), mk('Y', V45)])
+    await settle(20)
+    expect(q.status().running).toBe(false)
+    expect(states(q)).toEqual(['pending', 'done'])
+    expect(r.started.map((s) => s.label)).toEqual(['Y'])
+    expect(notices.filter((n) => n.kind === 'allDropped')).toHaveLength(1)
+  })
+
+  it('V5 한도로 빠진 계정도 V4.5 를 생성하는 동안은 참여 중으로 보이고, V5 로 돌아오면 알림 없이 다시 빠진다', async () => {
+    const w = world({
+      verdict: (id, model) => (!isV5Model(model) ? UNCHECKED : id === 'a1' ? EXHAUSTED : OK)
+    })
+    const { q, r, notices } = newQueue(w)
+    q.enqueueMany([mk('X')])
+    await waitIdle(q)
+    expect(excludedOf(q)).toEqual([true, false])
+    const ga = r.hold('A')
+    const gb = r.hold('B')
+    q.enqueueMany([mk('A', V45), mk('B', V45)])
+    await settle()
+    expect(states(q).slice(1)).toEqual(['generating', 'generating'])
+    // ×2 — 두 계정이 실제로 생성 중
+    expect(excludedOf(q)).toEqual([false, false])
+    ga.resolve()
+    gb.resolve()
+    await waitIdle(q)
+    expect(excludedOf(q)).toEqual([true, false])
+    q.enqueueMany([mk('X2')])
+    await waitIdle(q)
+    expect(r.finishedBy.get('X2')).toBe('a2')
+    expect(notices.filter((n) => n.kind === 'dropped')).toHaveLength(1)
+  })
+
+  it('번개를 새로 켜면 지난번 빠짐 기록을 버린다 — 켜자마자 ×0 으로 보이지 않는다', async () => {
+    const w = world({ verdict: () => EXHAUSTED })
+    const { q } = newQueue(w)
+    q.enqueueMany([mk('X')])
+    await settle(10)
+    expect(excludedOf(q)).toEqual([true, true])
+    w.enabled = false
+    q.reconcile()
+    await waitIdle(q)
+    w.enabled = true
+    q.reconcile()
+    expect(excludedOf(q)).toEqual([false, false])
+  })
+
+  it('V4.5 에서 등급이 맞지 않는 계정(Opus 아님)은 빠지고 알림은 한 번, 나머지 계정이 다 뽑는다', async () => {
+    const w = world({
+      verdict: (id, model) => (id === 'a2' ? UNKNOWN : isV5Model(model) ? OK : UNCHECKED)
+    })
+    const { q, r, notices } = newQueue(w)
+    q.enqueueMany([mk('A', V45), mk('B', V45), mk('C', V45)])
+    await waitIdle(q)
+    expect(states(q)).toEqual(['done', 'done', 'done'])
+    expect(r.started.every((s) => s.accountId === 'a1')).toBe(true)
+    expect(notices).toEqual([{ kind: 'dropped', label: '계정 2', reason: 'unknown', active: 1 }])
+  })
+
+  it('모든 계정이 V4.5 도 쓸 수 없으면 멈추고 알림 한 번 — 한 장도 안 나간다', async () => {
+    const w = world({ verdict: () => UNKNOWN })
+    const { q, r, notices } = newQueue(w)
+    q.enqueueMany([mk('A', V45), mk('B', V45)])
+    await settle(10)
+    expect(q.status().running).toBe(false)
+    expect(states(q)).toEqual(['pending', 'pending'])
+    expect(r.started).toEqual([])
+    expect(notices.map((n) => n.kind)).toEqual(['dropped', 'allDropped'])
+  })
+
+  it('요청이 나간 뒤 실패하면 그 계정의 한도 기록을 버리고, 429 는 그대로 둔다', async () => {
+    const w = world()
+    const { q, r } = newQueue(w)
+    r.failOnce.set('A', (lane) => (lane.accountId === 'a1' ? new Error('스트림 끊김') : null))
+    r.failOnce.set('B', (lane) =>
+      lane.accountId === 'a2' && r.attempts.get('B') === 1 ? new RateLimitError(0) : null
+    )
+    q.enqueueMany([mk('A'), mk('B')])
+    await waitIdle(q)
+    expect(states(q)).toEqual(['failed', 'done'])
+    expect(w.forgot).toEqual(['a1'])
   })
 })

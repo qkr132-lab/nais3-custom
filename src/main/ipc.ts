@@ -69,7 +69,7 @@ import {
 } from './db/settings'
 import { anlasUsage, logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance } from './nai/client'
-import { resetProbeCache } from './nai/account-switch'
+import { clearProbeStamps, resetProbeCache } from './nai/account-switch'
 import { TURBO_KEY } from './nai/turbo'
 import {
   addAccount,
@@ -300,7 +300,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('turbo:set', ({ enabled }) => {
     // 계정이 둘 미만이면 켤 수 없다 (렌더러가 막지만 여기서도)
     const usable = ctx.queue.turboStatus().accounts.length >= 2
-    setSetting(TURBO_KEY, enabled && usable ? '1' : '0')
+    const on = enabled && usable
+    // 켜는 순간에는 꺼진 동안 찍어 둔 한도 기록(20초 캐시)을 믿지 않는다 — 그 뒤 생성으로 바닥났을 수 있다
+    if (on && getSetting(TURBO_KEY) !== '1') clearProbeStamps()
+    setSetting(TURBO_KEY, on ? '1' : '0')
     ctx.queue.reconcile()
     return ctx.queue.turboStatus()
   })

@@ -70,6 +70,13 @@ export async function ensureQuotaAccount(model: string, now = Date.now()): Promi
 
 type BalanceResult = Awaited<ReturnType<typeof fetchAnlasBalance>>
 
+/** 계정 하나의 조회 기록 — 한도와 구독 등급 (조회 실패면 둘 다 null) */
+interface Probed {
+  opusUsage: BalanceResult['opusUsage']
+  tier: BalanceResult['tier']
+}
+const UNKNOWN: Probed = { opusUsage: null, tier: null }
+
 /**
  * 계정 하나의 Opus 한도를 조회한다. 20초 안에 다시 부르면 마지막 값을 돌려준다.
  * 고속 모드(번개 버튼)도 계정별로 이 조회를 그대로 쓴다.
@@ -79,23 +86,47 @@ export async function probeAccount(
   token: string,
   now = Date.now()
 ): Promise<BalanceResult['opusUsage']> {
+  return (await probe(id, token, now)).opusUsage
+}
+
+/** 계정 하나의 구독 등급 — probeAccount 와 같은 조회·캐시를 쓴다 (고속 모드의 V4.5 판정용) */
+export async function probeTier(
+  id: string,
+  token: string,
+  now = Date.now()
+): Promise<BalanceResult['tier']> {
+  return (await probe(id, token, now)).tier
+}
+
+async function probe(id: string, token: string, now: number): Promise<Probed> {
   // 방금 끝난 생성 뒤 갱신이 진행 중이면 그 결과를 기다린다 (오래된 값으로 판정하지 않게)
   const pending = refreshing.get(id)
   if (pending) await pending
+  // 같은 계정을 조회하는 중이면 그 결과를 같이 받는다 — 자동 전환과 고속 판정이 겹쳐도 옛 값·null 을 받지 않게
+  const running = inflight.get(id)
+  if (running) return running
   const last = lastProbe.get(id)
-  if (last && now - last < PROBE_COOLDOWN_MS) return cached.get(id) ?? null
+  if (last && now - last < PROBE_COOLDOWN_MS) return cached.get(id) ?? UNKNOWN
   lastProbe.set(id, now)
+  const started = fetchAnlasBalance(token).then(
+    ({ opusUsage, tier }): Probed => {
+      const value = { opusUsage, tier }
+      cached.set(id, value)
+      return value
+    },
+    (): Probed => cached.get(id) ?? UNKNOWN
+  )
+  inflight.set(id, started)
   try {
-    const { opusUsage } = await fetchAnlasBalance(token)
-    cached.set(id, opusUsage)
-    return opusUsage
-  } catch {
-    return cached.get(id) ?? null
+    return await started
+  } finally {
+    if (inflight.get(id) === started) inflight.delete(id)
   }
 }
 
-const cached = new Map<string, BalanceResult['opusUsage']>()
+const cached = new Map<string, Probed>()
 const refreshing = new Map<string, Promise<unknown>>()
+const inflight = new Map<string, Promise<Probed>>()
 
 /**
  * 생성 직후 이 계정의 잔액·한도를 다시 읽고 한도 기록을 새로 맞춘다 (고속 모드 전용).
@@ -106,7 +137,7 @@ const refreshing = new Map<string, Promise<unknown>>()
 export function refreshAccountUsage(id: string, token: string): Promise<BalanceResult> {
   const pending = fetchAnlasBalance(token).then((result) => {
     if (result.anlas !== null) {
-      cached.set(id, result.opusUsage)
+      cached.set(id, { opusUsage: result.opusUsage, tier: result.tier })
       lastProbe.set(id, Date.now())
     } else {
       lastProbe.delete(id)
@@ -120,9 +151,24 @@ export function refreshAccountUsage(id: string, token: string): Promise<BalanceR
   return pending
 }
 
+/** 이 계정의 한도 기록을 믿지 않는다 — 다음 조회는 20초 안이어도 새로 한다 (요청이 나간 뒤 실패했을 때) */
+export function forgetProbe(id: string): void {
+  lastProbe.delete(id)
+}
+
+/**
+ * 모든 계정의 한도 기록을 버린다 (고속 모드를 켤 때). 꺼진 동안 찍어 둔 기록은 그 뒤 생성으로
+ * 바닥났을 수 있어서다. 진행 중인 조회·갱신은 그대로 둔다.
+ */
+export function clearProbeStamps(): void {
+  lastProbe.clear()
+  cached.clear()
+}
+
 /** 테스트·설정 변경 시 캐시 비우기 */
 export function resetProbeCache(): void {
   lastProbe.clear()
   cached.clear()
   refreshing.clear()
+  inflight.clear()
 }
