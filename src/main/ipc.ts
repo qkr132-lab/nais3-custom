@@ -70,6 +70,7 @@ import {
 import { anlasUsage, logBalance } from './nai/anlas-log'
 import { fetchAnlasBalance } from './nai/client'
 import { resetProbeCache } from './nai/account-switch'
+import { TURBO_KEY } from './nai/turbo'
 import {
   addAccount,
   adoptLegacyToken,
@@ -269,13 +270,39 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     adoptLegacyToken(getNaiToken())
     return { accounts: listAccounts() }
   })
-  handle('accounts:add', ({ label, token }) => ({ accounts: addAccount(label, token) }))
-  handle('accounts:rename', ({ id, label }) => ({ accounts: renameAccount(id, label) }))
-  handle('accounts:remove', ({ id }) => ({ accounts: removeAccount(id) }))
+  // 계정이 바뀌면 고속 모드 작업자도 맞춘다 (×N·작업자 목록 갱신)
+  handle('accounts:add', ({ label, token }) => {
+    const accounts = addAccount(label, token)
+    ctx.queue.reconcile()
+    return { accounts }
+  })
+  handle('accounts:rename', ({ id, label }) => {
+    const accounts = renameAccount(id, label)
+    ctx.queue.reconcile(false)
+    return { accounts }
+  })
+  handle('accounts:remove', ({ id }) => {
+    const accounts = removeAccount(id)
+    // 계정이 둘 미만이 되면 고속 모드는 쓸 수 없다 — 켜 둔 채로 남지 않게 끈다
+    if (accounts.length < 2 && getSetting(TURBO_KEY) === '1') setSetting(TURBO_KEY, '0')
+    ctx.queue.reconcile()
+    return { accounts }
+  })
   handle('accounts:setActive', ({ id }) => {
     setActiveAccount(id)
     resetProbeCache()
+    ctx.queue.reconcile(false)
     return { accounts: listAccounts() }
+  })
+
+  // 고속 모드 — 번개 버튼 (커스텀). 저장값 turbo_mode, 기본 꺼짐
+  handle('turbo:status', () => ctx.queue.turboStatus())
+  handle('turbo:set', ({ enabled }) => {
+    // 계정이 둘 미만이면 켤 수 없다 (렌더러가 막지만 여기서도)
+    const usable = ctx.queue.turboStatus().accounts.length >= 2
+    setSetting(TURBO_KEY, enabled && usable ? '1' : '0')
+    ctx.queue.reconcile()
+    return ctx.queue.turboStatus()
   })
 
   handle('queue:enqueue', ({ request, count }) => ({ ids: ctx.queue.enqueue(request, count) }))
@@ -1054,6 +1081,12 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(color)
   })
 
+  // 고속 모드 상태·알림을 렌더러로 (큐가 계정 판정으로 상태를 바꿀 때)
+  ctx.queue.on('turbo', (status, notice) => {
+    broadcast('turbo:status', status)
+    if (notice) broadcast('turbo:notice', notice)
+  })
+
   // 생성 완료 알림 (커스텀) — 큐가 idle로 전환될 때 이번 실행에서 끝난 장수를 Windows 알림으로.
   // 소리 없음(silent). 설정 notify_on_complete !== '0' 일 때만 (기본 켜짐).
   let queueWasRunning = false
@@ -1064,9 +1097,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     if (status.running && !queueWasRunning) doneAtRunStart = doneNow
     if (!status.running && queueWasRunning) {
       const completed = doneNow - doneAtRunStart
-      // 2장 이상일 때만 — 1장짜리 즉석 생성엔 알림이 과함 (사용자 결정)
+      // 2장 이상일 때만 — 1장짜리 즉석 생성엔 알림이 과함 (사용자 결정).
+      // 고속 모드가 모든 계정 소진으로 멈춘 경우(대기 항목이 남음)는 끝난 게 아니라서 보내지 않는다
       if (
         completed >= 2 &&
+        !status.items.some((i) => i.state === 'pending') &&
         getSetting('notify_on_complete') !== '0' &&
         Notification.isSupported()
       ) {

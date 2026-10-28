@@ -371,6 +371,27 @@ export interface NaiAccountInfo {
   active: boolean
 }
 
+/** 고속 모드(번개 버튼)의 계정 한 칸 (커스텀) */
+export interface TurboAccount {
+  id: string
+  label: string
+  /** 무료분이 없거나 남은 양을 알 수 없어 지금은 뺀 계정 */
+  excluded: boolean
+}
+
+/** 고속 모드 상태. 켜져 있어도 계정이 둘 미만이면 쓰이지 않는다 */
+export interface TurboStatus {
+  /** 저장값 — 사용자가 켠 상태 */
+  enabled: boolean
+  /** 토큰이 있는 등록 계정 */
+  accounts: TurboAccount[]
+}
+
+/** 고속 모드 알림 — 상태가 바뀔 때만 한 번 */
+export type TurboNotice =
+  | { kind: 'dropped'; label: string; reason: 'exhausted' | 'unknown'; active: number }
+  | { kind: 'allDropped' }
+
 export interface SubscriptionInfo {
   tier: 'paper' | 'tablet' | 'scroll' | 'opus'
   anlasFixed: number
@@ -705,6 +726,10 @@ export interface IpcInvokeMap {
   'accounts:rename': { req: { id: string; label: string }; res: { accounts: NaiAccountInfo[] } }
   'accounts:remove': { req: { id: string }; res: { accounts: NaiAccountInfo[] } }
   'accounts:setActive': { req: { id: string }; res: { accounts: NaiAccountInfo[] } }
+  /** 고속 모드 상태 (커스텀) */
+  'turbo:status': { req: void; res: TurboStatus }
+  /** 고속 모드 켜기/끄기 — 저장하고 큐에 곧바로 반영한다 */
+  'turbo:set': { req: { enabled: boolean }; res: TurboStatus }
   'queue:enqueue': { req: { request: GenerationRequest; count: number }; res: { ids: string[] } }
   /** 여러 요청 원자적 일괄 등록 (씬 예약/큐 반복용 — 취소 누락 방지) */
   'queue:enqueueMany': { req: { requests: GenerationRequest[] }; res: { ids: string[] } }
@@ -1237,6 +1262,10 @@ export interface IpcEventMap {
   'accounts:switched': { label: string }
   /** 등록한 계정이 전부 한도를 소진했을 때 — 이후 생성은 Anlas가 나간다 */
   'accounts:allExhausted': void
+  /** 고속 모드 상태가 바뀜 — 켜고 끔, 계정이 빠지거나 돌아옴, 계정 추가·삭제 (커스텀) */
+  'turbo:status': TurboStatus
+  /** 고속 모드에서 계정이 빠졌거나 전부 빠져 멈췄을 때 */
+  'turbo:notice': TurboNotice
   'generation:progress': {
     id: string
     stepIx: number

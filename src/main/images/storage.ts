@@ -160,7 +160,12 @@ export async function saveGeneratedImage(input: {
   } else {
     const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
     filePath = join(monthDir, `NAIS3_${stamp}_${input.seed}.${ext}`)
+    // 고속 모드로 두 장이 같은 초에 같은 시드로 끝나도 서로 덮어쓰지 않는다 (이름이 겹칠 때만 _2, _3 …)
+    for (let n = 2; existsSync(filePath); n++) {
+      filePath = join(monthDir, `NAIS3_${stamp}_${input.seed}_${n}.${ext}`)
+    }
   }
+  // 이름을 고르는 곳부터 파일을 쓰는 곳까지 await 가 없다 — 같은 씬에 동시에 저장해도 번호가 겹치지 않는다
   writeFileSync(filePath, fileBuffer)
 
   // 썸네일: 카드가 커질 수 있어 640px로 (화질 열화 방지). webp q90

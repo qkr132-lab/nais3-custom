@@ -6,7 +6,9 @@ import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
 import { getNaiToken } from './db/settings'
-import { ensureQuotaAccount } from './nai/account-switch'
+import { accountToken, activeAccountId } from './db/accounts'
+import { ensureQuotaAccount, refreshAccountUsage } from './nai/account-switch'
+import { turboHooks } from './nai/turbo'
 import { purgeOldTrashedCharacters, purgeOldTrashedFolders } from './characters/repo'
 
 /** 씬 휴지통과 같은 보관 기간 설정(trash_retention_days, 0=무제한)을 따른다 */
@@ -167,16 +169,24 @@ app.whenReady().then(async () => {
   setInterval(purgeOldTrashedCharactersIfDue, 60 * 60 * 1000)
 
   // 생성 파이프라인: 큐 → 조각/와일드카드 치환 → 바이브/캐릭레퍼 준비 → 스트리밍 생성 → 저장
-  const queue = new GenerationQueue(async (rawRequest, id, signal) => {
-    // 한도가 바닥난 계정이면 여유 있는 계정으로 갈아탄다 (커스텀 — 계정 여러 개 등록 시)
-    const swap = await ensureQuotaAccount(rawRequest.model)
-    if (swap.switched) broadcast('accounts:switched', { label: swap.label ?? '' })
-    else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
-
-    const token = getNaiToken()
+  const queue = new GenerationQueue(async (rawRequest, id, signal, lane) => {
+    let token: string | null
+    if (lane.accountId) {
+      // 고속 모드 — 이 작업자의 계정 토큰만 쓴다. 활성 계정은 바꾸지 않고 자동 전환도 거치지 않는다
+      // (보내도 되는지는 큐가 보내기 직전에 계정별로 이미 확인했다)
+      token = accountToken(lane.accountId)
+    } else {
+      // 한도가 바닥난 계정이면 여유 있는 계정으로 갈아탄다 (커스텀 — 계정 여러 개 등록 시)
+      const swap = await ensureQuotaAccount(rawRequest.model)
+      if (swap.switched) broadcast('accounts:switched', { label: swap.label ?? '' })
+      else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
+      token = getNaiToken()
+    }
     if (!token) throw new Error('NAI 토큰이 설정되지 않았습니다')
 
     // 배치 항목마다 여기서 치환 — 매 장 다른 와일드카드 결과가 나온다.
+    // 아래 치환 블록(request 조립까지)은 await 없이 한 번에 돈다 — 작업자가 여럿이어도
+    // 순차 와일드카드 카운터를 두 장이 같이 읽는 일이 없다. 여기에 await 를 끼우지 말 것.
     // 주석 제거가 반드시 먼저 — 주석 줄이 조각을 소모하거나(순차 카운터),
     // 와일드카드 처리의 재조립이 개행을 지워 주석 범위가 전체로 번지는 것 방지 (NAIS2와 동일 순서)
     const latestScene = rawRequest.sceneId ? getScene(rawRequest.sceneId) : null
@@ -308,15 +318,27 @@ app.whenReady().then(async () => {
       broadcast('scenes:changed', { sceneId: request.sceneId, filePath: saved.filePath })
 
     // 생성 후 잔액 갱신 (실사용량 추적의 진실 공급원) — 실패해도 생성 흐름엔 영향 없음
-    void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
-      if (anlas !== null) {
-        logBalance(anlas)
-        broadcast('anlas:balance', { anlas, opusUsage })
-      }
-    })
+    if (lane.accountId) {
+      // 고속 모드: 이 계정의 한도 기록을 새로 맞춘다 (다음 장 판정이 이 값을 기다린다).
+      // 잔액 기록·방송·게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다
+      const accountId = lane.accountId
+      void refreshAccountUsage(accountId, token).then(({ anlas, opusUsage }) => {
+        if (anlas !== null && accountId === activeAccountId()) {
+          logBalance(anlas)
+          broadcast('anlas:balance', { anlas, opusUsage })
+        }
+      })
+    } else {
+      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
+        if (anlas !== null) {
+          logBalance(anlas)
+          broadcast('anlas:balance', { anlas, opusUsage })
+        }
+      })
+    }
 
     return saved.filePath
-  })
+  }, turboHooks())
 
   // 저장해둔 생성 지연 시간 적용 (기본 600ms)
   const savedDelay = Number(getSetting('gen_delay_ms'))

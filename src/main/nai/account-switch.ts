@@ -52,7 +52,7 @@ export async function ensureQuotaAccount(model: string, now = Date.now()): Promi
   const activeToken = accountToken(active.id)
   if (!activeToken) return { switched: false }
 
-  const activeUsage = await probe(active.id, activeToken, now)
+  const activeUsage = await probeAccount(active.id, activeToken, now)
   if (quotaState(activeUsage) !== 'exhausted') return { switched: false }
 
   // 소진 확인 — 여유 있는 계정을 찾는다
@@ -60,7 +60,7 @@ export async function ensureQuotaAccount(model: string, now = Date.now()): Promi
     if (candidate.id === active.id) continue
     const token = accountToken(candidate.id)
     if (!token) continue
-    const usage = await probe(candidate.id, token, now)
+    const usage = await probeAccount(candidate.id, token, now)
     if (quotaState(usage) === 'available' && setActiveAccount(candidate.id)) {
       return { switched: true, label: candidate.label }
     }
@@ -68,11 +68,20 @@ export async function ensureQuotaAccount(model: string, now = Date.now()): Promi
   return { switched: false, allExhausted: true }
 }
 
-async function probe(
+type BalanceResult = Awaited<ReturnType<typeof fetchAnlasBalance>>
+
+/**
+ * 계정 하나의 Opus 한도를 조회한다. 20초 안에 다시 부르면 마지막 값을 돌려준다.
+ * 고속 모드(번개 버튼)도 계정별로 이 조회를 그대로 쓴다.
+ */
+export async function probeAccount(
   id: string,
   token: string,
-  now: number
-): Promise<Awaited<ReturnType<typeof fetchAnlasBalance>>['opusUsage']> {
+  now = Date.now()
+): Promise<BalanceResult['opusUsage']> {
+  // 방금 끝난 생성 뒤 갱신이 진행 중이면 그 결과를 기다린다 (오래된 값으로 판정하지 않게)
+  const pending = refreshing.get(id)
+  if (pending) await pending
   const last = lastProbe.get(id)
   if (last && now - last < PROBE_COOLDOWN_MS) return cached.get(id) ?? null
   lastProbe.set(id, now)
@@ -85,10 +94,35 @@ async function probe(
   }
 }
 
-const cached = new Map<string, Awaited<ReturnType<typeof fetchAnlasBalance>>['opusUsage']>()
+const cached = new Map<string, BalanceResult['opusUsage']>()
+const refreshing = new Map<string, Promise<unknown>>()
+
+/**
+ * 생성 직후 이 계정의 잔액·한도를 다시 읽고 한도 기록을 새로 맞춘다 (고속 모드 전용).
+ * 조회가 끝나기 전에는 probeAccount 가 기다리므로, 다음 장을 보내기 전 판정은 늘 이 결과를 본다.
+ * 조회가 실패하면(anlas 가 null) 방금 장이 한도를 깎았을 수 있어 옛 기록을 믿지 않는다 —
+ * 다음 판정이 새로 조회하고, 그것도 실패하면 모름으로 빠진다.
+ */
+export function refreshAccountUsage(id: string, token: string): Promise<BalanceResult> {
+  const pending = fetchAnlasBalance(token).then((result) => {
+    if (result.anlas !== null) {
+      cached.set(id, result.opusUsage)
+      lastProbe.set(id, Date.now())
+    } else {
+      lastProbe.delete(id)
+    }
+    return result
+  })
+  refreshing.set(id, pending)
+  void pending.then(() => {
+    if (refreshing.get(id) === pending) refreshing.delete(id)
+  })
+  return pending
+}
 
 /** 테스트·설정 변경 시 캐시 비우기 */
 export function resetProbeCache(): void {
   lastProbe.clear()
   cached.clear()
+  refreshing.clear()
 }
