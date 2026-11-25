@@ -1,4 +1,4 @@
-import type { GenerationRequest } from '../../shared/types'
+import type { CharRefType, GenerationRequest } from '../../shared/types'
 
 /**
  * NAI 웹과 바이트 단위로 동일한 payload를 만드는 것이 이 모듈의 존재 이유다 (P1).
@@ -31,6 +31,7 @@ export {
 } from '../../shared/nai-presets'
 import { preparePromptCaptions } from '../../shared/nai-prompts'
 import { effectiveNoiseSchedule, isV5, modelCaps } from '../../shared/nai-models'
+import { charRefRule, sentCharRefFidelity, sentCharRefType } from '../../shared/char-refs'
 
 /**
  * Variety+(skip_cfg_above_sigma) 값.
@@ -94,10 +95,13 @@ export interface I2iOptions {
  * - information_extracted는 항상 1
  * - descriptions.caption.base_caption = 'character' | 'character&style' (+ legacy_uc: false)
  * - 이미지: 웹은 director_reference_images_cached({cache_secret_key}), 서드파티는 base64 배열
+ *
+ * 모델별 규칙(유형 내리기·충실도 고정·인페인트 제외)은 shared/char-refs — 웹 번들 2026-11-25 실측.
+ * V5 는 같은 필드로 나가되 충실도가 없어 secondary 가 늘 0 이고 의상 유형을 받는다.
  */
 export interface CharacterReferenceOptions {
-  /** 실캡처는 character&style. costume/delta는 웹 번들 enum에서 확인된 신규 타입 */
-  referenceType: 'character' | 'style' | 'character&style' | 'costume' | 'delta'
+  /** 실캡처는 character&style. 나머지는 웹 번들 enum 값 */
+  referenceType: CharRefType
   strength: number
   fidelity: number
   cacheSecretKey?: string
@@ -141,6 +145,14 @@ export function buildGenerateImagePayload(
     req.useCoords ? (c.center ?? { x: 0.5, y: 0.5 }) : { x: 0.5, y: 0.5 }
 
   const caps = modelCaps(req.model)
+  // 이 모델에 실제로 실리는 레퍼런스만, 이 모델이 받는 유형·충실도로 (웹과 같은 규칙)
+  const refRule = charRefRule(req.model, !!opts.i2i?.maskBase64)
+  const charRefs = (opts.characterReferences ?? []).flatMap((r) => {
+    const type = sentCharRefType(refRule, r.referenceType)
+    return type === null
+      ? []
+      : [{ ...r, referenceType: type, fidelity: sentCharRefFidelity(refRule, r.fidelity) }]
+  })
 
   return {
     action: opts.i2i ? (opts.i2i.maskBase64 ? 'infill' : 'img2img') : 'generate',
@@ -226,28 +238,25 @@ export function buildGenerateImagePayload(
         center: center(c),
         enabled: true
       })),
-      // V5는 캐릭터 레퍼런스 미지원 (웹 기능표 characterReferences=false) — 보내면 서버가 거부한다
-      ...(caps.characterReferences && opts.characterReferences?.length
+      ...(charRefs.length
         ? {
-            director_reference_descriptions: opts.characterReferences.map((r) => ({
+            director_reference_descriptions: charRefs.map((r) => ({
               caption: { base_caption: r.referenceType, char_captions: [] },
               legacy_uc: false
             })),
-            director_reference_information_extracted: opts.characterReferences.map(() => 1),
-            director_reference_strength_values: opts.characterReferences.map((r) => r.strength),
-            director_reference_secondary_strength_values: opts.characterReferences.map(
-              (r) => 1 - r.fidelity
-            ),
-            ...(opts.characterReferences.some((r) => r.cacheSecretKey)
+            director_reference_information_extracted: charRefs.map(() => 1),
+            director_reference_strength_values: charRefs.map((r) => r.strength),
+            director_reference_secondary_strength_values: charRefs.map((r) => 1 - r.fidelity),
+            ...(charRefs.some((r) => r.cacheSecretKey)
               ? {
-                  director_reference_images_cached: opts.characterReferences
+                  director_reference_images_cached: charRefs
                     .filter((r) => r.cacheSecretKey)
                     .map((r) => ({ cache_secret_key: r.cacheSecretKey }))
                 }
               : {}),
-            ...(opts.characterReferences.some((r) => r.imageBase64)
+            ...(charRefs.some((r) => r.imageBase64)
               ? {
-                  director_reference_images: opts.characterReferences
+                  director_reference_images: charRefs
                     .filter((r) => r.imageBase64)
                     .map((r) => r.imageBase64)
                 }

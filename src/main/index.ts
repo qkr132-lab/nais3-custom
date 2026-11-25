@@ -221,7 +221,12 @@ app.whenReady().then(async () => {
     // 요청에 vibeIds/charRefIds가 있으면 enabled 대신 그 id들만 (씬 큐 반복/씬별 추가)
     const { vibes, newlyEncoded } = await prepareVibes(token, queuedRequest.vibeIds)
     if (newlyEncoded.length) broadcast('vibes:encoded', {}) // 카드 인코딩 표시 갱신
-    const characterReferences = await prepareCharRefs(queuedRequest.charRefIds)
+    // 레퍼런스 규칙은 실제로 보낼 모델 기준 — 인페인트는 아래에서 짝 모델로 바뀐다
+    const characterReferences = await prepareCharRefs(
+      queuedRequest.charRefIds,
+      request.model,
+      !!request.source?.maskBase64
+    )
 
     let source = request.source
     // i2i/인페인트: 소스 해상도를 유효 NAI 해상도(64 배수·픽셀 상한)로 스냅하고 이미지를 맞춰 리사이즈.

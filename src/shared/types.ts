@@ -167,7 +167,19 @@ export interface VibeItem {
   folderId: number | null
 }
 
-export type CharRefType = 'character' | 'style' | 'character&style' | 'costume' | 'delta'
+/**
+ * 캐릭터 레퍼런스 유형 (NAI 웹의 값 그대로).
+ * character_mainoutfit·character&style_anyoutfit 은 「같은 옷 선호」 스위치로 갈리는 값 —
+ * 의상 레퍼런스를 받는 모델(V5)에서만 그대로 나가고, 아니면 기본 유형으로 내려 보낸다 (shared/char-refs)
+ */
+export type CharRefType =
+  | 'character'
+  | 'style'
+  | 'character&style'
+  | 'costume'
+  | 'delta'
+  | 'character_mainoutfit'
+  | 'character&style_anyoutfit'
 
 export interface CharRefItem {
   id: number

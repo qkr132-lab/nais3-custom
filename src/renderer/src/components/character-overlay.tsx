@@ -25,6 +25,7 @@ import { useCharRefsStore } from '../stores/refs-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
 import { modelCaps } from '@shared/nai-models'
+import { charRefFamily, charRefRule, prefersSameOutfit, withSameOutfit } from '@shared/char-refs'
 import { promptTokenLimit, promptTokenRequest } from '@shared/nai-tokens'
 import { requestForPromptMode } from '@shared/prompt-state'
 import { usePromptTokens } from '../lib/use-prompt-tokens'
@@ -868,8 +869,10 @@ function RefLinkRow({
 }): React.JSX.Element {
   const refs = useCharRefsStore((s) => s.items)
   const linked = char.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
+  const refRule = charRefRule(useGenerationStore((s) => s.request.model))
   const typeLabel = linked
-    ? (REF_TYPE_LABELS.find((t) => t.value === linked.refType)?.label ?? linked.refType)
+    ? (REF_TYPE_LABELS.find((t) => t.value === charRefFamily(linked.refType))?.label ??
+      linked.refType)
     : ''
 
   return (
@@ -884,7 +887,8 @@ function RefLinkRow({
       {linked ? (
         <>
           <span className="truncate text-[11px] text-muted">
-            {typeLabel} · 강도 {linked.strength.toFixed(2)} · 충실도 {linked.fidelity.toFixed(2)}
+            {typeLabel} · 강도 {linked.strength.toFixed(2)}
+            {refRule.fidelity ? ` · 충실도 ${linked.fidelity.toFixed(2)}` : ''}
           </span>
           {linked.thumbnail && (
             <img
@@ -916,6 +920,9 @@ function CharRefLinkDialog({
   const refs = useCharRefsStore((s) => s.items)
   const update = useCharRefsStore((s) => s.update)
   const linked = char?.charRefId != null ? refs.find((r) => r.id === char.charRefId) : undefined
+  // 강도 상한·충실도·의상 유형은 지금 고른 모델을 따른다 (V5: 강도 5까지·충실도 없음·같은 옷 선호)
+  const refRule = charRefRule(useGenerationStore((s) => s.request.model))
+  const sameOutfit = linked ? prefersSameOutfit(linked.refType) : null
 
   /** 파일 선택 → 라이브러리에 추가 → 전역 적용은 끄고 이 캐릭터에 연결 */
   const addFromFile = async (): Promise<void> => {
@@ -1022,7 +1029,7 @@ function CharRefLinkDialog({
                 <div className="space-y-1">
                   <p className="text-[12px] font-medium text-muted">유형</p>
                   <Select
-                    value={linked.refType}
+                    value={charRefFamily(linked.refType)}
                     onValueChange={(v) => update(linked.id, { refType: v })}
                   >
                     <SelectTrigger className="w-full">
@@ -1036,6 +1043,22 @@ function CharRefLinkDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {refRule.outfit && sameOutfit !== null && (
+                    <label className="flex items-center gap-2 pt-1 text-[12px] text-muted">
+                      <Switch
+                        checked={sameOutfit}
+                        onCheckedChange={(on) =>
+                          update(linked.id, { refType: withSameOutfit(linked.refType, on) })
+                        }
+                      />
+                      같은 옷 선호
+                    </label>
+                  )}
+                  {!refRule.outfit && charRefFamily(linked.refType) === 'costume' && (
+                    <p className="text-[11px] text-faint">
+                      의상 레퍼런스는 지금 모델에 실리지 않습니다 (V5 전용)
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <p className="text-[12px] font-medium text-muted">
@@ -1043,7 +1066,7 @@ function CharRefLinkDialog({
                   </p>
                   <Slider
                     min={0}
-                    max={1}
+                    max={refRule.strengthMax}
                     step={0.05}
                     value={[linked.strength]}
                     onValueChange={([v]) =>
@@ -1051,20 +1074,23 @@ function CharRefLinkDialog({
                     }
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-[12px] font-medium text-muted">
-                    충실도 <span className="font-mono text-ink">{linked.fidelity.toFixed(2)}</span>
-                  </p>
-                  <Slider
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={[linked.fidelity]}
-                    onValueChange={([v]) =>
-                      update(linked.id, { fidelity: Math.round(v * 100) / 100 })
-                    }
-                  />
-                </div>
+                {refRule.fidelity && (
+                  <div className="space-y-1.5">
+                    <p className="text-[12px] font-medium text-muted">
+                      충실도{' '}
+                      <span className="font-mono text-ink">{linked.fidelity.toFixed(2)}</span>
+                    </p>
+                    <Slider
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={[linked.fidelity]}
+                      onValueChange={([v]) =>
+                        update(linked.id, { fidelity: Math.round(v * 100) / 100 })
+                      }
+                    />
+                  </div>
+                )}
                 <div className="flex-1" />
                 <Button
                   variant="ghost"

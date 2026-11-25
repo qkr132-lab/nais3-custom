@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { GenerationRequest } from '../src/shared/types'
 import { buildGenerateImagePayload, varietySigma } from '../src/main/nai/payload'
-import { MODEL_OPTIONS, effectiveNoiseSchedule, isV5, modelCaps } from '../src/shared/nai-models'
+import {
+  MODEL_OPTIONS,
+  effectiveNoiseSchedule,
+  isV5,
+  modelCaps,
+  sentModel
+} from '../src/shared/nai-models'
 
 /**
  * V5 대응 명세. 근거는 두 갈래다:
@@ -49,8 +55,9 @@ describe('모델 기능표', () => {
     // V5에서 빠진 것들
     expect(v5.variety).toBe(false)
     expect(v5.vibeTransfer).toBe(false)
-    expect(v5.characterReferences).toBe(false)
     expect(v5.noiseSchedule).toBe(false)
+    // 캐릭터 레퍼런스는 2026-11-25 에 V5 에도 열렸다 (세부 규칙은 tests/char-refs.test.ts)
+    expect(v5.characterReferences).toBe(true)
     // V5에서 생긴 것들
     expect(v5.transparency).toBe(true)
     expect(v5.opusUsageLimit).toBe(true)
@@ -59,6 +66,19 @@ describe('모델 기능표', () => {
   it('모르는 모델 id는 V4.5 기준으로 떨어진다 (구버전 예약·메타데이터 복원 대비)', () => {
     expect(modelCaps('nai-diffusion-3').maxCharacters).toBe(6)
     expect(modelCaps('').variety).toBe(true)
+  })
+
+  it('인페인트 짝 모델은 본 모델과 같은 기능표를 쓴다 (웹 기능표에서 같은 칸)', () => {
+    expect(modelCaps('nai-diffusion-5-full-inpainting')).toBe(modelCaps('nai-diffusion-5-full'))
+    expect(modelCaps('nai-diffusion-4-5-full-inpainting')).toBe(modelCaps('nai-diffusion-4-5-full'))
+    expect(modelCaps('nai-diffusion-4-5-curated-inpainting').vibeTransfer).toBe(true)
+    // 마스크가 있으면 짝 모델로 — V5 Curated 는 V4.5 Curated 인페인트
+    expect(sentModel('nai-diffusion-5-full', true)).toBe('nai-diffusion-5-full-inpainting')
+    expect(sentModel('nai-diffusion-5-curated', true)).toBe('nai-diffusion-4-5-curated-inpainting')
+    expect(sentModel('nai-diffusion-5-full', false)).toBe('nai-diffusion-5-full')
+    expect(sentModel('nai-diffusion-5-full-inpainting', true)).toBe(
+      'nai-diffusion-5-full-inpainting'
+    )
   })
 
   it('드롭다운 목록이 실제 API 모델 id를 쓴다', () => {
@@ -90,7 +110,7 @@ describe('V5 payload', () => {
     expect(params({ ...v5Request, noiseSchedule: 'exponential' }).noise_schedule).toBe('karras')
   })
 
-  it('V5에는 바이브·캐릭터 레퍼런스를 싣지 않는다 (미지원 — 보내면 거부)', () => {
+  it('V5에는 바이브를 싣지 않는다 (미지원) — 캐릭터 레퍼런스는 싣는다', () => {
     const opts = {
       vibes: [{ strength: 0.6, encodedVibeBase64: 'AAA' }],
       characterReferences: [
@@ -99,12 +119,39 @@ describe('V5 payload', () => {
     }
     const v5 = params(v5Request, opts)
     expect(v5.reference_strength_multiple).toBeUndefined()
-    expect(v5.director_reference_descriptions).toBeUndefined()
+    expect(v5.reference_image_multiple).toBeUndefined()
+    expect(v5.director_reference_descriptions).toBeDefined()
 
-    // V4.5는 기존대로 실린다
+    // V4.5는 기존대로 둘 다 실린다
     const v45 = params({ ...v5Request, model: 'nai-diffusion-4-5-full' }, opts)
     expect(v45.reference_strength_multiple).toEqual([0.6])
     expect(v45.director_reference_descriptions).toBeDefined()
+  })
+
+  it('V5 인페인트(짝 모델)도 V5 규칙으로 나간다 — 바이브·Variety+ 없음, karras 고정, straight_alpha', () => {
+    const inpaint = params(
+      {
+        ...v5Request,
+        model: 'nai-diffusion-5-full-inpainting',
+        variety: true,
+        noiseSchedule: 'exponential'
+      },
+      {
+        vibes: [{ strength: 0.6, encodedVibeBase64: 'AAA' }],
+        i2i: {
+          strength: 0.7,
+          noise: 0,
+          extraNoiseSeed: 1,
+          colorCorrect: false,
+          imageBase64: 'IMG',
+          maskBase64: 'MASK'
+        }
+      }
+    )
+    expect(inpaint.reference_strength_multiple).toBeUndefined()
+    expect(inpaint.skip_cfg_above_sigma).toBeNull()
+    expect(inpaint.noise_schedule).toBe('karras')
+    expect(inpaint.straight_alpha).toBe(true)
   })
 
   it('V5에만 tag_hint 계열을 추가로 보낸다', () => {

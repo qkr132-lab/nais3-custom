@@ -17,6 +17,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { estimateAnlas } from '@shared/anlas'
+import { countSentCharRefs } from '@shared/char-refs'
 import { modelCaps } from '@shared/nai-models'
 import { promptTokenLimit, promptTokenRequest } from '@shared/nai-tokens'
 import { requestForPromptMode } from '@shared/prompt-state'
@@ -151,12 +152,27 @@ export function PromptPanel(): React.JSX.Element {
         width: request.width,
         height: request.height,
         steps: request.steps,
-        charRefCount: enabledCrefs,
+        // 이 모델에 실제로 실리는 레퍼런스만 센다
+        // (V4.5 는 의상 레퍼런스가 빠지고, V5 인페인트에는 레퍼런스가 아예 안 실린다)
+        charRefCount: countSentCharRefs(
+          request.model,
+          crefItems.filter((c) => c.enabled),
+          !!source?.maskBase64
+        ),
         isOpus: subscriptionTier === 'opus',
         batchCount,
         unencodedVibes: 0 // 캐시 상태는 오버레이에서 확인 — 배지로만 안내
       }),
-    [request.width, request.height, request.steps, subscriptionTier, batchCount, enabledCrefs]
+    [
+      request.model,
+      request.width,
+      request.height,
+      request.steps,
+      subscriptionTier,
+      batchCount,
+      crefItems,
+      source
+    ]
   )
 
   // 예약 전체 예상 비용 (커스텀) — "다 뽑으면 얼마?"를 생성 전에 보여준다.
@@ -182,11 +198,16 @@ export function PromptPanel(): React.JSX.Element {
           ...(entry ? entry.characterIds : enabledCharIds)
         ])
         const linked = linkedCharRefIds(charIds)
-        const refCount = entry
-          ? new Set([...entry.charRefIds, ...(add?.charRefIds ?? []), ...linked]).size
-          : (add && add.charRefIds.length > 0) || linked.length > 0
-            ? new Set([...enabledCrefIds, ...(add?.charRefIds ?? []), ...linked]).size
-            : enabledCrefIds.length
+        const refIds = new Set([
+          ...(entry ? entry.charRefIds : enabledCrefIds),
+          ...(add?.charRefIds ?? []),
+          ...linked
+        ])
+        // 이 모델에 실제로 실리는 레퍼런스만 센다 (V4.5 는 의상 레퍼런스가 빠진다)
+        const refCount = countSentCharRefs(
+          request.model,
+          crefItems.filter((c) => refIds.has(c.id))
+        )
         const est = estimateAnlas({
           width: s.width,
           height: s.height,
@@ -208,6 +229,7 @@ export function PromptPanel(): React.JSX.Element {
     additionsEnabled,
     additions,
     activePresetId,
+    request.model,
     request.steps,
     subscriptionTier,
     crefItems,

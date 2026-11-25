@@ -1,7 +1,8 @@
 import { readFileSync } from 'fs'
-import sharp from 'sharp'
 import type { CharacterReferenceOptions, VibeOptions } from '../nai/payload'
 import { ENDPOINTS } from '../nai/endpoints'
+import { charRefRule, sentCharRefType } from '../../shared/char-refs'
+import { processCharRefImage } from './charref-image'
 import { enabledCharRefRows, enabledVibeRows, saveVibeEncoding } from './repo'
 
 /** 지금 인코딩 중인 바이브 (바이브 id + 정보 추출값 → 진행 중 요청).
@@ -72,34 +73,26 @@ export async function prepareVibes(
 }
 
 /**
- * 캐릭레퍼 이미지 전처리 — OpenAPI 명세: 1024×1536 / 1536×1024 / 1472×1472
- * 캔버스에 검정 패딩으로 맞춰 전송. 종횡비에 따라 캔버스 선택.
+ * 생성 직전 캐릭레퍼 준비. 이 모델에 실리지 않는 레퍼런스(인페인트 제외·의상 미지원)는
+ * 그림을 읽지도 않는다 — 유형·충실도를 모델에 맞추는 것은 payload 가 같은 규칙으로 한다.
  */
-async function processCharRefImage(filePath: string): Promise<string> {
-  const buf = readFileSync(filePath)
-  const meta = await sharp(buf).metadata()
-  const w = meta.width ?? 1
-  const h = meta.height ?? 1
-  const ratio = w / h
-  const canvas =
-    ratio > 1.2 ? { w: 1536, h: 1024 } : ratio < 1 / 1.2 ? { w: 1024, h: 1536 } : { w: 1472, h: 1472 }
-
-  const png = await sharp(buf)
-    .resize(canvas.w, canvas.h, { fit: 'contain', background: { r: 0, g: 0, b: 0 } })
-    .png()
-    .toBuffer()
-  return png.toString('base64')
-}
-
-export async function prepareCharRefs(ids?: number[]): Promise<CharacterReferenceOptions[]> {
-  const rows = enabledCharRefRows(ids)
+export async function prepareCharRefs(
+  ids: number[] | undefined,
+  model: string,
+  hasMask: boolean
+): Promise<CharacterReferenceOptions[]> {
+  const rule = charRefRule(model, hasMask)
+  if (!rule.send) return []
   const result: CharacterReferenceOptions[] = []
-  for (const row of rows) {
+  for (const row of enabledCharRefRows(ids)) {
+    if (sentCharRefType(rule, row.refType) === null) continue
     result.push({
       referenceType: row.refType as CharacterReferenceOptions['referenceType'],
       strength: row.strength,
       fidelity: row.fidelity,
-      imageBase64: await processCharRefImage(row.filePath)
+      imageBase64: (await processCharRefImage(readFileSync(row.filePath), rule.image)).toString(
+        'base64'
+      )
     })
   }
   return result

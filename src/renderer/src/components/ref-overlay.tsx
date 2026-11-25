@@ -13,8 +13,16 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CharRefItem, CharRefType, VibeItem } from '@shared/types'
+import {
+  charRefFamily,
+  charRefRule,
+  prefersSameOutfit,
+  withSameOutfit,
+  type CharRefRule
+} from '@shared/char-refs'
 import { cn } from '../lib/utils'
 import { buildDisplayRows } from '../lib/folder-list'
+import { useGenerationStore } from '../stores/generation-store'
 import { CHARREF_TYPES, refsStoreFor } from '../stores/refs-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
@@ -45,6 +53,9 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
   const setFolderColor = store((s) => s.setFolderColor)
   const removeFolder = store((s) => s.removeFolder)
   const move = store((s) => s.move)
+  // 강도 상한·충실도·의상 유형은 지금 고른 모델을 따른다 (V5: 강도 5까지·충실도 없음·같은 옷 선호)
+  const model = useGenerationStore((s) => s.request.model)
+  const refRule = useMemo(() => charRefRule(model), [model])
 
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -150,19 +161,32 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
     if (ids.length === 0) return
     const patch: Record<string, unknown> = {}
     if (apply.enabled) patch.enabled = batchEnabled // 켜기/끄기는 두 종류 공통
+    // 유형을 바꿀 항목 — 이미 같은 묶음이면 「같은 옷 선호」로 갈린 값을 지킨다
+    // (유형 칸에서 같은 유형을 다시 골라도 값이 안 바뀌는 것과 같게)
+    let retype: number[] = []
     if (kind === 'charref') {
-      if (apply.type) patch.refType = batchType
+      if (apply.type) {
+        retype = ids.filter((id) => {
+          const item = byId.get(id) as CharRefItem | undefined
+          return !item || charRefFamily(item.refType) !== batchType
+        })
+      }
       if (apply.strength) patch.strength = batchStrength
-      if (apply.fidelity) patch.fidelity = batchFidelity
+      if (apply.fidelity && refRule.fidelity) patch.fidelity = batchFidelity
     } else {
       if (apply.strength) patch.strength = batchStrength
       if (apply.info) patch.infoExtracted = batchInfo
     }
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(patch).length === 0 && !(kind === 'charref' && apply.type)) {
       toast('적용할 항목을 하나 이상 켜주세요', 'error')
       return
     }
-    bulkUpdate(ids, patch)
+    const retypeSet = new Set(retype)
+    bulkUpdate(retype, { ...patch, refType: batchType })
+    bulkUpdate(
+      ids.filter((id) => !retypeSet.has(id)),
+      patch
+    )
     toast(`${ids.length}개에 적용됨`, 'success')
   }
 
@@ -278,7 +302,7 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
         {/* 타입 빠른 편집 (캐릭레퍼) — 펼치지 않고도 바로 변경 / 바이브는 강도 표시 */}
         {kind === 'charref' ? (
           <Select
-            value={(item as CharRefItem).refType}
+            value={charRefFamily((item as CharRefItem).refType)}
             onValueChange={(v) => update(item.id, { refType: v as CharRefType })}
           >
             <SelectTrigger
@@ -332,7 +356,7 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
         {kind === 'vibe' ? (
           <VibeParams item={item as VibeItem} update={update} />
         ) : (
-          <CharRefParams item={item as CharRefItem} update={update} />
+          <CharRefParams item={item as CharRefItem} update={update} rule={refRule} />
         )}
       </div>
     )
@@ -514,26 +538,28 @@ export function RefOverlay({ kind }: { kind: 'vibe' | 'charref' }): React.JSX.El
             >
               <Slider
                 min={0}
-                max={1}
+                max={kind === 'charref' ? refRule.strengthMax : 1}
                 step={0.05}
                 value={[batchStrength]}
                 onValueChange={([v]) => setBatchStrength(Math.round(v * 100) / 100)}
               />
             </BatchRow>
             {kind === 'charref' ? (
-              <BatchRow
-                on={apply.fidelity}
-                toggle={() => setApply((a) => ({ ...a, fidelity: !a.fidelity }))}
-                label={`충실도 ${batchFidelity.toFixed(2)}`}
-              >
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={[batchFidelity]}
-                  onValueChange={([v]) => setBatchFidelity(Math.round(v * 100) / 100)}
-                />
-              </BatchRow>
+              refRule.fidelity && (
+                <BatchRow
+                  on={apply.fidelity}
+                  toggle={() => setApply((a) => ({ ...a, fidelity: !a.fidelity }))}
+                  label={`충실도 ${batchFidelity.toFixed(2)}`}
+                >
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[batchFidelity]}
+                    onValueChange={([v]) => setBatchFidelity(Math.round(v * 100) / 100)}
+                  />
+                </BatchRow>
+              )
             ) : (
               <BatchRow
                 on={apply.info}
@@ -645,15 +671,19 @@ function VibeParams({
 
 function CharRefParams({
   item,
-  update
+  update,
+  rule
 }: {
   item: CharRefItem
   update: (id: number, patch: Record<string, unknown>) => void
+  rule: CharRefRule
 }): React.JSX.Element {
+  const family = charRefFamily(item.refType)
+  const sameOutfit = prefersSameOutfit(item.refType)
   return (
     <div className="flex flex-col gap-1.5">
       <ParamRow label="타입">
-        <Select value={item.refType} onValueChange={(v) => update(item.id, { refType: v as CharRefType })}>
+        <Select value={family} onValueChange={(v) => update(item.id, { refType: v as CharRefType })}>
           <SelectTrigger className="h-7 flex-1 text-[12px]">
             <SelectValue />
           </SelectTrigger>
@@ -666,24 +696,40 @@ function CharRefParams({
           </SelectContent>
         </Select>
       </ParamRow>
+      {rule.outfit && sameOutfit !== null && (
+        <ParamRow label="같은 옷">
+          <Switch
+            checked={sameOutfit}
+            onCheckedChange={(on) => update(item.id, { refType: withSameOutfit(item.refType, on) })}
+          />
+          <span className="text-[11.5px] text-muted">같은 옷 선호</span>
+        </ParamRow>
+      )}
+      {!rule.outfit && family === 'costume' && (
+        <p className="text-[10.5px] text-faint">
+          의상 레퍼런스는 지금 모델에 실리지 않습니다 (V5 전용)
+        </p>
+      )}
       <ParamRow label={`강도 ${item.strength.toFixed(2)}`}>
         <Slider
           min={0}
-          max={1}
+          max={rule.strengthMax}
           step={0.05}
           value={[item.strength]}
           onValueChange={([v]) => update(item.id, { strength: Math.round(v * 100) / 100 })}
         />
       </ParamRow>
-      <ParamRow label={`충실도 ${item.fidelity.toFixed(2)}`}>
-        <Slider
-          min={0}
-          max={1}
-          step={0.05}
-          value={[item.fidelity]}
-          onValueChange={([v]) => update(item.id, { fidelity: Math.round(v * 100) / 100 })}
-        />
-      </ParamRow>
+      {rule.fidelity && (
+        <ParamRow label={`충실도 ${item.fidelity.toFixed(2)}`}>
+          <Slider
+            min={0}
+            max={1}
+            step={0.05}
+            value={[item.fidelity]}
+            onValueChange={([v]) => update(item.id, { fidelity: Math.round(v * 100) / 100 })}
+          />
+        </ParamRow>
+      )}
     </div>
   )
 }

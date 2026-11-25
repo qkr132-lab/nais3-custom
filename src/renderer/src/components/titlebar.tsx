@@ -18,6 +18,7 @@ import { useUpdateStore } from '../stores/update-store'
 import { keepOpenWhileBusy } from '../stores/refill-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { estimateAnlas } from '@shared/anlas'
+import { countSentCharRefs } from '@shared/char-refs'
 import type { OpusUsage } from '@shared/types'
 import {
   formatUsagePercent,
@@ -214,7 +215,16 @@ export function Titlebar(): React.JSX.Element {
   const request = useGenerationStore((s) => s.request)
   const batchCount = useGenerationStore((s) => s.batchCount)
   const tier = useGenerationStore((s) => s.subscriptionTier)
-  const enabledCrefs = useCharRefsStore((s) => s.items.filter((c) => c.enabled).length)
+  // i2i·인페인트 원본은 요청이 아니라 스토어의 source 에 있다 (요청의 source 는 저장할 때 지운다)
+  const source = useGenerationStore((s) => s.source)
+  // 이 모델·요청에 실제로 실리는 레퍼런스만 센다 (V4.5 의상 레퍼런스·V5 인페인트는 빠진다)
+  const enabledCrefs = useCharRefsStore((s) =>
+    countSentCharRefs(
+      request.model,
+      s.items.filter((c) => c.enabled),
+      !!source?.maskBase64
+    )
+  )
   const unencodedVibes = useVibesStore(
     (s) => s.items.filter((v) => v.enabled && !v.encodedReady).length
   )
@@ -225,7 +235,7 @@ export function Titlebar(): React.JSX.Element {
     width: request.width,
     height: request.height,
     steps: request.steps,
-    strength: request.source ? (request.i2iStrength ?? 0.7) : 1,
+    strength: source ? (request.i2iStrength ?? 0.7) : 1,
     charRefCount: enabledCrefs,
     isOpus: tier === 'opus',
     batchCount,
