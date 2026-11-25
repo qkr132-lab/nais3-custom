@@ -143,14 +143,12 @@ export function FutaCharBadges({
   notes: BodyNote[]
   futa?: boolean
 }): React.JSX.Element | null {
-  // 카드 태그 씬 맞춤 메모는 「카드 맞춤」 배지 하나로 (몸·후타 배지와 따로 센다)
-  const fit = notes.filter(isFitNote)
+  // 카드 태그 씬 맞춤 메모는 배지로 달지 않는다 (몸·후타 배지에도 섞지 않는다)
   const badge = bodyCharBadge(
     notes.filter((n) => !isFitNote(n)),
     futa
   )
-  const fitTitle = fit.length ? ['카드 맞춤', ...fit.map(bodyNoteLine)].join('\n') : ''
-  if (!badge.title && !futa && !fitTitle) return null
+  if (!badge.title && !futa) return null
   const item = (
     id: 'futa' | 'pink' | 'eyes' | BodyKind,
     text: string,
@@ -179,18 +177,6 @@ export function FutaCharBadges({
       )}
       {badge.pink && !badge.futa && item('pink', 'pink nipples', 'ok')}
       {badge.eyes && item('eyes', eyeBadgeLabel(badge.eyeCause), 'ok')}
-      {fitTitle && (
-        <span
-          key="fit"
-          data-body-badge="fit"
-          tabIndex={0}
-          aria-label={fitTitle.replace(/\n/g, '. ')}
-          className={cn('text-[10px]', TONE_TEXT.ok)}
-          title={fitTitle}
-        >
-          카드 맞춤
-        </span>
-      )}
     </span>
   )
 }
@@ -332,103 +318,6 @@ export function BodyBlock({
               .
             </p>
           )}
-        </div>
-      )}
-    </section>
-  )
-}
-
-const FIT_OPEN_KEY = 'scene_card_fit_open'
-
-/**
- * 씬 상세의 접이식 「카드 맞춤」 블록 (커스텀) — 카드 태그 씬 맞춤이 뺀 것·가중치를 푼 것·더한 것·예외로 둔 것.
- * 접어도 한 줄 요약(뺌 4 · 바꿈 1 · 안 바꿈 1)이 보이고, 펴면 카드·태그마다 근거와 규칙 이름이 나온다.
- * 메모가 없으면 아무것도 그리지 않는다. rounds 는 큐 반복 회차마다의 메모.
- */
-export function CardFitBlock({
-  rounds
-}: {
-  rounds: { label: string; notes: BodyNote[] }[]
-}): React.JSX.Element | null {
-  const [saved, setSaved] = useState<boolean | null>(() => {
-    try {
-      const v = localStorage.getItem(FIT_OPEN_KEY)
-      return v === '1' ? true : v === '0' ? false : null
-    } catch {
-      return null
-    }
-  })
-  const bodyId = useId()
-  // 회차끼리 같으면 한 번만
-  const keyOf = (notes: BodyNote[]): string => JSON.stringify(notes.map(bodyNoteLine))
-  const groups: { label: string | null; notes: BodyNote[] }[] = []
-  for (const r of rounds) {
-    if (!groups.some((g) => keyOf(g.notes) === keyOf(r.notes)))
-      groups.push({ label: r.label, notes: r.notes })
-  }
-  const all = groups.flatMap((g) => g.notes)
-  if (!all.length) return null
-  const single = groups.length === 1
-  const count = (kind: BodyKind): number => all.filter((n) => n.kind === kind).length
-  const parts = (['removed', 'replaced', 'added', 'kept'] as BodyKind[])
-    .map((k) => ({ k, n: count(k) }))
-    .filter((p) => p.n > 0)
-  const open = saved ?? true
-  const toggle = (): void => {
-    const next = !open
-    setSaved(next)
-    try {
-      localStorage.setItem(FIT_OPEN_KEY, next ? '1' : '0')
-    } catch {
-      // 저장이 막혀도 이 화면에서는 펴고 접힌다
-    }
-  }
-  return (
-    <section data-testid="card-fit-block" className="rounded-lg border border-line bg-surface-2/40">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={open ? bodyId : undefined}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px]"
-        onClick={toggle}
-      >
-        <ChevronRight
-          size={13}
-          className={cn('shrink-0 transition-transform', open && 'rotate-90')}
-        />
-        <span className="shrink-0 font-medium">카드 맞춤</span>
-        <span className="min-w-0 flex-1 text-[11.5px] text-muted">
-          {parts.map((p, i) => (
-            <span key={p.k}>
-              {i > 0 && ' · '}
-              <span className={p.k === 'kept' ? undefined : TONE_TEXT[KIND_META[p.k].tone]}>
-                {KIND_META[p.k].label} {p.n}
-              </span>
-            </span>
-          ))}
-          {!single && ' · 회차마다 다름'}
-        </span>
-      </button>
-      {open && (
-        <div id={bodyId} className="flex flex-col gap-2 border-t border-line px-2.5 py-2">
-          {groups.map((g, gi) => (
-            <div key={g.label ?? gi} className="flex flex-col gap-1.5">
-              {!single && g.label && (
-                <p className="text-[11.5px] font-medium text-muted">{g.label}</p>
-              )}
-              {g.notes.length ? (
-                <BodyNoteRows notes={g.notes} />
-              ) : (
-                <p className="text-[11.5px] text-muted">이 회차는 바꾼 것이 없습니다.</p>
-              )}
-            </div>
-          ))}
-          <p className="text-[11px] text-muted">
-            장면 태그와 부딪히는 카드·입은 복장 태그를 보낼 때만 빼거나 가중치를 풀었고, 카드(캐릭터
-            탭)의 글은 그대로입니다. 위의 「카드 맞춤」 버튼(따름·켬·끔)으로 이 씬만, 세트 메뉴로
-            세트를, 설정의 「카드 태그 씬 맞춤」으로 전체를 끕니다. 규칙은 설정의 「규칙표 열기」로
-            고칩니다.
-          </p>
         </div>
       )}
     </section>

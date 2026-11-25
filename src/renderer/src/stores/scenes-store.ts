@@ -312,7 +312,7 @@ export function buildSceneRequest(
   // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
   const eyesOn = useOutfitsStore.getState().eyesClosedStrip
   const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
-  // 카드 태그 씬 맞춤 (커스텀) — 씬에서 정한 값 > 세트 > 전체 설정(기본 꺼짐). 규칙표가 깨졌으면(rules null) 아무것도 고치지 않는다.
+  // 카드 태그 씬 맞춤 (커스텀) — 전체 설정(기본 꺼짐)이 꺼져 있으면 끔, 켜져 있으면 예전에 씬·세트에 정해 둔 값을 따른다. 규칙표가 깨졌으면(rules null) 아무것도 고치지 않는다.
   // 배경 카드는 인물이 없어 쓰지 않는다. 꺼져 있으면 카드 글을 읽지 않아 이 기능이 없던 때와 글자 단위로 같다
   const fitState = useCardFitStore.getState()
   const fitRules = fitState.rules

@@ -116,7 +116,7 @@ const prompts = (r: GenerationRequest): string[] => r.characterPrompts.map((c) =
 const fitNotes = (r: GenerationRequest): NonNullable<GenerationRequest['bodyNotes']> =>
   (r.bodyNotes ?? []).filter((n) => n.topic === 'fit')
 
-describe('켜고 끄기 — 씬 > 세트 > 전체 설정', () => {
+describe('켜고 끄기 — 전체 설정이 꺼져 있으면 끔, 켜져 있으면 씬 > 세트', () => {
   beforeEach(() => setup())
 
   it('전체 설정 켬: 감은 눈 씬에서 당하는쪽 눈매·눈 색이 빠지고 메모가 남는다', () => {
@@ -152,11 +152,12 @@ describe('켜고 끄기 — 씬 > 세트 > 전체 설정', () => {
     expect(prompts(other)[0]).toContain('tsurime')
   })
 
-  it('전체 설정을 꺼도 씬에서 켠 씬은 켜진다', () => {
+  it('전체 설정을 끄면 씬·세트에서 켜 둔 곳도 꺼진다 — 끄는 곳은 설정 창 하나', () => {
     setup({ fit: false })
-    useSceneExtrasStore.setState({ cardFits: { 1: { 4: true } } })
+    useSceneExtrasStore.setState({ cardFits: { 1: { 4: true } }, cardFitPresets: { 1: true } })
     const r = buildSceneRequest(sceneOf({ targetTags: 'closed eyes' }))
-    expect(prompts(r)[0]).not.toContain('tsurime')
+    expect(prompts(r)).toEqual([`${GIRL_CARD}, closed eyes`, BOY_CARD])
+    expect(r.bodyNotes).toBeUndefined()
   })
 })
 
@@ -170,9 +171,9 @@ describe('규칙 — 실제 조립 경로', () => {
     )
   })
 
-  it('뒷모습: 씬 전체 글의 from behind 는 당하는쪽 앞면 태그를 뺀다 (하는쪽 카드는 그대로)', () => {
+  it('뒷모습: from behind 라고 카드 태그를 빼지 않는다', () => {
     const r = buildSceneRequest(sceneOf({ prompt: 'from behind, doggystyle' }))
-    expect(prompts(r)[0]).toBe('1girl, 1.4::yellow eyes::, tsurime, white bandeau, loincloth')
+    expect(prompts(r)).toEqual([GIRL_CARD, BOY_CARD])
   })
 
   it('pov: 하는쪽 머리·눈을 빼고 몸은 남긴다', () => {

@@ -146,7 +146,7 @@ export const isEyeCountId = (id: string): id is EyeCountId =>
 export const isFutaNote = (n: BodyNote): boolean =>
   !isPinkNote(n) && !isEyeNote(n) && !isFitNote(n) && !BODY_ATTENTION.has(n.kind)
 
-/** 카드 태그 씬 맞춤의 메모인가 — 「몸·후타」와 따로 「카드 맞춤」 블록에 보인다 */
+/** 카드 태그 씬 맞춤의 메모인가 — 「몸·후타」 블록·배지에 섞지 않으려고 가른다 (화면에 따로 보이지는 않는다) */
 export const isFitNote = (n: BodyNote): boolean => n.topic === 'fit'
 
 /**

@@ -4,18 +4,7 @@ import { normalizeBackground } from '@shared/background-tags'
 import { promptTokenRequest } from '@shared/nai-tokens'
 import { nudeStripLabel, nudeStripOn, nudeStripTitle } from '@shared/nude-strip'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
-import {
-  ArrowLeft,
-  ImageOff,
-  Loader2,
-  Minus,
-  Play,
-  Plus,
-  Shirt,
-  Star,
-  Trash2,
-  Wand2
-} from 'lucide-react'
+import { ArrowLeft, ImageOff, Loader2, Minus, Play, Plus, Shirt, Star, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
@@ -25,10 +14,8 @@ import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
 import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useCharactersStore } from '../stores/characters-store'
-import { cardFitFor, useSceneExtrasStore } from '../stores/scene-extras-store'
+import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useCardFitStore } from '../stores/card-fit-store'
-import { CardFitMenu } from './card-fit-menu'
-import { cardFitLabel } from '../lib/card-fit-choice'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm } from '../stores/dialog-store'
@@ -39,7 +26,7 @@ import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
 import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
 import { futaCardsOff, isFitNote } from '../lib/body-notes'
-import { BodyBlock, CardFitBlock } from './body-notes'
+import { BodyBlock } from './body-notes'
 import { ExposeBlock } from './expose-notes'
 import { ImageContextMenu } from './image-context-menu'
 import { Lightbox } from './lightbox'
@@ -92,12 +79,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   // 카드 태그 씬 맞춤 (커스텀) — 씬 값 > 세트 값 > 전체 설정. 규칙표가 바뀌어도(version) 미리보기를 다시 계산
   const cardFitGlobal = useCardFitStore((s) => s.enabled)
   const cardFitVersion = useCardFitStore((s) => s.version)
-  const cardFitRulesReady = useCardFitStore((s) => !!s.rules)
   const cardFitOverride = useSceneExtrasStore((s) => s.cardFits[scene.presetId]?.[scene.id])
   const cardFitPreset = useSceneExtrasStore((s) => s.cardFitPresets[scene.presetId])
-  const setSceneCardFit = useSceneExtrasStore((s) => s.setSceneCardFit)
-  const cardFitInherited = cardFitPreset ?? cardFitGlobal
-  const cardFitEffective = cardFitFor(scene.presetId, scene.id, cardFitGlobal)
   useEffect(() => {
     if (stripOnNude) void useOutfitsStore.getState().ensureKinds(charItems.map((c) => c.prompt))
   }, [stripOnNude, charItems])
@@ -194,17 +177,13 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     notes: round.exposeNotes ?? []
   }))
   // 회차마다 바꾸고 더한 몸·후타 메모 (없으면 블록을 그리지 않는다)
-  // 카드 맞춤 메모(topic fit)는 「몸·후타」와 따로 「카드 맞춤」 블록에
+  // 카드 맞춤 메모(topic fit)는 「몸·후타」 블록에 섞지 않는다 (화면에 따로 보이지도 않는다)
   const bodyRounds = tokenRounds.map(({ label, request: round }) => ({
     label,
     notes: (round.bodyNotes ?? []).filter((n) => !isFitNote(n)),
     futa: round.futaPlan?.counts.futa,
     // 재조립을 꺼 둔 채 후타 카드가 그려지면 껐다는 것을 알린다 (요청은 건드리지 않는다)
     futaOff: futaReassembly ? undefined : futaCardsOff(round.characterPrompts)
-  }))
-  const fitRounds = tokenRounds.map(({ label, request: round }) => ({
-    label,
-    notes: (round.bodyNotes ?? []).filter(isFitNote)
   }))
   const tokenPreview = usePromptTokens('tokens:preview', {
     requests: tokenRounds.map(({ request: round }) => promptTokenRequest(round))
@@ -320,32 +299,6 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             <Shirt size={13} /> 옷 벗기기 · {nudeStripLabel(nudeStripOverride)}
           </Button>
         </NudeStripMenu>
-        {/* 카드 태그 씬 맞춤 (커스텀) — 누르면 메뉴: 따름(세트 → 설정 창) / 켬 / 끔 (이 씬만) */}
-        <CardFitMenu
-          current={cardFitOverride}
-          level="scene"
-          inherited={cardFitInherited}
-          onPick={(value) => setSceneCardFit(scene.presetId, [scene.id], value)}
-        >
-          <Button
-            size="sm"
-            variant={cardFitEffective.on && cardFitRulesReady ? 'accent' : 'ghost'}
-            className="gap-1"
-            title={
-              !cardFitRulesReady
-                ? '카드 맞춤: 규칙표 오류 — 설정 창에서 확인 (지금은 카드를 고치지 않음)'
-                : `카드 맞춤: 지금 ${cardFitEffective.on ? '켬' : '끔'} (${
-                    cardFitEffective.where === 'scene'
-                      ? '이 씬에서 정함'
-                      : cardFitEffective.where === 'preset'
-                        ? '세트에서 정함'
-                        : '설정 창 따름'
-                  }) · 뺀 것은 아래 「카드 맞춤」에서 확인`
-            }
-          >
-            <Wand2 size={13} /> 카드 맞춤 · {cardFitLabel(cardFitOverride)}
-          </Button>
-        </CardFitMenu>
         {/* 생성 — 메인 "씬 생성"과 동일한 예약 생성 흐름 (예약 0이면 이 씬 1개 예약 후) */}
         <Button
           size="sm"
@@ -451,8 +404,6 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           {!isBackground && <ExposeBlock rounds={exposeRounds} enabled={exposeWorn} />}
           {/* 몸·후타 자동 재조립 (커스텀) — 바꾼 것·더한 것·안 바꾼 것을 이전 → 이후로 보인다 (후타·알몸이 없으면 안 그린다) */}
           {!isBackground && <BodyBlock rounds={bodyRounds} />}
-          {/* 카드 태그 씬 맞춤 (커스텀) — 장면과 부딪혀 뺀 카드 태그·가중치 푼 것·예외로 둔 것 (없으면 안 그린다) */}
-          {!isBackground && <CardFitBlock rounds={fitRounds} />}
         </div>
 
         <div className="mt-4 mb-2 flex items-center gap-2 text-[12px] text-muted">

@@ -161,22 +161,13 @@ describe('얼굴 안 보임', () => {
 })
 
 describe('뒷모습', () => {
-  it('from behind → 앞면 태그를 뺀다', () => {
+  it('from behind 라고 카드 태그를 빼지 않는다 (기본표에 뒷모습 규칙 없음)', () => {
     const r = fit({
       card: GIRL,
       texts: { scene: ['from behind, doggystyle'], source: '', target: '', own: [] }
     })
-    expect(r.card).not.toMatch(/cleavage|navel|midriff/)
-    expect(r.card).toContain('strapless, bandeau')
-  })
-
-  it('looking back 이 있으면 그대로 두고 「안 바꿈」으로 알린다', () => {
-    const r = fit({
-      card: GIRL,
-      texts: { scene: ['from behind'], source: '', target: 'looking back', own: [] }
-    })
-    expect(r.card).toContain('cleavage')
-    expect(r.notes.some((n) => n.kind === 'kept' && n.reason.includes('예외'))).toBe(true)
+    expect(r.card).toBe(GIRL)
+    expect(r.notes).toEqual([])
   })
 })
 
@@ -242,11 +233,11 @@ describe('같은 갈래는 씬이 이김', () => {
 })
 
 describe('복장도 같은 규칙으로', () => {
-  it('입은 복장의 앞면 태그도 뺀다', () => {
+  it('입은 복장의 눈 태그도 뺀다', () => {
     const r = fit({
       card: '1girl',
-      outfit: 'crop top, midriff, navel',
-      texts: { scene: ['from behind'], source: '', target: '', own: [] }
+      outfit: 'crop top, tsurime, blue eyes',
+      texts: { scene: ['closed eyes'], source: '', target: '', own: [] }
     })
     expect(r.outfit).toBe('crop top')
     expect(r.notes.some((n) => n.reason.startsWith('복장 · '))).toBe(true)

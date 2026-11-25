@@ -295,14 +295,18 @@ function readCardFitPresets(raw: unknown): Record<number, boolean> {
 }
 
 /**
- * 이 씬에서 카드 태그 씬 맞춤을 쓰는가 — 씬에서 정한 값 > 세트에서 정한 값 > 전체 설정 (커스텀).
- * where = 어느 단계가 정했는지 (화면 설명용)
+ * 이 씬에서 카드 태그 씬 맞춤을 쓰는가 (커스텀).
+ * 전체 설정이 꺼져 있으면 어디서도 쓰지 않는다 — 씬·세트에서 고르는 화면을 없앴으므로(1.32.1)
+ * 설정 창의 스위치가 끄는 곳의 전부다. 1.32.0 에서 「켬」으로 정해 둔 씬·세트도 함께 꺼진다.
+ * 켜져 있으면 1.32.0 에서 정해 둔 값을 그대로 따른다: 씬에서 정한 값 > 세트에서 정한 값 > 켬.
+ * where = 어느 단계가 정했는지
  */
 export function cardFitFor(
   presetId: number,
   sceneId: number,
   globalOn: boolean
 ): { on: boolean; where: 'scene' | 'preset' | 'global' } {
+  if (!globalOn) return { on: false, where: 'global' }
   const s = useSceneExtrasStore.getState()
   const scene = s.cardFits[presetId]?.[sceneId]
   if (scene !== undefined) return { on: scene, where: 'scene' }

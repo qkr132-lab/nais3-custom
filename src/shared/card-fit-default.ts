@@ -2,8 +2,9 @@ import type { CardFitRuleFile } from './card-fit'
 
 /**
  * 카드 태그 씬 맞춤의 기본 규칙표 (커스텀) — 규칙표 파일(%APPDATA%\NAIS3 Custom\card-fit-rules.json)이 없을 때 이대로 써 둔다.
- * 사용자가 파일을 고치면 파일이 이긴다. 기본으로 켜 둔 것: 눈 표현·얼굴 안 보임·뒷모습·같은 갈래는 씬이 이김·실루엣·pov 하는쪽 얼굴·알몸이면 옷 벗기기,
+ * 사용자가 파일을 고치면 파일이 이긴다. 기본으로 켜 둔 것: 눈 표현·얼굴 안 보임·같은 갈래는 씬이 이김·실루엣·pov 하는쪽 얼굴·알몸이면 옷 벗기기,
  * 눈이 보이는 일그러진 눈(rolling eyes 등)은 눈 색 가중치만 푼다. 「씬이 누른 태그」는 제안이라 꺼 둔다.
+ * 뒷모습(from behind)이라고 앞면 태그(cleavage·navel …)를 빼는 규칙은 넣지 않는다 — 뒷모습 씬에서도 카드의 앞면 태그는 그대로 보낸다.
  */
 export const DEFAULT_CARD_FIT_RULES: CardFitRuleFile = {
   설명: [
@@ -251,17 +252,6 @@ export const DEFAULT_CARD_FIT_RULES: CardFitRuleFile = {
       'faceless female',
       'faceless male'
     ],
-    뒷모습: ['from behind', 'facing away', 'back focus'],
-    '뒷모습 예외': ['looking back', 'looking over shoulder'],
-    앞면: [
-      'cleavage',
-      'navel',
-      'midriff',
-      'collarbone',
-      'underboob',
-      'navel piercing',
-      'cleavage cutout'
-    ],
     시점: ['pov', 'pov crotch', 'pov hands', 'male pov', 'first-person view'],
     '머리 색': [
       'blonde hair',
@@ -415,13 +405,6 @@ export const DEFAULT_CARD_FIT_RULES: CardFitRuleFile = {
         '@눈 묘사 문장',
         '@얼굴 묘사 문장'
       ]
-    },
-    {
-      이름: '뒷모습 → 앞면 태그 빼기',
-      설명: 'from behind 면 cleavage·navel·midriff 처럼 앞에서만 보이는 카드 태그를 뺀다 (looking back 이 있으면 그대로)',
-      근거: ['@뒷모습'],
-      예외: ['@뒷모습 예외'],
-      빼기: ['@앞면']
     },
     {
       이름: 'pov → 하는쪽 얼굴·머리 빼기',

@@ -41,7 +41,6 @@ import {
   SlidersHorizontal,
   ShieldCheck,
   Shirt,
-  Wand2,
   Sparkles,
   Star,
   Trash2,
@@ -115,9 +114,6 @@ import { useDragScroll, useIsPortraitMode } from '../lib/drag-scroll'
 import { ResolutionPicker } from './resolution-picker'
 import { R2SyncDialog } from './r2-sync-dialog'
 import { NudeStripMenu } from './nude-strip-menu'
-import { CardFitMenu } from './card-fit-menu'
-import { cardFitLabel, type CardFitChoice } from '../lib/card-fit-choice'
-import { useCardFitStore } from '../stores/card-fit-store'
 import { SceneDetail } from './scene-detail'
 import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
@@ -196,10 +192,6 @@ function PresetDropdown(): React.JSX.Element {
   const reorderPresets = useScenesStore((s) => s.reorderPresets)
   const duplicatePreset = useScenesStore((s) => s.duplicatePreset)
   const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
-  // 카드 태그 씬 맞춤 — 세트별 값 (커스텀 · 없으면 설정 창의 전체 설정)
-  const cardFitPresets = useSceneExtrasStore((s) => s.cardFitPresets)
-  const setPresetCardFit = useSceneExtrasStore((s) => s.setPresetCardFit)
-  const cardFitGlobal = useCardFitStore((s) => s.enabled)
   const [open, setOpen] = useState(false)
   const [folderCat, setFolderCat] = useState<'전체' | '단독' | '남캐' | '여캐' | '후타×후타' | '기타'>('전체')
   const presetScrollRef = useRef<HTMLDivElement>(null)
@@ -484,25 +476,6 @@ function PresetDropdown(): React.JSX.Element {
             >
               <Cloud size={14} /> 클플 즐겨찾기 동기화…
             </button>
-          )}
-          {/* 카드 태그 씬 맞춤 — 이 세트의 씬 전부 (씬에서 따로 정한 씬은 그 값이 이긴다) */}
-          {active && active.kind !== 'background' && (
-            <CardFitMenu
-              current={cardFitPresets[active.id]}
-              level="preset"
-              inherited={cardFitGlobal}
-              onPick={(value) => {
-                setPresetCardFit(active.id, value)
-                toast(`「${active.name}」 세트: 카드 맞춤 · ${cardFitLabel(value)}`, 'success')
-              }}
-            >
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted hover:bg-surface-2 hover:text-ink"
-                title="이 세트 씬들의 카드 태그 씬 맞춤 — 따름(설정 창) · 켬 · 끔 · 씬에서 따로 정한 씬은 그 값을 씀"
-              >
-                <Wand2 size={14} /> 카드 맞춤 (이 세트) · {cardFitLabel(cardFitPresets[active.id])}
-              </button>
-            </CardFitMenu>
           )}
           <div className="my-1 h-px bg-line" />
           <button
@@ -2004,11 +1977,6 @@ function BulkBar({
   const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
   const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
   const globalStripOnNude = useOutfitsStore((s) => s.stripOnNude)
-  const setSceneCardFit = useSceneExtrasStore((s) => s.setSceneCardFit)
-  const bulkCardFitInherited = useSceneExtrasStore((s) =>
-    activePresetId == null ? undefined : s.cardFitPresets[activePresetId]
-  )
-  const cardFitGlobal = useCardFitStore((s) => s.enabled)
   const moveScenesToEdge = useScenesStore((s) => s.moveScenesToEdge)
   const moveScenesToPosition = useScenesStore((s) => s.moveScenesToPosition)
   const total = useScenesStore((s) => s.scenes.length)
@@ -2036,12 +2004,6 @@ function BulkBar({
     if (activePresetId == null) return
     setSceneNudeStrip(activePresetId, [...selection], value)
     toast(`선택한 ${n}개 씬: 옷 벗기기 · ${nudeStripLabel(value)}`, 'success')
-  }
-  // 카드 태그 씬 맞춤 (커스텀) — 선택한 씬에만. 따름 = 씬에서 정한 값을 지움 (세트 → 설정 창)
-  const bulkCardFit = (value: CardFitChoice): void => {
-    if (activePresetId == null) return
-    setSceneCardFit(activePresetId, [...selection], value)
-    toast(`선택한 ${n}개 씬: 카드 맞춤 · ${cardFitLabel(value)}`, 'success')
   }
   const disabled = n === 0
 
@@ -2143,22 +2105,6 @@ function BulkBar({
           <Shirt size={13} /> 옷 벗기기
         </Button>
       </NudeStripMenu>
-      {/* 카드 태그 씬 맞춤 일괄 (커스텀) — 누르면 메뉴: 따름 / 켬 / 끔 */}
-      <CardFitMenu
-        current={null}
-        level="scene"
-        inherited={bulkCardFitInherited ?? cardFitGlobal}
-        onPick={bulkCardFit}
-      >
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={disabled}
-          title="선택한 씬의 카드 태그 씬 맞춤을 정함 — 따름(세트 → 설정 창) · 켬 · 끔"
-        >
-          <Wand2 size={13} /> 카드 맞춤
-        </Button>
-      </CardFitMenu>
       {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
       <Button
         size="sm"
