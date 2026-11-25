@@ -144,7 +144,10 @@ export const isEyeCountId = (id: string): id is EyeCountId =>
  * 어느 카드가 후타인지는 메모로 짐작하지 않는다 (상대 여캐에도 글을 바꾼 메모가 붙는다) — 요청의 futaPlan 이 알려 준다
  */
 export const isFutaNote = (n: BodyNote): boolean =>
-  !isPinkNote(n) && !isEyeNote(n) && !BODY_ATTENTION.has(n.kind)
+  !isPinkNote(n) && !isEyeNote(n) && !isFitNote(n) && !BODY_ATTENTION.has(n.kind)
+
+/** 카드 태그 씬 맞춤의 메모인가 — 「몸·후타」와 따로 「카드 맞춤」 블록에 보인다 */
+export const isFitNote = (n: BodyNote): boolean => n.topic === 'fit'
 
 /**
  * 메모가 가리키는 곳 — 「메인」 「씬」 「합성 카드 A · 하는쪽 칸」.

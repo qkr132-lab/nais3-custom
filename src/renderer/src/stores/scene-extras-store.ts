@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { cardFitStripRule } from '@shared/card-fit'
+import { useCardFitStore } from './card-fit-store'
 import type { CharPositions, CharRoles, SequenceEntry } from '@shared/types'
 import type { OutfitChoice } from '@shared/outfit'
 import { copyCharacterKeys, setupHasContent } from '@shared/scene-bundle'
@@ -74,6 +76,8 @@ type AdditionsMap = Record<number, Record<number, SceneAddition>>
 type SceneTransparentBackgroundMap = Record<number, Record<number, boolean>>
 /** presetId → sceneId → 옷 벗기기 값 (true 둘 다 · false 안 벗김 · 'male' 남캐만 · 'female' 여캐만) */
 type SceneNudeStripMap = Record<number, Record<number, NudeStripSetting>>
+/** presetId → sceneId → 카드 태그 씬 맞춤 켬/끔 (커스텀 · 없으면 세트 → 전체 설정을 따른다) */
+type SceneCardFitMap = Record<number, Record<number, boolean>>
 
 interface SceneExtrasState {
   loaded: boolean
@@ -84,6 +88,10 @@ interface SceneExtrasState {
   transparentBackgrounds: SceneTransparentBackgroundMap
   /** 씬별 「옷 벗기기」 (커스텀) — 없으면 설정 창의 전체 설정을 따른다 */
   nudeStrips: SceneNudeStripMap
+  /** 씬별 「카드 태그 씬 맞춤」 (커스텀) — 없으면 세트(cardFitPresets) → 설정 창의 전체 설정을 따른다 */
+  cardFits: SceneCardFitMap
+  /** 세트(씬 프리셋)별 「카드 태그 씬 맞춤」 (커스텀) — 없으면 전체 설정을 따른다 */
+  cardFitPresets: Record<number, boolean>
 
   load: () => Promise<void>
   /**
@@ -113,6 +121,10 @@ interface SceneExtrasState {
     sceneIds: number[],
     value: NudeStripSetting | undefined
   ) => void
+  /** 씬별 카드 태그 씬 맞춤 — 여러 씬을 한 번에. undefined = 세트·전체 설정 따름 */
+  setSceneCardFit: (presetId: number, sceneIds: number[], value: boolean | undefined) => void
+  /** 세트별 카드 태그 씬 맞춤 — undefined = 전체 설정 따름 */
+  setPresetCardFit: (presetId: number, value: boolean | undefined) => void
   /** 씬 복사/이동 때 본문과 함께 씬별 캐릭터 구성도 옮긴다. */
   copyAdditions: (transfers: SceneAdditionTransfer[]) => void
   moveAdditions: (transfers: SceneAdditionTransfer[]) => void
@@ -148,7 +160,9 @@ function persist(): void {
       additionsEnabled: s.additionsEnabled,
       additions: s.additions,
       transparentBackgrounds: s.transparentBackgrounds,
-      nudeStrips: s.nudeStrips
+      nudeStrips: s.nudeStrips,
+      cardFits: s.cardFits,
+      cardFitPresets: s.cardFitPresets
     })
   })
 }
@@ -233,6 +247,8 @@ export function sceneNudeStripSetting(
 /** 어느 씬에서든 옷 벗기기를 쓰는지 — 카드 옷 분류를 미리 받아둘지 판단용 */
 export function anyNudeStrip(): boolean {
   if (useOutfitsStore.getState().stripOnNude) return true
+  // 카드 태그 씬 맞춤의 「알몸이면 옷 벗기기 따라 켜기」가 있으면 옷 분류가 필요하다 (켜고 끄는 건 씬·세트마다라 규칙만 본다)
+  if (cardFitStripRule(useCardFitStore.getState().rules)) return true
   return Object.values(useSceneExtrasStore.getState().nudeStrips).some((scenes) =>
     Object.values(scenes).some((value) => value !== false)
   )
@@ -254,6 +270,47 @@ function readNudeStrips(raw: unknown): SceneNudeStripMap {
   return out
 }
 
+/** 저장된 씬별 카드 맞춤 맵 — true/false 만 남긴다 */
+function readCardFits(raw: unknown): SceneCardFitMap {
+  const out: SceneCardFitMap = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [presetId, scenes] of Object.entries(raw)) {
+    if (!scenes || typeof scenes !== 'object') continue
+    const kept: Record<number, boolean> = {}
+    for (const [sceneId, value] of Object.entries(scenes)) {
+      if (typeof value === 'boolean') kept[Number(sceneId)] = value
+    }
+    out[Number(presetId)] = kept
+  }
+  return out
+}
+
+function readCardFitPresets(raw: unknown): Record<number, boolean> {
+  const out: Record<number, boolean> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [presetId, value] of Object.entries(raw)) {
+    if (typeof value === 'boolean') out[Number(presetId)] = value
+  }
+  return out
+}
+
+/**
+ * 이 씬에서 카드 태그 씬 맞춤을 쓰는가 — 씬에서 정한 값 > 세트에서 정한 값 > 전체 설정 (커스텀).
+ * where = 어느 단계가 정했는지 (화면 설명용)
+ */
+export function cardFitFor(
+  presetId: number,
+  sceneId: number,
+  globalOn: boolean
+): { on: boolean; where: 'scene' | 'preset' | 'global' } {
+  const s = useSceneExtrasStore.getState()
+  const scene = s.cardFits[presetId]?.[sceneId]
+  if (scene !== undefined) return { on: scene, where: 'scene' }
+  const preset = s.cardFitPresets[presetId]
+  if (preset !== undefined) return { on: preset, where: 'preset' }
+  return { on: globalOn, where: 'global' }
+}
+
 /** 활성 항목들 (큐 반복 실행 대상) */
 export function enabledEntries(): SequenceEntry[] {
   const s = useSceneExtrasStore.getState()
@@ -268,6 +325,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
   additions: {},
   transparentBackgrounds: {},
   nudeStrips: {},
+  cardFits: {},
+  cardFitPresets: {},
 
   load: async () => {
     if (get().loaded) return
@@ -281,7 +340,9 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
           additionsEnabled: !!parsed.additionsEnabled,
           additions: parsed.additions ?? {},
           transparentBackgrounds: parsed.transparentBackgrounds ?? {},
-          nudeStrips: readNudeStrips(parsed.nudeStrips)
+          nudeStrips: readNudeStrips(parsed.nudeStrips),
+          cardFits: readCardFits(parsed.cardFits),
+          cardFitPresets: readCardFitPresets(parsed.cardFitPresets)
         })
       } catch {
         // 손상된 설정은 무시하고 기본값으로 시작
@@ -367,12 +428,29 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({ nudeStrips: { ...get().nudeStrips, [presetId]: preset } })
     persist()
   },
+  setSceneCardFit: (presetId, sceneIds, value) => {
+    const preset = { ...(get().cardFits[presetId] ?? {}) }
+    for (const sceneId of sceneIds) {
+      if (value === undefined) delete preset[sceneId]
+      else preset[sceneId] = value
+    }
+    set({ cardFits: { ...get().cardFits, [presetId]: preset } })
+    persist()
+  },
+  setPresetCardFit: (presetId, value) => {
+    const next = { ...get().cardFitPresets }
+    if (value === undefined) delete next[presetId]
+    else next[presetId] = value
+    set({ cardFitPresets: next })
+    persist()
+  },
   copyAdditions: (transfers) => {
     if (transfers.length === 0) return
     set({
       additions: transferAdditions(get(), transfers, 'copy'),
       transparentBackgrounds: transferSceneFlags(get().transparentBackgrounds, transfers, 'copy'),
-      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'copy')
+      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'copy'),
+      cardFits: transferSceneFlags(get().cardFits, transfers, 'copy')
     })
     persist()
   },
@@ -381,7 +459,8 @@ export const useSceneExtrasStore = create<SceneExtrasState>((set, get) => ({
     set({
       additions: transferAdditions(get(), transfers, 'move'),
       transparentBackgrounds: transferSceneFlags(get().transparentBackgrounds, transfers, 'move'),
-      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'move')
+      nudeStrips: transferSceneFlags(get().nudeStrips, transfers, 'move'),
+      cardFits: transferSceneFlags(get().cardFits, transfers, 'move')
     })
     persist()
   },

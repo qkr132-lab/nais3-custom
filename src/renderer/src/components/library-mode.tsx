@@ -19,10 +19,11 @@ import {
   Pencil,
   Trash2
 } from 'lucide-react'
-import { memo, useEffect, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { LibraryImage } from '@shared/types'
 import { imageUrl } from '../lib/constants'
 import { cn } from '../lib/utils'
+import { useDragScroll, useIsPortraitMode } from '../lib/drag-scroll'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { setI2iSource } from '../stores/generation-store'
 import { useLayoutStore } from '../stores/layout-store'
@@ -64,6 +65,8 @@ export function LibraryMode(): React.JSX.Element {
   const [analysisPath, setAnalysisPath] = useState<string | null>(null)
   const [dragItem, setDragItem] = useState<LibraryImage | null>(null)
   const [dropHover, setDropHover] = useState(false)
+  const libScrollRef = useRef<HTMLDivElement>(null)
+  useDragScroll(libScrollRef, !editMode)
 
   useEffect(() => {
     if (!loaded) void load()
@@ -129,7 +132,7 @@ export function LibraryMode(): React.JSX.Element {
           <TooltipContent>편집 모드</TooltipContent>
         </Tooltip>
         <div className="flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5">
-          {[3, 4, 5, 6].map((n) => (
+          {[2, 3, 4, 5, 6].map((n) => (
             <button
               key={n}
               onClick={() => setColumns(n)}
@@ -177,7 +180,7 @@ export function LibraryMode(): React.JSX.Element {
       )}
 
       {/* 그리드 */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar">
+      <div ref={libScrollRef} className="min-h-0 flex-1 touch-pan-y overflow-y-auto p-3 no-scrollbar">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -252,7 +255,8 @@ const LibraryCard = memo(function LibraryCard({
   const selectRangeTo = useLibraryStore((s) => s.selectRangeTo)
   const rename = useLibraryStore((s) => s.rename)
   const remove = useLibraryStore((s) => s.remove)
-  const sortable = useSortable({ id: `lib-${item.id}` })
+  const isPortrait = useIsPortraitMode()
+  const sortable = useSortable({ id: `lib-${item.id}`, disabled: isPortrait && !editMode })
 
   const src = item.thumbnail ? `data:image/webp;base64,${item.thumbnail}` : imageUrl(item.filePath)
 
@@ -287,7 +291,8 @@ const LibraryCard = memo(function LibraryCard({
           {...sortable.attributes}
           {...sortable.listeners}
           className={cn(
-            'group relative aspect-square touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
+            'group relative aspect-square select-none overflow-hidden rounded-lg border bg-surface-2 transition',
+            !isPortrait || editMode ? 'touch-none' : 'touch-pan-y',
             editMode && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
             sortable.isDragging && 'shadow-xl'
           )}
@@ -321,7 +326,7 @@ const LibraryCard = memo(function LibraryCard({
             <Popover>
               <PopoverTrigger asChild>
                 <button
-                  className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100 max-[960px]:opacity-100"
                   onClick={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
                 >

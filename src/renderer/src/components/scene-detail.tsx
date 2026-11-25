@@ -4,7 +4,18 @@ import { normalizeBackground } from '@shared/background-tags'
 import { promptTokenRequest } from '@shared/nai-tokens'
 import { nudeStripLabel, nudeStripOn, nudeStripTitle } from '@shared/nude-strip'
 import { CensorStatus, SceneCensorDialog } from './scene-censor-dialog'
-import { ArrowLeft, ImageOff, Loader2, Minus, Play, Plus, Shirt, Star, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  ImageOff,
+  Loader2,
+  Minus,
+  Play,
+  Plus,
+  Shirt,
+  Star,
+  Trash2,
+  Wand2
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '@shared/types'
 import { modelCaps } from '@shared/nai-models'
@@ -14,17 +25,21 @@ import { ResolutionPicker } from './resolution-picker'
 import { useGenerationStore } from '../stores/generation-store'
 import { previewSceneRequests, useScenesStore } from '../stores/scenes-store'
 import { useCharactersStore } from '../stores/characters-store'
-import { useSceneExtrasStore } from '../stores/scene-extras-store'
+import { cardFitFor, useSceneExtrasStore } from '../stores/scene-extras-store'
+import { useCardFitStore } from '../stores/card-fit-store'
+import { CardFitMenu } from './card-fit-menu'
+import { cardFitLabel } from '../lib/card-fit-choice'
 import { useOutfitsStore } from '../stores/outfits-store'
 import { usePromptTokens } from '../lib/use-prompt-tokens'
 import { askConfirm } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
+import { useDragScroll } from '../lib/drag-scroll'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
 import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
-import { futaCardsOff } from '../lib/body-notes'
-import { BodyBlock } from './body-notes'
+import { futaCardsOff, isFitNote } from '../lib/body-notes'
+import { BodyBlock, CardFitBlock } from './body-notes'
 import { ExposeBlock } from './expose-notes'
 import { ImageContextMenu } from './image-context-menu'
 import { Lightbox } from './lightbox'
@@ -74,6 +89,15 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   const [nudePinkNipples] = useNudePinkNipples()
   const outfitItems = useOutfitsStore((s) => s.items)
   const exposeActs = useOutfitsStore((s) => s.acts)
+  // 카드 태그 씬 맞춤 (커스텀) — 씬 값 > 세트 값 > 전체 설정. 규칙표가 바뀌어도(version) 미리보기를 다시 계산
+  const cardFitGlobal = useCardFitStore((s) => s.enabled)
+  const cardFitVersion = useCardFitStore((s) => s.version)
+  const cardFitRulesReady = useCardFitStore((s) => !!s.rules)
+  const cardFitOverride = useSceneExtrasStore((s) => s.cardFits[scene.presetId]?.[scene.id])
+  const cardFitPreset = useSceneExtrasStore((s) => s.cardFitPresets[scene.presetId])
+  const setSceneCardFit = useSceneExtrasStore((s) => s.setSceneCardFit)
+  const cardFitInherited = cardFitPreset ?? cardFitGlobal
+  const cardFitEffective = cardFitFor(scene.presetId, scene.id, cardFitGlobal)
   useEffect(() => {
     if (stripOnNude) void useOutfitsStore.getState().ensureKinds(charItems.map((c) => c.prompt))
   }, [stripOnNude, charItems])
@@ -101,6 +125,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
   // 표시할 예약/잔여 수 = 아직 안 뽑은 예약 + 큐에 든 것 (둘 중 하나만 값이 있음)
   const pendingCount = scene.reserveCount + queueRemaining
   const sentinelRef = useRef<HTMLDivElement>(null)
+  const detailScrollRef = useRef<HTMLDivElement>(null)
+  useDragScroll(detailScrollRef, true)
   const [cols, setCols] = useState(3)
   const [lightboxIdx, setLightboxIdx] = useState(-1)
 
@@ -155,7 +181,11 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       eyesClosedStrip,
       nudePinkNipples,
       outfitItems,
-      exposeActs
+      exposeActs,
+      cardFitGlobal,
+      cardFitVersion,
+      cardFitOverride,
+      cardFitPreset
     ]
   )
   // 회차마다 붙은 젖힘 태그와 안 붙은 이유 (요청에 실려 온 메모)
@@ -164,12 +194,17 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
     notes: round.exposeNotes ?? []
   }))
   // 회차마다 바꾸고 더한 몸·후타 메모 (없으면 블록을 그리지 않는다)
+  // 카드 맞춤 메모(topic fit)는 「몸·후타」와 따로 「카드 맞춤」 블록에
   const bodyRounds = tokenRounds.map(({ label, request: round }) => ({
     label,
-    notes: round.bodyNotes ?? [],
+    notes: (round.bodyNotes ?? []).filter((n) => !isFitNote(n)),
     futa: round.futaPlan?.counts.futa,
     // 재조립을 꺼 둔 채 후타 카드가 그려지면 껐다는 것을 알린다 (요청은 건드리지 않는다)
     futaOff: futaReassembly ? undefined : futaCardsOff(round.characterPrompts)
+  }))
+  const fitRounds = tokenRounds.map(({ label, request: round }) => ({
+    label,
+    notes: (round.bodyNotes ?? []).filter(isFitNote)
   }))
   const tokenPreview = usePromptTokens('tokens:preview', {
     requests: tokenRounds.map(({ request: round }) => promptTokenRequest(round))
@@ -285,6 +320,32 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             <Shirt size={13} /> 옷 벗기기 · {nudeStripLabel(nudeStripOverride)}
           </Button>
         </NudeStripMenu>
+        {/* 카드 태그 씬 맞춤 (커스텀) — 누르면 메뉴: 따름(세트 → 설정 창) / 켬 / 끔 (이 씬만) */}
+        <CardFitMenu
+          current={cardFitOverride}
+          level="scene"
+          inherited={cardFitInherited}
+          onPick={(value) => setSceneCardFit(scene.presetId, [scene.id], value)}
+        >
+          <Button
+            size="sm"
+            variant={cardFitEffective.on && cardFitRulesReady ? 'accent' : 'ghost'}
+            className="gap-1"
+            title={
+              !cardFitRulesReady
+                ? '카드 맞춤: 규칙표 오류 — 설정 창에서 확인 (지금은 카드를 고치지 않음)'
+                : `카드 맞춤: 지금 ${cardFitEffective.on ? '켬' : '끔'} (${
+                    cardFitEffective.where === 'scene'
+                      ? '이 씬에서 정함'
+                      : cardFitEffective.where === 'preset'
+                        ? '세트에서 정함'
+                        : '설정 창 따름'
+                  }) · 뺀 것은 아래 「카드 맞춤」에서 확인`
+            }
+          >
+            <Wand2 size={13} /> 카드 맞춤 · {cardFitLabel(cardFitOverride)}
+          </Button>
+        </CardFitMenu>
         {/* 생성 — 메인 "씬 생성"과 동일한 예약 생성 흐름 (예약 0이면 이 씬 1개 예약 후) */}
         <Button
           size="sm"
@@ -323,8 +384,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
       )}
 
       {/* 스크롤 영역: 프롬프트 + 생성 이미지. scrollbar-gutter로 스크롤바 등장/소멸 시 밀림 방지 */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar">
-        <div className="grid gap-2">
+      <div ref={detailScrollRef} className="min-h-0 flex-1 touch-pan-y overflow-y-auto p-3 no-scrollbar">
+        <div className="grid items-start gap-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span>{isBackground ? '배경 태그' : '씬 태그'}</span>
             {isBackground ? (
@@ -390,6 +451,8 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           {!isBackground && <ExposeBlock rounds={exposeRounds} enabled={exposeWorn} />}
           {/* 몸·후타 자동 재조립 (커스텀) — 바꾼 것·더한 것·안 바꾼 것을 이전 → 이후로 보인다 (후타·알몸이 없으면 안 그린다) */}
           {!isBackground && <BodyBlock rounds={bodyRounds} />}
+          {/* 카드 태그 씬 맞춤 (커스텀) — 장면과 부딪혀 뺀 카드 태그·가중치 푼 것·예외로 둔 것 (없으면 안 그린다) */}
+          {!isBackground && <CardFitBlock rounds={fitRounds} />}
         </div>
 
         <div className="mt-4 mb-2 flex items-center gap-2 text-[12px] text-muted">
@@ -431,12 +494,12 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
             <Trash2 size={12} /> 정리
           </button>
           <div className="flex items-center gap-0.5 rounded-md bg-surface-2 p-0.5">
-            {[2, 3, 4, 5].map((n) => (
+            {[1, 2, 3, 4, 5].map((n) => (
               <button
                 key={n}
                 onClick={() => setCols(n)}
                 className={cn(
-                  'grid h-5 w-5 place-items-center rounded text-[11px] font-medium',
+                  'grid h-6 w-6 place-items-center rounded text-[11.5px] font-medium',
                   cols === n ? 'bg-paper text-ink' : 'text-muted hover:text-ink'
                 )}
               >
@@ -454,7 +517,7 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
           </p>
         ) : (
           <div
-            className="grid gap-2"
+            className="grid items-start gap-2"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
             {/* F1: 스트리밍 타일 — 완성본이 로드될 때까지 마지막 프레임을 붙든다 (튐 방지) */}
@@ -466,13 +529,13 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                 {streaming && previewPng ? (
                   <img
                     src={`data:image/png;base64,${previewPng}`}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                     alt=""
                   />
                 ) : heldFrame ? (
                   <img
                     src={`data:image/png;base64,${heldFrame}`}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                     alt=""
                   />
                 ) : (
@@ -504,12 +567,11 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                 onDelete={() => void deleteImage(img.id)}
               >
                 <div
-                  className="group relative overflow-hidden rounded-md bg-surface-2"
-                  style={{ aspectRatio: `${scene.width} / ${scene.height}` }}
+                  className="group relative overflow-hidden rounded-md bg-paper/75"
                 >
                   <img
                     src={imageUrl(img.filePath)}
-                    className="h-full w-full cursor-pointer object-cover"
+                    className="block h-auto w-full cursor-pointer object-contain"
                     loading="lazy"
                     // 탐색기/타 앱으로 끌어 저장 (16px 이상 끌어야 발동)
                     {...imageDragOutProps(img.filePath)}
@@ -518,10 +580,10 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                   />
                   <button
                     className={cn(
-                      'absolute left-1 top-1 grid size-6 place-items-center rounded-full backdrop-blur transition',
+                      'absolute left-1 top-1 grid size-7 place-items-center rounded-full backdrop-blur transition',
                       img.favorite
                         ? 'bg-amber-400/90 text-black'
-                        : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'
+                        : 'bg-black/45 text-white opacity-0 group-hover:opacity-100 max-[960px]:opacity-100'
                     )}
                     onClick={() => void toggleFavorite(img.id)}
                     title="즐겨찾기"
@@ -529,7 +591,7 @@ export function SceneDetail({ scene }: { scene: Scene }): React.JSX.Element {
                     <Star size={13} fill={img.favorite ? 'currentColor' : 'none'} />
                   </button>
                   <button
-                    className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-black/40 text-white opacity-0 backdrop-blur transition hover:bg-danger group-hover:opacity-100"
+                    className="absolute right-1 top-1 grid size-7 place-items-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur transition hover:bg-danger group-hover:opacity-100 max-[960px]:opacity-100"
                     onClick={() => void deleteImage(img.id)}
                     title="삭제"
                   >

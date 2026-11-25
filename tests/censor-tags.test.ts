@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CENSOR_NEGATIVE_SUPPRESS_TAGS,
   CENSOR_OPTIONS,
   censorPrompt,
   changeCensors,
@@ -227,12 +228,17 @@ describe('independent negative-prompt suppression', () => {
       characterPrompts: [char('1girl')],
       seed: 7
     } as GenerationRequest
+    // 검열 부위가 있는 씬은 네거티브 끝에 다른 검열 방식(바·모자이크 등) 억제 태그가 붙는다
+    const suppress = CENSOR_NEGATIVE_SUPPRESS_TAGS.join(', ')
     const on = refreshScenePrompts(queued, scene)
-    expect(on.negativePrompt).toBe('low quality, blur, anal')
+    expect(on.negativePrompt).toBe(`low quality, blur, anal, ${suppress}`)
     expect(on.prompt).toBe('sky, landscape')
     expect(on.characterPrompts).toEqual([char('1girl, completely white censored anal')])
     const off = refreshScenePrompts(on, { ...scene, suppressAnal: false })
-    expect(off.negativePrompt).toBe('low quality, blur')
+    expect(off.negativePrompt).toBe(`low quality, blur, ${suppress}`)
+    // 검열 부위가 없는 씬에는 붙지 않는다
+    const plain = refreshScenePrompts(queued, { ...scene, censorKinds: [], suppressAnal: false })
+    expect(plain.negativePrompt).toBe('low quality, blur')
     expect(off.characterPrompts[0].prompt).toBe('1girl, completely white censored anal')
   })
   it('rebuilds queued negatives on toggle, removing only the generated contribution', () => {

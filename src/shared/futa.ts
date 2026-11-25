@@ -23,7 +23,7 @@ import type { BodyNote, FutaPlan, PromptParts } from './types'
  *  - 남자가 없다 (후타+여, 후타+후타, 후타 혼자): 남자 선언을 모두 정리하고 관계 태그를 맞춘다
  *      후타+여 = 2girls + futa with female · 후타+후타 = 2girls + futa with futa · 후타 혼자 = 1girl
  *  - 남자가 있다 (후타+남): 남자 선언은 맞으니 그대로 두고 hetero 만 futa with male 로 바꾼다
- * DB·IPC 없는 순수 계산이다.
+ * DB·IPC 없는 순수 계산이다 (렌더러·폰·클라우드가 같은 코드를 쓴다).
  */
 
 // ── 계획 ────────────────────────────────────────────────
@@ -91,6 +91,8 @@ export interface TagEdit {
   /** 바꾼 뒤 — 빈 문자열이면 뺀 것 */
   after: string
   reason: string
+  /** 가중치 묶음 밖으로 꺼낸 태그면 그 묶음의 가중치 (decide 가 lift 를 돌려준 때만 · 카드 맞춤의 「가중치 풀기」) */
+  liftedFrom?: string
 }
 
 /** 가중치 표기(::)가 깨진 토큰 — :: 가 있는데 N::태그:: 한 묶음으로 읽히지 않는다 */
@@ -112,7 +114,18 @@ export interface TagKept {
 
 /** decide 의 답 — 바꿈/뺌(after) 또는 그대로 두되 알림(keep) 또는 바꾸고 남은 것을 알림(after + keepRest) */
 export type TagVerdict =
-  { after: string; reason: string; keepRest?: string; keepReason?: string } | { keep: string }
+  | {
+      after: string
+      reason: string
+      keepRest?: string
+      keepReason?: string
+      /**
+       * 가중치 묶음 밖으로 꺼낸다 (카드 맞춤의 「가중치 풀기」) — 1보다 센 묶음(1.4::yellow eyes::) 안의 태그일 때만
+       * after 를 묶음 바로 뒤에 가중치 없이 둔다. 묶음 밖이거나 1 이하 묶음이면 바꾸지 않은 것으로 친다
+       */
+      lift?: boolean
+    }
+  | { keep: string }
 
 /**
  * 프롬프트의 태그를 하나씩 바꾼다 (nude-strip 의 filterTags 와 같은 안전 규칙).
@@ -140,19 +153,26 @@ export function mapTags(
   const at = textBlockStart(prompt)
   const head = at < 0 ? prompt : prompt.slice(0, at)
   const tail = at < 0 ? '' : prompt.slice(at)
-  const apply = (raw: string): { after: string } | null => {
+  const apply = (raw: string, groupWeight?: string): { after: string; lift?: boolean } | null => {
     const v = decide(norm(raw), raw.trim())
     if (!v) return null
     if ('keep' in v) {
       kept.push({ before: raw.trim(), reason: v.keep })
       return null
     }
+    // 가중치 풀기는 1보다 센 묶음 안에서만 뜻이 있다 — 아니면 바꾸지 않은 것으로 친다
+    if (v.lift && !(groupWeight != null && Number(groupWeight) > 1)) return null
     // 접두사가 붙은 태그를 바꾸면 접두사를 이어 붙인다 (상호작용 태그의 source#·target# 가 사라지지 않게)
     const prefix = ROLE_PREFIX.exec(raw.trim())?.[0] ?? ''
-    const after = v.after && prefix ? `${prefix}${v.after}` : v.after
-    edits.push({ before: raw.trim(), after, reason: v.reason })
+    const after = v.after && prefix && !v.lift ? `${prefix}${v.after}` : v.after
+    edits.push({
+      before: raw.trim(),
+      after,
+      reason: v.reason,
+      ...(v.lift ? { liftedFrom: groupWeight } : {})
+    })
     if (v.keepRest) kept.push({ before: v.keepRest, reason: v.keepReason ?? v.reason })
-    return { after }
+    return v.lift ? { after, lift: true } : { after }
   }
 
   const out: string[] = []
@@ -199,19 +219,23 @@ export function mapTags(
           .map((t) => t.trim())
           .filter(Boolean)
         const next: string[] = []
+        // 가중치를 풀어 묶음 밖으로 꺼낸 태그 — 묶음 바로 뒤에 둔다
+        const lifted: string[] = []
         let groupChanged = false
         for (const t of inner) {
-          const r = apply(t)
+          const r = apply(t, group[1])
           if (!r) next.push(t)
           else {
             groupChanged = true
-            if (r.after) next.push(r.after)
+            if (r.lift) lifted.push(r.after)
+            else if (r.after) next.push(r.after)
           }
         }
         if (!groupChanged) keptTokens.push(token)
         else {
           lineChanged = true
           if (next.length) keptTokens.push(`${group[1]}::${next.join(', ')}::`)
+          keptTokens.push(...lifted.filter(Boolean))
         }
         continue
       }

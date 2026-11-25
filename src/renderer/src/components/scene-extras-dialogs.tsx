@@ -519,7 +519,16 @@ function SelectionPanel({
           />
         </div>
       </div>
-      <RolePanel characterIds={characterIds} roles={roles} onPatch={onPatch} />
+      <RolePanel
+        characterIds={characterIds}
+        baseCharacterIds={baseCharacterIds}
+        roles={roles}
+        slots={slots}
+        slotOf={slotOf}
+        slotChars={slotChars}
+        slotRoles={slotRoles}
+        onPatch={onPatch}
+      />
       <PositionPanel
         sceneId={sceneId}
         characterIds={characterIds}
@@ -541,22 +550,98 @@ function SelectionPanel({
   )
 }
 
+/**
+ * 씬/큐 항목에서 캐릭터의 자리 번호(1~8번)를 순환·지정하는 헬퍼.
+ * 번호를 골랐는데 현재 잡아둔 자리(slots) 수가 그 번호보다 적으면 빈 격자점에 자리를 자동으로 만들어
+ * 캐릭터탭의 번호 선택처럼 즉시 작동하게 한다.
+ */
+function ensureSlotsUpTo(
+  currentSlots: { x: number; y: number }[] | undefined,
+  targetCount: number
+): { x: number; y: number }[] {
+  const list = [...(currentSlots ?? [])]
+  const defaults = [
+    { x: 0.75, y: 0.5 },
+    { x: 0.25, y: 0.5 },
+    { x: 0.5, y: 0.75 },
+    { x: 0.5, y: 0.3 },
+    { x: 0.3, y: 0.3 },
+    { x: 0.7, y: 0.3 },
+    { x: 0.3, y: 0.7 },
+    { x: 0.7, y: 0.7 }
+  ]
+  while (list.length < targetCount) {
+    const cand =
+      defaults.find((p) => !list.some((s) => Math.hypot(s.x - p.x, s.y - p.y) < 0.08)) ??
+      defaults[list.length % defaults.length]
+    list.push({ ...cand })
+  }
+  return list
+}
+
+function applyCharSlotNumber(
+  charId: number,
+  nextSlotNo: number | null,
+  layout: {
+    slots?: { x: number; y: number }[]
+    slotChars?: Record<number, number>
+    slotOf?: Record<number, number>
+  },
+  onPatch: (patch: SelectionPatch) => void
+): void {
+  const nextChars: Record<number, number> = {}
+  for (const [k, cid] of Object.entries(layout.slotChars ?? {})) {
+    if (cid !== charId) nextChars[Number(k)] = cid
+  }
+  const nextSlotOf: Record<number, number> = { ...(layout.slotOf ?? {}) }
+  delete nextSlotOf[charId]
+
+  if (nextSlotNo == null) {
+    onPatch({ slotChars: nextChars, slotOf: nextSlotOf })
+    return
+  }
+  const index = nextSlotNo - 1
+  const nextSlots = ensureSlotsUpTo(layout.slots, nextSlotNo)
+  nextChars[index] = charId
+  nextSlotOf[charId] = index
+  onPatch({
+    slots: nextSlots,
+    slotChars: nextChars,
+    slotOf: nextSlotOf
+  })
+}
+
 /** 행위 역할 지정 (커스텀) — 역할을 주면 생성 시 씬의 하는쪽/당하는쪽 태그가
  *  그 캐릭터 프롬프트 뒤에 자동으로 합쳐진다. 카드에는 외형만 있으면 됨 */
 function RolePanel({
   characterIds,
+  baseCharacterIds,
   roles,
+  slots,
+  slotOf,
+  slotChars,
+  slotRoles,
   onPatch
 }: {
   characterIds: number[]
+  baseCharacterIds?: number[]
   roles?: CharRoles
+  slots?: { x: number; y: number }[]
+  slotOf?: Record<number, number>
+  slotChars?: Record<number, number>
+  slotRoles?: Record<number, CharRole | null>
   onPatch: (patch: SelectionPatch) => void
 }): React.JSX.Element | null {
   const items = useCharactersStore((s) => s.items)
-  const chars = characterIds
+  const chars = [...new Set([...characterIds, ...(baseCharacterIds ?? [])])]
     .map((id) => items.find((c) => c.id === id))
-    .filter((c): c is CharacterCard => !!c)
+    .filter((c): c is CharacterCard => !!c && !!c.prompt.trim())
   if (chars.length === 0) return null
+
+  const seating = seatSlots(
+    chars.map((c) => ({ id: c.id, slotNo: c.slotNo, role: roles?.[c.id] ?? c.role })),
+    { slots, slotOf, slotChars, slotRoles }
+  )
 
   const setRole = (id: number, role: CharRole | null): void => {
     const next: CharRoles = { ...(roles ?? {}) }
@@ -579,14 +664,17 @@ function RolePanel({
     <div className="rounded-md border border-line bg-paper p-2">
       <div className="flex items-center gap-2">
         <Users size={13} className="text-muted" />
-        <span className="text-[12px] font-medium text-muted">행위 역할</span>
+        <span className="text-[12px] font-medium text-muted">행위 역할 · 자리 번호</span>
         <span className="text-[11px] text-faint">
-          역할을 주면 씬의 하는쪽/당하는쪽 태그가 그 캐릭터에 자동으로 합쳐져요
+          역할(하는쪽/당하는쪽)과 자리 번호(1번~8번)를 캐릭터탭처럼 바로 지정할 수 있어요
         </span>
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         {chars.map((c, i) => {
           const current = roles?.[c.id] ?? null
+          const seats = seating.bySlots.get(c.id) ?? []
+          const activeSlotNo = seats.length > 0 ? seats[0] + 1 : null
+          const maxSlot = Math.max(slots?.length ?? 0, 4)
           return (
             <div
               key={c.id}
@@ -604,10 +692,40 @@ function RolePanel({
                 </span>
               )}
               <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
+              <button
+                type="button"
+                title={
+                  activeSlotNo
+                    ? `${activeSlotNo}번 자리 배정됨 (클릭: 다음 번호 · 우클릭: 해제)`
+                    : `자리 번호 지정 (클릭: 1번 → 2번 → … → ${maxSlot}번 → 없음)`
+                }
+                onClick={() => {
+                  const nextNo =
+                    activeSlotNo == null ? 1 : activeSlotNo >= maxSlot ? null : activeSlotNo + 1
+                  applyCharSlotNumber(c.id, nextNo, { slots, slotChars, slotOf }, onPatch)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  applyCharSlotNumber(c.id, null, { slots, slotChars, slotOf }, onPatch)
+                }}
+                className={cn(
+                  'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors',
+                  activeSlotNo
+                    ? 'bg-emerald-500 text-white'
+                    : 'border border-line bg-paper text-faint hover:bg-surface hover:text-muted'
+                )}
+              >
+                {seats.length > 1
+                  ? `${seats.map((s) => s + 1).join('·')}번`
+                  : activeSlotNo
+                    ? `${activeSlotNo}번`
+                    : '번호'}
+              </button>
               <div className="flex overflow-hidden rounded border border-line">
                 {OPTIONS.map((o) => (
                   <button
                     key={o.label}
+                    type="button"
                     title={o.title}
                     className={cn(
                       'px-1.5 py-0.5 text-[10.5px] transition-colors',
@@ -631,7 +749,7 @@ function RolePanel({
   )
 }
 
-/** 캐릭터 위치 지정 (커스텀) — 위치 적용 on/off + 선택 캐릭터별 5x5 격자 오버라이드 */
+/** 캐릭터 위치 지정 (커스텀) — 위치 적용 on/off + 자리 번호별(1번·2번·3번·4번…) 위치/역할 + 선택 캐릭터별 오버라이드 */
 function PositionPanel({
   characterIds,
   useCoords,
@@ -670,9 +788,10 @@ function PositionPanel({
   const chars = [...new Set([...characterIds, ...(baseCharacterIds ?? [])])]
     .map((id) => items.find((c) => c.id === id))
     .filter((c): c is CharacterCard => !!c && !!c.prompt.trim())
+  const slotList = slots ?? []
   const seating = seatSlots(
     chars.map((c) => ({ id: c.id, slotNo: c.slotNo, role: roles?.[c.id] ?? c.role })),
-    { slots, slotOf, slotChars, slotRoles }
+    { slots: slotList, slotOf, slotChars, slotRoles }
   )
 
   const [boardOpen, setBoardOpen] = useState(false)
@@ -728,6 +847,63 @@ function PositionPanel({
     onPatch({ positions: next })
   }
 
+  const addSlotQuick = (): void => {
+    const nextSlots = ensureSlotsUpTo(slotList, slotList.length + 1)
+    onPatch({ slots: nextSlots, useCoords: true })
+  }
+  const add3PSlotsQuick = (): void => {
+    onPatch({
+      useCoords: true,
+      slots: [
+        { x: 0.75, y: 0.5 },
+        { x: 0.25, y: 0.5 },
+        { x: 0.5, y: 0.75 }
+      ],
+      slotRoles: {
+        ...(slotRoles ?? {}),
+        0: 'target',
+        1: 'target',
+        2: 'source'
+      }
+    })
+  }
+  const setSlotPos = (index: number, center: { x: number; y: number }): void => {
+    onPatch({
+      slots: slotList.map((s, i) => (i === index ? center : s))
+    })
+  }
+  const cycleSlotRole = (index: number): void => {
+    const cur = slotRoles?.[index] ?? null
+    const nextRole: CharRole | null = cur === 'target' ? 'source' : cur === 'source' ? null : 'target'
+    const next = { ...(slotRoles ?? {}) }
+    if (nextRole) next[index] = nextRole
+    else delete next[index]
+    onPatch({ slotRoles: next })
+  }
+  const removeSlotAt = (index: number): void => {
+    const shift = <V,>(map: Record<number, V> | undefined): Record<number, V> => {
+      const next: Record<number, V> = {}
+      for (const [at, v] of Object.entries(map ?? {})) {
+        const n = Number(at)
+        if (n === index) continue
+        next[n > index ? n - 1 : n] = v
+      }
+      return next
+    }
+    const nextSlotOf: Record<number, number> = {}
+    for (const [id, at] of Object.entries(slotOf ?? {})) {
+      if (at === index) continue
+      nextSlotOf[Number(id)] = at > index ? at - 1 : at
+    }
+    onPatch({
+      slots: slotList.filter((_, i) => i !== index),
+      slotOf: nextSlotOf,
+      slotChars: shift(slotChars),
+      slotRoles: shift(slotRoles),
+      slotTags: shift(slotTags)
+    })
+  }
+
   return (
     <div className="rounded-md border border-line bg-paper p-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -737,6 +913,26 @@ function PositionPanel({
           {scene ? `${scene.width}×${scene.height}` : '큐 배치 — 실제 비율은 각 씬 해상도에 따름'}
         </span>
         <div className="flex-1" />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px]"
+          title="1번·2번·3번·4번… 자리를 추가해 번호별 위치와 역할(하/당)을 지정합니다"
+          onClick={addSlotQuick}
+        >
+          <Plus size={12} /> 자리 추가 ({slotList.length + 1}번)
+        </Button>
+        {slotList.length === 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 px-2 text-[11px] text-accent"
+            title="1번(당)·2번(당)·3번(하) 3P 기본 자리 세트를 한 번에 만듭니다"
+            onClick={add3PSlotsQuick}
+          >
+            <Plus size={12} /> 3P 자리 (1·2당/3하)
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -772,10 +968,94 @@ function PositionPanel({
         futaCharIds={futaCharIds}
         onPatch={onPatch}
       />
+      {/* 번호별 자리(1번·2번·3번·4번…) 위치·역할 직접 지정 바 */}
+      {slotList.length > 0 && (
+        <div className="mt-2 rounded-md border border-line/80 bg-surface p-1.5">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted">
+            <span className="font-medium">자리 번호별 위치 · 역할</span>
+            <span className="text-faint">
+              (캐릭터탭이나 아래 캐릭터의 번호(1번·2번·3번…)와 자동 연결됩니다)
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {slotList.map((pos, idx) => {
+              const occId = seating.bySlot.get(idx)
+              const occ = occId != null ? chars.find((c) => c.id === occId) : undefined
+              const sRole = slotRoles?.[idx] ?? null
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center gap-1 rounded-md border border-line bg-surface-2 px-1.5 py-0.5"
+                >
+                  <span className="rounded bg-emerald-500 px-1.5 py-0.5 font-mono text-[10.5px] font-semibold text-white">
+                    {idx + 1}번
+                  </span>
+                  <button
+                    type="button"
+                    title={
+                      sRole === 'target'
+                        ? '당하는쪽 자리 (클릭: 하는쪽으로)'
+                        : sRole === 'source'
+                          ? '하는쪽 자리 (클릭: 역할 없음으로)'
+                          : '자리 역할 없음 (클릭: 당하는쪽으로)'
+                    }
+                    onClick={() => cycleSlotRole(idx)}
+                    className={cn(
+                      'rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors',
+                      sRole === 'source'
+                        ? 'bg-accent text-white'
+                        : sRole === 'target'
+                          ? 'bg-violet-500 text-white'
+                          : 'border border-line bg-paper text-faint hover:text-muted'
+                    )}
+                  >
+                    {sRole === 'source' ? '하' : sRole === 'target' ? '당' : '역할'}
+                  </button>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
+                        title={`${idx + 1}번 자리 위치 지정`}
+                      >
+                        <Crosshair size={11} />
+                        {pos.x.toFixed(3)},{pos.y.toFixed(3)}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto">
+                      <PositionPicker center={pos} onPick={(nc) => setSlotPos(idx, nc)} />
+                    </PopoverContent>
+                  </Popover>
+                  <span className="max-w-20 truncate text-[10.5px] text-muted">
+                    {occ ? charLabel(occ, idx) : '빈 자리'}
+                  </span>
+                  {slotTags?.[idx]?.trim() && (
+                    <span
+                      className="rounded bg-accent/15 px-1 text-[10px] text-accent"
+                      title={slotTags[idx]}
+                    >
+                      +태그
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="grid size-4 place-items-center rounded text-faint hover:text-danger"
+                    title={`${idx + 1}번 자리 삭제`}
+                    onClick={() => removeSlotAt(idx)}
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {useCoords !== false &&
         (chars.length === 0 ? (
           <p className="mt-2 text-[11.5px] text-faint">
-            캐릭터를 먼저 선택하면 위치를 지정할 수 있어요.
+            캐릭터를 선택하거나 위의 「자리 추가」로 1번·2번·3번 자리를 먼저 만들어 둘 수 있어요.
           </p>
         ) : (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -783,13 +1063,18 @@ function PositionPanel({
               const pos = positions?.[c.id]
               // 미지정은 0.5 — 카드 기본 좌표는 씬 생성에 쓰이지 않는다
               const role = roles?.[c.id] ?? c.role
-              const center = pos ??
+              const seats = seating.bySlots.get(c.id) ?? []
+              const firstSeat = seats.length > 0 ? seats[0] : null
+              const activeSlotNo = firstSeat != null ? firstSeat + 1 : null
+              const maxSlot = Math.max(slotList.length, 4)
+              const center =
+                (firstSeat != null ? slotList[firstSeat] : undefined) ??
+                pos ??
                 (role === 'source'
                   ? scene?.sourcePos
                   : role === 'target'
                     ? scene?.targetPos
                     : undefined) ?? { x: 0.5, y: 0.5 }
-              const seats = seating.bySlots.get(c.id) ?? []
               return (
                 <div
                   key={c.id}
@@ -807,37 +1092,94 @@ function PositionPanel({
                     </span>
                   )}
                   <span className="max-w-24 truncate text-[11.5px]">{charLabel(c, i)}</span>
-                  {seats.length ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 px-1.5 text-[10.5px]"
-                      onClick={() => setBoardOpen(true)}
-                      title="자리 좌표가 적용 중입니다. 넓게 배치에서 자리를 편집하세요."
-                    >
-                      자리 {seats.map((s) => s + 1).join('·')} 편집
-                    </Button>
-                  ) : (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
-                          title="위치 지정"
-                        >
-                          <Crosshair size={11} />
-                          {center.x.toFixed(3)},{center.y.toFixed(3)}
-                          {!pos && <span className="text-faint">(미지정)</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto">
-                        <PositionPicker center={center} onPick={(nc) => setPos(c.id, nc)} />
-                      </PopoverContent>
-                    </Popover>
-                  )}
+                  {/* 캐릭터탭과 동일한 자리 번호 선택 버튼 (1번→2번→3번→4번…→없음) */}
+                  <button
+                    type="button"
+                    title={
+                      activeSlotNo
+                        ? `${activeSlotNo}번 자리 배정됨 (클릭: 다음 번호 · 우클릭: 해제)`
+                        : `자리 번호 지정 (클릭: 1번 → 2번 → … → ${maxSlot}번 → 없음)`
+                    }
+                    onClick={() => {
+                      const nextNo =
+                        activeSlotNo == null ? 1 : activeSlotNo >= maxSlot ? null : activeSlotNo + 1
+                      applyCharSlotNumber(c.id, nextNo, { slots: slotList, slotChars, slotOf }, onPatch)
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      applyCharSlotNumber(c.id, null, { slots: slotList, slotChars, slotOf }, onPatch)
+                    }}
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors',
+                      activeSlotNo
+                        ? 'bg-emerald-500 text-white'
+                        : 'border border-line bg-paper text-faint hover:bg-surface hover:text-muted'
+                    )}
+                  >
+                    {seats.length > 1
+                      ? `${seats.map((s) => s + 1).join('·')}번`
+                      : activeSlotNo
+                        ? `${activeSlotNo}번`
+                        : '번호'}
+                  </button>
+                  {/* 캐릭터탭과 동일한 역할(하/당) 순환 버튼 */}
+                  <button
+                    type="button"
+                    title={
+                      role === 'source'
+                        ? '하는쪽 (클릭: 당하는쪽으로)'
+                        : role === 'target'
+                          ? '당하는쪽 (클릭: 역할 없음으로)'
+                          : '역할 없음 (클릭: 하는쪽으로)'
+                    }
+                    onClick={() => {
+                      const nextRole: CharRole | null =
+                        role === 'source' ? 'target' : role === 'target' ? null : 'source'
+                      const nextRoles: CharRoles = { ...(roles ?? {}) }
+                      if (nextRole) nextRoles[c.id] = nextRole
+                      else delete nextRoles[c.id]
+                      onPatch({ roles: nextRoles })
+                    }}
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors',
+                      role === 'source'
+                        ? 'bg-accent text-white'
+                        : role === 'target'
+                          ? 'bg-violet-500 text-white'
+                          : 'border border-line bg-paper text-faint hover:bg-surface hover:text-muted'
+                    )}
+                  >
+                    {role === 'source' ? '하' : role === 'target' ? '당' : '역할'}
+                  </button>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-1.5 font-mono text-[10.5px]"
+                        title={
+                          firstSeat != null
+                            ? `${firstSeat + 1}번 자리 위치 직접 수정`
+                            : '이 캐릭터 위치 지정'
+                        }
+                      >
+                        <Crosshair size={11} />
+                        {center.x.toFixed(3)},{center.y.toFixed(3)}
+                        {!pos && firstSeat == null && <span className="text-faint">(미지정)</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto">
+                      <PositionPicker
+                        center={center}
+                        onPick={(nc) =>
+                          firstSeat != null ? setSlotPos(firstSeat, nc) : setPos(c.id, nc)
+                        }
+                      />
+                    </PopoverContent>
+                  </Popover>
                   {pos && !seats.length && (
                     <button
+                      type="button"
                       className="grid size-5 place-items-center rounded text-faint hover:text-fg"
                       title="이 캐릭터의 개별 위치 지정 지우기"
                       onClick={() => resetPos(c.id)}

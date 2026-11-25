@@ -741,7 +741,7 @@ export function ScenePlacementDialog({
             )}
             {/* 미리 잡아둔 자리 — 캐릭터 없이 위치·인원부터 정한다 */}
             <div>
-              <p className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted">
+              <p className="mb-1.5 flex flex-wrap items-center gap-2 text-[12px] font-medium text-muted">
                 자리
                 <span className="font-mono text-[11px] text-faint">{slotList.length}칸</span>
                 <Button
@@ -751,8 +751,34 @@ export function ScenePlacementDialog({
                   disabled={slotList.length >= caps.maxCharacters}
                   onClick={addSlot}
                 >
-                  <Plus size={12} /> 자리 추가
+                  <Plus size={12} /> 자리 추가 ({slotList.length + 1}번)
                 </Button>
+                {slotList.length === 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 gap-1 px-2 text-[11px] text-accent"
+                    onClick={() => {
+                      onPatch({
+                        useCoords: true,
+                        slots: [
+                          { x: 0.75, y: 0.5 },
+                          { x: 0.25, y: 0.5 },
+                          { x: 0.5, y: 0.75 }
+                        ],
+                        slotRoles: {
+                          ...(slotRoles ?? {}),
+                          0: 'target',
+                          1: 'target',
+                          2: 'source'
+                        }
+                      })
+                      setPickedSlot(0)
+                    }}
+                  >
+                    <Plus size={12} /> 3P 자리 (1·2당/3하)
+                  </Button>
+                )}
               </p>
               {slotList.length === 0 ? (
                 <p className="text-[11.5px] text-faint">
@@ -874,8 +900,51 @@ export function ScenePlacementDialog({
                 <div className="flex flex-col gap-1">
                   {picked.map((c, i) => {
                     const seats = seatsOf(c.id)
+                    const firstSeat = seats.length > 0 ? seats[0] : null
+                    const activeSlotNo = firstSeat != null ? firstSeat + 1 : null
+                    const maxSlot = Math.max(slotList.length, 4)
+                    const role = roles?.[c.id] ?? c.role
                     const center = previewCenters.get(c.id) ?? centerOf(c)
                     const overridden = !!positions?.[c.id]
+                    const cycleCharSlotNo = (nextNo: number | null): void => {
+                      const nextChars: Record<number, number> = {}
+                      for (const [k, cid] of Object.entries(slotChars ?? {})) {
+                        if (cid !== c.id) nextChars[Number(k)] = cid
+                      }
+                      const nextSlotOf: Record<number, number> = { ...(slotOf ?? {}) }
+                      delete nextSlotOf[c.id]
+                      if (nextNo == null) {
+                        onPatch({ slotChars: nextChars, slotOf: nextSlotOf })
+                        return
+                      }
+                      const idx = nextNo - 1
+                      const nextSlots = [...slotList]
+                      const defaults = [
+                        { x: 0.75, y: 0.5 },
+                        { x: 0.25, y: 0.5 },
+                        { x: 0.5, y: 0.75 },
+                        { x: 0.5, y: 0.3 },
+                        { x: 0.3, y: 0.3 },
+                        { x: 0.7, y: 0.3 },
+                        { x: 0.3, y: 0.7 },
+                        { x: 0.7, y: 0.7 }
+                      ]
+                      while (nextSlots.length < nextNo) {
+                        const cand =
+                          defaults.find(
+                            (p) => !nextSlots.some((s) => Math.hypot(s.x - p.x, s.y - p.y) < 0.08)
+                          ) ?? defaults[nextSlots.length % defaults.length]
+                        nextSlots.push({ ...cand })
+                      }
+                      nextChars[idx] = c.id
+                      nextSlotOf[c.id] = idx
+                      onPatch({
+                        slots: nextSlots,
+                        slotChars: nextChars,
+                        slotOf: nextSlotOf
+                      })
+                      setPickedSlot(idx)
+                    }
                     return (
                       <div
                         key={c.id}
@@ -922,6 +991,72 @@ export function ScenePlacementDialog({
                             )}
                           </span>
                         </span>
+                        {/* 캐릭터탭과 동일한 자리 번호 선택 버튼 */}
+                        <button
+                          type="button"
+                          title={
+                            activeSlotNo
+                              ? `${activeSlotNo}번 자리 배정됨 (클릭: 다음 번호 · 우클릭: 해제)`
+                              : `자리 번호 지정 (클릭: 1번 → 2번 → … → ${maxSlot}번 → 없음)`
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const nextNo =
+                              activeSlotNo == null
+                                ? 1
+                                : activeSlotNo >= maxSlot
+                                  ? null
+                                  : activeSlotNo + 1
+                            cycleCharSlotNo(nextNo)
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            cycleCharSlotNo(null)
+                          }}
+                          className={cn(
+                            'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors',
+                            activeSlotNo
+                              ? 'bg-emerald-500 text-white'
+                              : 'border border-line bg-paper text-faint hover:bg-surface hover:text-muted'
+                          )}
+                        >
+                          {seats.length > 1
+                            ? `${seats.map((s) => s + 1).join('·')}번`
+                            : activeSlotNo
+                              ? `${activeSlotNo}번`
+                              : '번호'}
+                        </button>
+                        {/* 캐릭터탭과 동일한 행위 역할(하/당) 순환 버튼 */}
+                        <button
+                          type="button"
+                          title={
+                            role === 'source'
+                              ? '하는쪽 (클릭: 당하는쪽으로)'
+                              : role === 'target'
+                                ? '당하는쪽 (클릭: 역할 없음으로)'
+                                : '역할 없음 (클릭: 하는쪽으로)'
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const nextRole: CharRole | null =
+                              role === 'source' ? 'target' : role === 'target' ? null : 'source'
+                            const nextRoles: CharRoles = { ...(roles ?? {}) }
+                            if (nextRole) nextRoles[c.id] = nextRole
+                            else delete nextRoles[c.id]
+                            onPatch({ roles: nextRoles })
+                          }}
+                          className={cn(
+                            'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors',
+                            role === 'source'
+                              ? 'bg-accent text-white'
+                              : role === 'target'
+                                ? 'bg-violet-500 text-white'
+                                : 'border border-line bg-paper text-faint hover:bg-surface hover:text-muted'
+                          )}
+                        >
+                          {role === 'source' ? '하' : role === 'target' ? '당' : '역할'}
+                        </button>
                         {seats.length > 0 ? (
                           <span
                             className={cn(

@@ -24,6 +24,7 @@ import {
 } from '@shared/expose-state'
 import { readBody } from '@shared/body'
 import { stripEyesWhenClosed } from '@shared/eyes'
+import { cardFitStripNotes, cardFitStripRule, fitCardToScene } from '@shared/card-fit'
 import {
   bodyTagsFor,
   flagNotes,
@@ -48,6 +49,7 @@ import { enabledCharacters, linkedCharRefIds, useCharactersStore } from './chara
 import { randomSeed, useGenerationStore, withTransparentBackground } from './generation-store'
 import { useCharRefsStore, useVibesStore } from './refs-store'
 import { clothKindOf, outfitMap, useOutfitsStore } from './outfits-store'
+import { useCardFitStore } from './card-fit-store'
 import {
   characterSex,
   nudeStripFor,
@@ -57,6 +59,7 @@ import {
 } from '@shared/nude-strip'
 import {
   anyNudeStrip,
+  cardFitFor,
   enabledEntries,
   hasAddition,
   sceneNudeStripSetting,
@@ -84,7 +87,7 @@ interface ScenesState {
   selection: Set<number> // 편집 모드 체크된 씬들
   lastSelectedId: number | null // Shift 범위 선택 기준점 (커스텀)
   columns: number // 2~5
-  cardOrientation: 'portrait' | 'landscape' // 카드 비율 고정 (해상도 무관)
+  cardOrientation: 'auto' | 'portrait' | 'landscape' // 카드 비율 (auto=원본 비율 전체 표시)
   gridView: 'card' | 'row' // 씬 화면 보기: 카드 / 이름 목록 (커스텀)
 
   // 상세 이미지 (페이지네이션)
@@ -111,7 +114,7 @@ interface ScenesState {
   select: (id: number | null) => void
   setEditMode: (v: boolean) => void
   setColumns: (n: number) => void
-  setCardOrientation: (o: 'portrait' | 'landscape') => void
+  setCardOrientation: (o: 'auto' | 'portrait' | 'landscape') => void
   setGridView: (v: 'card' | 'row') => void
   toggleSelected: (id: number) => void
   /** Shift+클릭 범위 선택 — lastSelectedId부터 id까지 (커스텀) */
@@ -216,11 +219,17 @@ const stripLabel = (setting: NudeStripSetting | undefined): string =>
  * 커스텀 확장 (NAIS2 Custom 이식):
  * - entry(큐 반복 항목)가 있으면 캐릭터/바이브/캐릭레퍼는 메인 설정 대신 항목의 선택만 적용
  * - 씬별 캐릭터 추가가 켜져 있으면 해당 씬의 추가 선택을 합집합으로 얹는다
+ * - options.ignoreSource: PC에 불러 둔 i2i 소스를 읽지 않는다(소스도, 소스 해상도로 덮는 것도 없다).
+ *   모바일 클라우드의 완성 요청과 폰 작업 실행이 쓴다 — 기본(안 주면)은 예전 동작 그대로
  */
-export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): GenerationRequest {
+export function buildSceneRequest(
+  scene: Scene,
+  entry?: SequenceEntry | null,
+  options?: { ignoreSource?: boolean }
+): GenerationRequest {
   const generation = useGenerationStore.getState()
   const base = requestForPromptMode(generation.request, generation.promptSplitEnabled)
-  const src = useGenerationStore.getState().source
+  const src = options?.ignoreSource ? null : generation.source
   const extras = useSceneExtrasStore.getState()
   const rawAddition = extras.additionsEnabled
     ? extras.additions[scene.presetId]?.[scene.id]
@@ -233,7 +242,15 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
    * 좌표·역할·태그가 모두 자리 번호로 엮여 있어서, 두 곳을 섞으면 엉뚱한 자리에 붙는다.
    * (1.12.0~1.14.0에서는 씬별 추가만 읽어, 큐 항목에 잡아둔 자리가 조용히 무시됐다)
    */
-  const layout = add?.slots?.length ? add : entry?.slots?.length ? entry : null
+  const layout = add?.slots?.length
+    ? {
+        ...add,
+        slotChars: { ...(entry?.slotChars ?? {}), ...(add.slotChars ?? {}) },
+        slotOf: { ...(entry?.slotOf ?? {}), ...(add.slotOf ?? {}) }
+      }
+    : entry?.slots?.length
+      ? entry
+      : null
 
   // 캐릭터: 씬별 선택 순서 우선 → 반복 항목/메인 enabled 순서. 중복은 한 번만 포함한다.
   const baseCharIds = entry ? entry.characterIds : enabledCharacters().map((c) => c.id)
@@ -295,6 +312,16 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
   // 눈이 안 보이면 눈 태그 빼기·알몸일 때 pink nipples — 둘 다 설정에서 켜야 동작한다 (기본 꺼짐)
   const eyesOn = useOutfitsStore.getState().eyesClosedStrip
   const pinkNipplesOn = useOutfitsStore.getState().nudePinkNipples
+  // 카드 태그 씬 맞춤 (커스텀) — 씬에서 정한 값 > 세트 > 전체 설정(기본 꺼짐). 규칙표가 깨졌으면(rules null) 아무것도 고치지 않는다.
+  // 배경 카드는 인물이 없어 쓰지 않는다. 꺼져 있으면 카드 글을 읽지 않아 이 기능이 없던 때와 글자 단위로 같다
+  const fitState = useCardFitStore.getState()
+  const fitRules = fitState.rules
+  const fitOn =
+    !!fitRules &&
+    scene.kind !== 'background' &&
+    cardFitFor(scene.presetId, scene.id, fitState.enabled).on
+  // 「알몸이면 옷 벗기기 따라 켜기」 — 씬에서 옷 벗기기를 따로 정하지 않았을 때만 옷 벗기기를 켠다
+  const fitStripRule = fitOn ? cardFitStripRule(fitRules) : null
   // 하는쪽 태그 — 씬의 하는쪽 태그와 하는쪽 자리에 적은 자리 태그 (당하는쪽 노출 판정용)
   const sourceContexts = [
     scene.sourceTags ?? '',
@@ -489,7 +516,14 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     // 장면 태그의 누드는 씬 전체 태그처럼 당하는쪽(역할 없는 씬이면 전원)에게만 걸린다.
     // 남캐만·여캐만을 골랐으면 반대쪽은 이 씬에서 벗기지 않는다 — 남녀는 역할 기준(하는쪽=남캐, 당하는쪽=여캐),
     // 역할이 없는 캐릭터만 카드의 남자 태그(1boy 등)로 가린다
-    const strip = nudeStripFor(nudeStripSetting, globalStripOnNude, characterSex(role, c.prompt))
+    const stripBase = nudeStripFor(
+      nudeStripSetting,
+      globalStripOnNude,
+      characterSex(role, c.prompt)
+    )
+    // 카드 맞춤의 「알몸이면 옷 벗기기 따라 켜기」 — 씬에 옷 벗기기 값이 없고 전체 설정도 꺼져 있을 때만. 알몸 판정은 옷 벗기기가 한다
+    const stripByFit = !!fitStripRule && nudeStripSetting === undefined && !stripBase.enabled
+    const strip = stripByFit ? { enabled: true, force: false } : stripBase
     const worn = wornOutfitTags(c.outfitId, outfitChoice, outfits, strip.enabled, kindOf, auto)
     const dressed = undressForNude({
       card: c.prompt,
@@ -502,7 +536,6 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       enabled: strip.enabled,
       kindOf
     })
-    const outfitTag = dressed.outfit
     // 눈이 안 보이면(눈 감음·잠듦·눈 가림) 카드의 눈 외형 태그(눈 색·동공·흰자·빛나는 눈·기호 눈·눈 상태·시선)를 뺀다 (커스텀) —
     // 이 캐릭터에게 걸린 장면 태그(sceneGroups: 옷 벗기기와 같은 범위, 얼굴 인셋 자리도 몸 자리와 같이 읽는다)나
     // 지금 입은 복장(dressed.outfit)의 눈 가림 물건에 근거가 있을 때. 더 좁은 글(캐릭터·자리·상대 태그)에 눈 뜬 표현이 분명하면 빼지 않는다.
@@ -546,6 +579,36 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     const charTagOut = rw?.texts.char ?? charTag
     const slotTagOut = rw?.texts.slot ?? slotTag
     const partnerTagOut = rw?.texts.partner ?? partnerTag
+    // 카드 태그 씬 맞춤 (커스텀) — 눈 태그 빼기까지 끝난 카드와 입은 복장을, 이 캐릭터에게 걸린 장면 글(후타 재조립 뒤 실제로 보내는 글)에 맞춘다.
+    // 고친 것은 bodyNotes(topic fit)에 남는다. 꺼져 있으면 카드·복장 글 그대로
+    const fit = fitCardToScene({
+      enabled: fitOn,
+      rules: fitRules,
+      card: eyes.text,
+      outfit: dressed.outfit,
+      texts: {
+        scene: futaScene ? [futaScene.base, futaScene.prompt] : [base.prompt, scene.prompt],
+        source: rw?.texts.source ?? scene.sourceTags ?? '',
+        target: rw?.texts.target ?? scene.targetTags ?? '',
+        own: [charTagOut, slotTagOut, partnerTagOut]
+      },
+      role,
+      anyRole,
+      drawn: metas.filter((m) => !m.faceSeat).length,
+      faceSeat,
+      sex: reading.body.futa ? null : meta.sex,
+      who: { index, name: c.name, id: c.id }
+    })
+    const fitStripNotes =
+      stripByFit && fitStripRule && dressed.nude != null
+        ? cardFitStripNotes({
+            rule: fitStripRule,
+            nude: dressed.nude,
+            before: { card: c.prompt, outfit: worn },
+            after: { card: dressed.card, outfit: dressed.outfit },
+            who: { index, name: c.name, id: c.id }
+          })
+        : []
     const roleTagsOut = roleTagsFor(
       role,
       rw
@@ -579,7 +642,9 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
       ...(rw?.notes ?? []),
       ...(bodyTags?.notes ?? []),
       ...(futaOn && !faceSeat ? flagNotes(reading, index, c.name, c.id) : []),
-      ...eyes.notes
+      ...eyes.notes,
+      ...fitStripNotes,
+      ...fit.notes
     )
     // 입은 옷 자동 젖힘 (커스텀) — 옷 벗기기가 끝난 카드·복장 글을 읽어, 입은 옷에 맞는 젖힘 태그를 붙이거나
     // 안 붙인 이유를 남긴다. 알몸이면 붙이지 않는다. 붙은 태그는 반드시 exposeNotes 에 있다
@@ -608,17 +673,21 @@ export function buildSceneRequest(scene: Scene, entry?: SequenceEntry | null): G
     const explicit = addPos ?? slotPos ?? rp ?? (seated ? undefined : entry?.positions?.[c.id])
     return {
       // 카드(몸) → 몸에 맞춘 태그 → 복장 → 입은 옷 자동 젖힘 → 이 씬 태그 → 자리 태그 → 상대 태그 → 역할 태그 순으로 이어붙인다
+      // 카드 맞춤이 더한 태그(규칙의 「더하기」)는 맨 끝 — 더한 게 없으면 예전과 같은 글
       prompt: [
         bodyTags?.tags.join(', ') ?? '',
-        outfitTag,
+        fit.outfit,
         autoTag,
         withRole(charTagOut),
         withRole(slotTagOut),
         withRole(partnerTagOut),
-        roleTagsOut
-      ].reduce(appendPrompt, eyes.text),
-      // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀)
-      negativePrompt: appendPrompt(c.negativePrompt, dressed.outfitNegative),
+        roleTagsOut,
+        ...(fit.add ? [fit.add] : [])
+      ].reduce(appendPrompt, fit.card),
+      // 입은 복장의 네거티브가 카드 네거티브 뒤에 붙는다 (커스텀) · 카드 맞춤의 「네거티브에 더하기」는 그 뒤
+      negativePrompt: fit.addNegative
+        ? appendPrompt(appendPrompt(c.negativePrompt, dressed.outfitNegative), fit.addNegative)
+        : appendPrompt(c.negativePrompt, dressed.outfitNegative),
       // 미지정 캐릭터는 중립(0.5) — 카드 기본 좌표를 쓰면 배치 탭에서 끌어놓은
       // 위치가 씬으로 새어 들어온다. 겹침은 아래 자동 분산이 풀어준다.
       center: explicit ?? { x: 0.5, y: 0.5 },
@@ -750,14 +819,15 @@ export function previewSceneRequests(
   }))
 }
 
-/** 커스텀 확장이 참조하는 스토어들이 로드됐는지 보장 (씬 생성 직전 호출) */
-async function ensureExtrasData(): Promise<void> {
+/** 커스텀 확장이 참조하는 스토어들이 로드됐는지 보장 (씬 생성 직전 호출) — 모바일 클라우드도 쓴다 */
+export async function ensureExtrasData(): Promise<void> {
   const jobs: Promise<void>[] = []
   if (!useSceneExtrasStore.getState().loaded) jobs.push(useSceneExtrasStore.getState().load())
   if (!useCharactersStore.getState().loaded) jobs.push(useCharactersStore.getState().load())
   if (!useOutfitsStore.getState().loaded) jobs.push(useOutfitsStore.getState().load())
   if (!useVibesStore.getState().loaded) jobs.push(useVibesStore.getState().load())
   if (!useCharRefsStore.getState().loaded) jobs.push(useCharRefsStore.getState().load())
+  // 카드 태그 씬 맞춤 규칙표는 앱 시작 때 읽는다 (App) — 못 읽었으면 rules 가 없어 카드를 고치지 않는다
   await Promise.all(jobs)
   // 누드면 옷 벗기기 — 카드 태그의 옷 분류를 미리 받아둔다 (요청은 동기로 만들어진다)
   if (anyNudeStrip()) {
@@ -849,7 +919,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   trashedPresets: [],
   columns: Number(localStorage.getItem('scene_columns')) || 3,
   cardOrientation:
-    (localStorage.getItem('scene_orientation') as 'portrait' | 'landscape') || 'portrait',
+    (localStorage.getItem('scene_orientation_v2') as 'auto' | 'portrait' | 'landscape') || 'auto',
   gridView: localStorage.getItem('scene_grid_view') === 'row' ? 'row' : 'card',
   images: [],
   imagesTotal: 0,
@@ -948,7 +1018,7 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
   },
   setCardOrientation: (cardOrientation) => {
     set({ cardOrientation })
-    localStorage.setItem('scene_orientation', cardOrientation)
+    localStorage.setItem('scene_orientation_v2', cardOrientation)
   },
   setGridView: (gridView) => {
     set({ gridView })
@@ -1538,11 +1608,14 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
       if (!scene) continue // 현재 프리셋에 없는 씬(다른 프리셋 대기 항목)은 그대로 둔다
       const snap = item.request.sceneSequenceEntry ?? null
       const entry = snap ? (liveEntries.get(snap.id) ?? snap) : null
-      // 시드·i2i 소스는 원래 항목 것을 유지하고, 프롬프트/캐릭터/레퍼런스만 최신으로 재구성
+      // 시드·i2i 소스는 원래 항목 것을 유지하고, 프롬프트/캐릭터/레퍼런스만 최신으로 재구성.
+      // 폰 작업 id(cloudJobId)도 그대로 — 잃으면 PC 메인이 큐 항목을 작업에 묶지 못해 작업을 잃은 것으로 처리한다 (커스텀).
+      // 폰 작업 항목은 PC에 지금 불러 둔 소스의 해상도로 덮이지 않게 소스를 무시하고 다시 만든다
       const rebuilt: GenerationRequest = {
-        ...buildSceneRequest(scene, entry),
+        ...buildSceneRequest(scene, entry, { ignoreSource: !!item.request.cloudJobId }),
         seed: item.request.seed,
-        source: item.request.source
+        source: item.request.source,
+        ...(item.request.cloudJobId ? { cloudJobId: item.request.cloudJobId } : {})
       }
       updates.push({ id: item.id, request: rebuilt })
     }
@@ -1551,9 +1624,35 @@ export const useScenesStore = create<ScenesState>((set, get) => ({
 }))
 
 /** 씬 생성 시드 — 시드 고정을 존중 (고정이면 base+offset, 아니면 랜덤) */
-function sceneSeed(offset: number): number {
+export function sceneSeed(offset: number): number {
   const g = useGenerationStore.getState()
   return g.seedLocked && g.request.seed >= 0 ? (g.request.seed + offset) % 4294967296 : randomSeed()
+}
+
+/**
+ * 씬 한 장을 count장 큐에 넣고 큐 id들을 돌려준다 (커스텀 · 모바일 클라우드의 폰 작업용).
+ * 큐 반복·예약 수는 건드리지 않고 buildSceneRequest(scene) × count + 시드 sceneSeed(i)로 한 번에 등록한다.
+ * 활성 프리셋이 아닌 씬도 된다 — buildSceneRequest 는 씬 객체와 스토어만 본다.
+ * 폰 작업 전용이라 PC에 불러 둔 i2i 소스는 늘 무시한다(폰 사용자가 모르게 i2i 요청이 나가지 않게).
+ * cloudJobId(폰 작업 id)를 주면 모든 요청에 달린다 — 같은 작업의 중복 등록 방지와 진행 추적용.
+ */
+export async function enqueueSceneRequests(
+  scene: Scene,
+  count: number,
+  cloudJobId?: string
+): Promise<string[]> {
+  if (count <= 0) return []
+  await ensureExtrasData()
+  const requests: GenerationRequest[] = []
+  for (let i = 0; i < count; i++) {
+    requests.push({
+      ...buildSceneRequest(scene, null, { ignoreSource: true }),
+      seed: sceneSeed(i),
+      ...(cloudJobId ? { cloudJobId } : {})
+    })
+  }
+  const { ids } = await window.nais.invoke('queue:enqueueMany', { requests })
+  return ids
 }
 
 /** 활성 프리셋의 총 예약 수 (메인 생성 버튼 활성/표시용) */
@@ -1582,4 +1681,21 @@ export function bindSceneEvents(): () => void {
       reloadSelected = false
     }, 300)
   })
+}
+
+export function bindExternalDbEvents(): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const off = window.nais.on('db:externalChange', () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      const s = useScenesStore.getState()
+      void s.load()
+      void s.refreshPresetCounts()
+      void useSceneExtrasStore.getState().reload()
+    }, 400)
+  })
+  return () => {
+    clearTimeout(timer)
+    off()
+  }
 }

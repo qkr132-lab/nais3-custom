@@ -7,6 +7,14 @@ import type { SceneSetup } from './scene-bundle'
 import type { Outfit, OutfitChoice, OutfitPiece, TagKind } from './outfit'
 import type { NudeStripSetting } from './nude-strip'
 import type { PromptTokenReport, PromptTokenRequest } from './nai-tokens'
+import type {
+  CloudDevice,
+  CloudPairing,
+  CloudPcStatus,
+  CloudPreparedItem,
+  CloudWork,
+  CloudWorkResult
+} from './cloud-contract'
 
 export type { OpusUsage, RefillStatus, RefillUseResult }
 
@@ -108,7 +116,7 @@ export interface BodyNote {
    * 어느 갈래의 메모인가 — 눈 감음이면 'eyes' (카드의 눈 외형 태그를 뺀 메모). 없으면 후타·몸 메모.
    * 화면이 후타 메모와 따로 세고 「눈 감음」 배지를 다는 데 쓴다.
    */
-  topic?: 'eyes'
+  topic?: 'eyes' | 'fit'
   /**
    * 눈이 안 보이는 까닭 (topic 이 eyes 일 때) — closed 눈 감음 · asleep 잠듦 · covered 눈 가림. 없으면 눈 감음.
    * 화면이 배지·요약에 「눈 감음」「잠듦」「눈 가림」을 갈라 쓴다.
@@ -262,6 +270,8 @@ export interface GenerationRequest {
   source?: SourceImage
   /** 씬 생성이면 씬 id (저장 시 images.scene_id 연결) */
   sceneId?: number
+  /** 폰(모바일 클라우드)에서 온 생성 작업 id (커스텀) — 같은 작업을 두 번 넣지 않고, 큐 진행을 작업에 묶는 데 쓴다 */
+  cloudJobId?: string
   /** 예약 후 씬 태그가 바뀌어도 실행 직전에 재병합하기 위한 예약 당시 기본 프롬프트 */
   sceneBasePrompt?: string
   sceneBaseNegativePrompt?: string
@@ -315,6 +325,8 @@ export interface QueueItemLite {
   id: string
   state: QueueItemState
   sceneId?: number
+  /** 폰(모바일 클라우드) 작업에서 온 항목이면 그 작업 id (커스텀) — 「모두 취소」가 씬 예약 수로 되돌리지 않게 */
+  cloudJobId?: string
   error?: string
   filePath?: string
 }
@@ -802,6 +814,21 @@ export interface IpcInvokeMap {
     req: { tags: string[] }
     res: { items: { tag: string; ko: string; count: number }[] }
   }
+  /**
+   * 카드 태그 씬 맞춤 규칙표 (커스텀) — userData\card-fit-rules.json 을 글 그대로 읽는다 (없으면 기본 규칙표로 만든 뒤).
+   * 읽기·해석은 렌더러(shared/card-fit)가 한다. error = 파일을 읽지 못한 까닭
+   */
+  'cardFit:read': {
+    req: void
+    res: { path: string; text: string; created: boolean; error?: string }
+  }
+  /** 규칙표 파일을 기본 프로그램(메모장 등)으로 연다 */
+  'cardFit:open': { req: void; res: void }
+  /** 규칙표를 기본으로 되돌린다 — 지금 파일은 card-fit-rules.bak-<시각>.json 으로 남긴다 */
+  'cardFit:reset': {
+    req: void
+    res: { path: string; text: string; created: boolean; backup?: string; error?: string }
+  }
   /** 태그마다 옷 / 알몸 / 몸 / 모름 — 누드 씬에서 카드의 옷 태그를 걷어낼 때 (커스텀) */
   'outfits:classifyTags': {
     req: { tags: string[] }
@@ -988,6 +1015,8 @@ export interface IpcInvokeMap {
   'scenes:purge': { req: { ids: number[] }; res: void }
   'scenes:create': { req: { presetId: number; name: string }; res: { id: number } }
   'scenes:get': { req: { id: number }; res: { scene: Scene | null } }
+  /** 씬이 휴지통에 있지 않고(그 프리셋도) 살아 있는가 (커스텀 · 폰 작업 실행 전 확인용) */
+  'scenes:isLive': { req: { id: number }; res: { live: boolean } }
   'scenes:update': {
     req: {
       id: number
@@ -1219,6 +1248,37 @@ export interface IpcInvokeMap {
     res: { deleted: number; failed: { key: string; error: string }[] }
   }
   'r2:transferStatus': { req: void; res: R2TransferStatus }
+  // ── 모바일 클라우드 (커스텀) — 설계 cloud/DESIGN.md, 계약 src/shared/cloud-contract.ts ──
+  'cloud:status': { req: void; res: CloudPcStatus }
+  /** 동기화 켜고 끄기 */
+  'cloud:setEnabled': { req: { enabled: boolean }; res: CloudPcStatus }
+  /** 새로 생성한 그림을 클라우드에 올릴지 */
+  'cloud:setUploadImages': { req: { enabled: boolean }; res: CloudPcStatus }
+  /** 클라우드에 남길 최근 그림 수 */
+  'cloud:setKeepImages': { req: { count: number }; res: CloudPcStatus }
+  /** PC 꺼졌을 때 클라우드 생성 — 켜면 NAI 토큰을 클라우드에 맡기고, 끄면 지운다 */
+  'cloud:setCloudGen': { req: { enabled: boolean }; res: CloudPcStatus }
+  /** 폰 연결 코드(10분) + QR */
+  'cloud:pairing': { req: void; res: CloudPairing }
+  'cloud:devices': { req: void; res: { items: CloudDevice[] } }
+  'cloud:revokeDevice': { req: { id: string }; res: { items: CloudDevice[] } }
+  /** 바뀐 것 전부 바로 올리기 */
+  'cloud:syncNow': { req: void; res: CloudPcStatus }
+  /** 최근 그림 N장을 클라우드에 올리기 (이미 올린 건 건너뜀) */
+  'cloud:uploadRecent': { req: { count: number }; res: { queued: number } }
+  /** 렌더러가 폰 작업을 받을 준비가 됨 — 이 전엔 메인이 할 일을 넘기지 않는다 */
+  'cloud:rendererReady': { req: void; res: void }
+  /** 렌더러가 cloud:work 를 처리한 결과 */
+  'cloud:workDone': { req: CloudWorkResult; res: void }
+  /** 렌더러가 만든 클라우드 생성용 완성 요청 (allKeys = 있어야 할 키 전부, 마지막 묶음에만) */
+  'cloud:prepared': { req: { items: CloudPreparedItem[]; allKeys?: string[] }; res: void }
+  /** 폰과 나눌 PC 폴더 — path 가 '' 이면 고르지 않은 것(폴더 공유 꺼짐) */
+  'cloud:driveRoot': { req: void; res: { path: string } }
+  /** 폴더 고르기 창을 띄워 바꾼다 (취소하면 그대로) */
+  'cloud:pickDriveRoot': { req: void; res: { path: string } }
+  'cloud:clearDriveRoot': { req: void; res: { path: string } }
+  /** 씬 전부(모든 프리셋·씬/배경) — 썸네일 없이 가볍게. 클라우드 완성 요청 만들기용 */
+  'scenes:listAllLite': { req: void; res: { items: Scene[] } }
 }
 
 /** Automatic R2 synchronization settings, stored independently for each scene preset. */
@@ -1294,6 +1354,7 @@ export interface IpcEventMap {
   }
   /** 씬에 새 이미지가 생성됨 (목록/상세 갱신). filePath로 카드 즉시 낙관적 갱신 */
   'scenes:changed': { sceneId: number; filePath: string }
+  'db:externalChange': Record<string, never>
   /** 바이브 인코딩 완료 — 카드의 인코딩 표시 갱신용 */
   'vibes:encoded': Record<string, never>
   /** 자동 업데이트 상태 (GitHub release) */
@@ -1308,4 +1369,10 @@ export interface IpcEventMap {
   /** R2 내려받기·삭제 진행 상황 (커스텀) */
   'r2:transfer': R2TransferStatus
   'r2sync:status': R2SyncStatus
+  /** 모바일 클라우드 상태 (커스텀) */
+  'cloud:status': CloudPcStatus
+  /** 폰에서 온 편집·생성 작업 — 렌더러가 처리하고 cloud:workDone 으로 답한다 */
+  'cloud:work': CloudWork
+  /** 클라우드 생성용 완성 요청을 다시 만들어 보내 달라 (full = 해시 무시하고 전부) */
+  'cloud:needPrepared': { full: boolean }
 }

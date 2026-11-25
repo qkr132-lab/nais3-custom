@@ -21,6 +21,7 @@ import { useCharactersStore } from '../src/renderer/src/stores/characters-store'
 import { useSceneExtrasStore } from '../src/renderer/src/stores/scene-extras-store'
 import { useOutfitsStore } from '../src/renderer/src/stores/outfits-store'
 import { DEFAULT_EXPOSE_ACTS } from '../src/shared/auto-expose'
+import { CENSOR_NEGATIVE_SUPPRESS_TAGS } from '../src/shared/censor-tags'
 import type { Outfit, OutfitChoice } from '../src/shared/outfit'
 
 const scene = {
@@ -104,7 +105,9 @@ describe('scene token preview uses the actual generation request builder', () =>
       'blue eyes, completely white censored anal'
     ])
     expect(preview[0].request.sceneBaseCharacterPrompts).toEqual(['blue eyes'])
-    expect(preview[0].request.negativePrompt).toBe('low quality, blur, anal')
+    expect(preview[0].request.negativePrompt).toBe(
+      `low quality, blur, anal, ${CENSOR_NEGATIVE_SUPPRESS_TAGS.join(', ')}`
+    )
     expect(scene).toEqual(originalScene)
     expect(useGenerationStore.getState().request).toEqual(originalRequest)
     expect(invoke).not.toHaveBeenCalled()

@@ -14,6 +14,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { useRef, type CSSProperties } from 'react'
+import { useIsPortraitMode } from '../lib/drag-scroll'
 import { cn } from '../lib/utils'
 
 /** 드롭다운 목록용 세로 드래그 정렬 컨테이너 — onReorder에 새 id 순서 전달 */
@@ -26,7 +27,12 @@ export function SortableList({
   onReorder: (ids: number[]) => void
   children: React.ReactNode
 }): React.JSX.Element {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const isPortrait = useIsPortraitMode()
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: isPortrait ? { delay: 220, tolerance: 8 } : { distance: 4 }
+    })
+  )
   const onDragEnd = (e: DragEndEvent): void => {
     const { active, over } = e
     if (!over || active.id === over.id) return
@@ -66,6 +72,7 @@ export function SortableRow({
   onTap?: () => void
   children: React.ReactNode
 }): React.JSX.Element {
+  const isPortrait = useIsPortraitMode()
   const sortable = useSortable({ id })
   const downPos = useRef<{ x: number; y: number } | null>(null)
   const style: CSSProperties = {
@@ -80,7 +87,11 @@ export function SortableRow({
     <div
       ref={sortable.setNodeRef}
       style={style}
-      className={cn('flex touch-none items-center', className)}
+      className={cn(
+        'flex items-center',
+        isPortrait ? 'touch-pan-y select-none' : 'touch-none',
+        className
+      )}
       {...sortable.attributes}
       {...sortable.listeners}
       // capture 단계에서 좌표 기록 (dnd 리스너보다 먼저, 덮어쓰지 않음)

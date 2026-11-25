@@ -2,6 +2,7 @@ import { useCharRefsStore, useVibesStore } from '../stores/refs-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useGenerationStore } from '../stores/generation-store'
 import { useOutfitsStore } from '../stores/outfits-store'
+import { useCardFitStore } from '../stores/card-fit-store'
 import { useSceneExtrasStore } from '../stores/scene-extras-store'
 import { useScenesStore } from '../stores/scenes-store'
 import { toast } from '../stores/toast-store'
@@ -67,9 +68,16 @@ export function initLiveResync(): void {
       s.entries !== p.entries ||
       s.sequenceEnabled !== p.sequenceEnabled ||
       // 옷 벗기기 값(둘 다·남캐만·여캐만 …)을 바꾸면 대기 중인 씬도 새 값으로 다시 만든다
-      s.nudeStrips !== p.nudeStrips
+      s.nudeStrips !== p.nudeStrips ||
+      // 카드 태그 씬 맞춤 — 씬·세트에서 켜고 끈 값
+      s.cardFits !== p.cardFits ||
+      s.cardFitPresets !== p.cardFitPresets
     )
       schedule()
+  })
+  // 카드 태그 씬 맞춤 — 전체 설정이나 규칙표가 바뀌면(version) 대기 중인 씬의 캐릭터 칸 글도 새 규칙으로
+  useCardFitStore.subscribe((s, p) => {
+    if (s.version !== p.version) schedule()
   })
   // 옷 벗기기 전체 설정 — 「전체 설정 따름」인 씬의 대기 항목에 반영.
   // 입은 옷 자동 젖힘 설정과 복장 편집·장면 행위 목록 편집도 같다 (젖힘 태그는 복장 조각과 장면 목록에서 정해진다).

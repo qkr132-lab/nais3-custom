@@ -102,6 +102,8 @@ import {
   reorderPresets,
   setPresetDefaultResolution,
   listScenes,
+  listAllScenesLite,
+  isSceneLive,
   listTrashedScenes,
   restoreScenes,
   purgeScenes,
@@ -152,6 +154,7 @@ import {
   updateOutfit
 } from './outfits/repo'
 import { classifyTag, hasClothingData, stateCandidates, tagKo } from './outfits/classify'
+import { openCardFitFile, readCardFitFile, resetCardFitFile } from './card-fit'
 import { splitPromptTokens, tokenTags, type TagKind } from '../shared/outfit'
 import { importNais2 } from './backup/nais2'
 import { checkForUpdatesNow, startUpdateDownload } from './updater'
@@ -221,6 +224,13 @@ import { basename, extname, join } from 'path'
 import sharp from 'sharp'
 import { verifyToken } from './nai/client'
 import type { GenerationQueue } from './queue/generation-queue'
+import {
+  cloudApi,
+  onCloudNaiInfo,
+  onNaiTokenChanged,
+  probeAllAccountsForCloud,
+  syncDriveIndexToCloud
+} from './cloud'
 
 /** IpcInvokeMap 계약을 강제하는 handle 등록 헬퍼 */
 function handle<C extends keyof IpcInvokeMap>(
@@ -248,7 +258,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   // 검증 성공 시에만 저장 — 잘못된 토큰이 조용히 저장되는 것 방지
   handle('nai:setToken', async ({ token }) => {
     const result = await verifyToken(token)
-    if (result.valid) setNaiToken(token)
+    if (result.valid) {
+      setNaiToken(token)
+      onNaiTokenChanged() // 클라우드 생성이 켜져 있으면 새 토큰을 맡긴다 (커스텀)
+    }
     return result
   })
 
@@ -256,12 +269,14 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('nai:revealToken', () => ({ token: getNaiToken() }))
   handle('nai:deleteToken', () => {
     deleteNaiToken()
+    onNaiTokenChanged() // 클라우드 생성이 켜져 있으면 맡긴 토큰도 지우고 끈다 (커스텀)
   })
   handle('nai:balance', async () => {
     const token = getNaiToken()
     if (!token) return { anlas: null, tier: null, opusUsage: null }
     const { anlas, tier, opusUsage } = await fetchAnlasBalance(token)
     if (anlas !== null) logBalance(anlas)
+    onCloudNaiInfo({ tier, anlas, opusUsage }) // 모바일 클라우드 (커스텀)
     return { anlas, tier, opusUsage }
   })
   handle('nai:anlasUsage', () => anlasUsage())
@@ -273,25 +288,36 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   // 계정이 바뀌면 고속 모드 작업자도 맞춘다 (×N·작업자 목록 갱신)
   handle('accounts:add', ({ label, token }) => {
+    const before = getNaiToken()
     const accounts = addAccount(label, token)
+    // 활성 계정이 없어 첫 계정이 바로 활성이 되면 로컬 토큰이 바뀐다 — 클라우드 쪽도 맞춘다 (커스텀)
+    if (getNaiToken() !== before) onNaiTokenChanged()
+    else void probeAllAccountsForCloud(true)
     ctx.queue.reconcile()
     return { accounts }
   })
   handle('accounts:rename', ({ id, label }) => {
     const accounts = renameAccount(id, label)
     ctx.queue.reconcile(false)
+    void probeAllAccountsForCloud(false)
     return { accounts }
   })
   handle('accounts:remove', ({ id }) => {
+    const before = getNaiToken()
     const accounts = removeAccount(id)
+    // 활성 계정을 지워 쓰던 토큰이 바뀌었거나 없어졌으면 클라우드 쪽도 맞춘다 (커스텀)
+    if (getNaiToken() !== before) onNaiTokenChanged()
+    else void probeAllAccountsForCloud(true)
     // 계정이 둘 미만이 되면 고속 모드는 쓸 수 없다 — 켜 둔 채로 남지 않게 끈다
     if (accounts.length < 2 && getSetting(TURBO_KEY) === '1') setSetting(TURBO_KEY, '0')
     ctx.queue.reconcile()
     return { accounts }
   })
   handle('accounts:setActive', ({ id }) => {
-    setActiveAccount(id)
+    const switched = setActiveAccount(id)
     resetProbeCache()
+    if (switched) onNaiTokenChanged() // 클라우드 생성이 켜져 있으면 새 토큰을 맡긴다 (커스텀)
+    else void probeAllAccountsForCloud(true)
     ctx.queue.reconcile(false)
     return { accounts: listAccounts() }
   })
@@ -306,6 +332,7 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
     if (on && getSetting(TURBO_KEY) !== '1') clearProbeStamps()
     setSetting(TURBO_KEY, on ? '1' : '0')
     ctx.queue.reconcile()
+    void probeAllAccountsForCloud(false)
     return ctx.queue.turboStatus()
   })
 
@@ -318,11 +345,12 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
         // 게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다
         const token = active ? getNaiToken() : null
         if (token) {
-          const { anlas, opusUsage } = await fetchAnlasBalance(token)
+          const { anlas, tier, opusUsage } = await fetchAnlasBalance(token)
           if (anlas !== null) {
             logBalance(anlas)
             // 생성이 아니다 — 칩의 「직전 생성 실제 차감」은 그대로 둔다
             broadcast('anlas:balance', { anlas, opusUsage, keepDelta: true })
+            onCloudNaiInfo({ tier, anlas, opusUsage }) // 모바일 클라우드 (커스텀)
           }
         }
         // 고속 모드에서 빠졌거나 모두 빠져 멈췄으면 새 한도로 다시 판정받는다
@@ -427,7 +455,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       const data = JSON.parse(readFileSync(result.filePaths[0], 'utf-8')) as Record<string, unknown>
       // 포맷 감지: NAIS3는 _app='NAIS3', NAIS2는 nais2-* 키
       if (data._app === 'NAIS3') {
+        const tokenBefore = getNaiToken()
         const { imported } = importAll(data)
+        // 복원이 NAI 토큰·계정을 바꿨으면 클라우드 쪽도 맞춘다 (커스텀)
+        if (getNaiToken() !== tokenBefore) onNaiTokenChanged()
         return { summary: `NAIS3 백업 복원 완료 (${imported}개 항목)`, needsPromptReload: true }
       }
       if (Object.keys(data).some((k) => k.startsWith('nais2-'))) {
@@ -505,6 +536,8 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   })
   handle('scenes:create', ({ presetId, name }) => ({ id: createScene(presetId, name) }))
   handle('scenes:get', ({ id }) => ({ scene: getScene(id) }))
+  // 씬·프리셋이 둘 다 휴지통 밖에 있는가 (커스텀 · 폰 작업 실행 전 확인용)
+  handle('scenes:isLive', ({ id }) => ({ live: isSceneLive(id) }))
   handle('scenes:update', ({ id, patch }) => {
     updateScene(id, patch)
     if (patch.name !== undefined) scheduleSyncForScenes([id])
@@ -587,9 +620,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('scenes:exportJson', ({ presetId }) => exportScenesJson(presetId))
   handle('scenes:importJson', ({ presetId }) => importScenesJson(presetId))
   handle('scenes:exportZip', async ({ mode }) => ({ count: await exportZip(mode) }))
-  handle('scenes:exportToFolder', ({ ids, mode, favoritesOnly, dir, policy }) =>
-    exportToFolder({ ids, mode, favoritesOnly }, { dir, policy })
-  )
+  handle('scenes:exportToFolder', async ({ ids, mode, favoritesOnly, dir, policy }) => {
+    const res = await exportToFolder({ ids, mode, favoritesOnly }, { dir, policy })
+    if (res.copied && res.copied > 0) void syncDriveIndexToCloud(true)
+    return res
+  })
 
   // ── Cloudflare R2 업로드 (커스텀) ──────────────────────────────────
   handle('r2:setAuth', (auth) => setR2Auth(auth))
@@ -688,6 +723,10 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
   handle('outfits:classifyTags', ({ tags }) => ({
     kinds: Object.fromEntries(tags.map((t) => [t, classifyTag(t)]))
   }))
+  // 카드 태그 씬 맞춤 규칙표 (커스텀) — 파일은 글 그대로 넘기고 해석은 렌더러가 한다
+  handle('cardFit:read', () => readCardFitFile())
+  handle('cardFit:open', () => openCardFitFile())
+  handle('cardFit:reset', () => resetCardFitFile())
   handle('chars:create', ({ name, folderId }) => ({ id: createCharacter(name, folderId) }))
   handle('chars:update', ({ id, patch }) => {
     updateCharacter(id, patch)
@@ -964,10 +1003,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
         seed: 0,
         kind: 'upscale'
       })
-      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
+      void fetchAnlasBalance(token).then(({ anlas, tier, opusUsage }) => {
         if (anlas !== null) {
           logBalance(anlas)
           broadcast('anlas:balance', { anlas, opusUsage })
+          onCloudNaiInfo({ tier, anlas, opusUsage }) // 모바일 클라우드 (커스텀)
         }
       })
       return { filePath: saved.filePath, base64: png.toString('base64') }
@@ -997,10 +1037,11 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
         kind: method // 툴별 kind (bg-removal 등) → 히스토리 뱃지 구분
       })
       // 잔액 갱신 (디렉터 툴도 Anlas 소모, Opus는 소형 무료)
-      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
+      void fetchAnlasBalance(token).then(({ anlas, tier, opusUsage }) => {
         if (anlas !== null) {
           logBalance(anlas)
           broadcast('anlas:balance', { anlas, opusUsage })
+          onCloudNaiInfo({ tier, anlas, opusUsage }) // 모바일 클라우드 (커스텀)
         }
       })
       return { filePath: saved.filePath, base64: png.toString('base64') }
@@ -1093,6 +1134,33 @@ export function registerIpcHandlers(ctx: { dbVersion: number; queue: GenerationQ
       return { error: e instanceof Error ? e.message : String(e) }
     }
   })
+
+  // 모바일 클라우드 (커스텀) — 설계 cloud/DESIGN.md
+  handle('cloud:status', () => cloudApi.status())
+  handle('cloud:setEnabled', ({ enabled }) => cloudApi.setEnabled(enabled))
+  handle('cloud:setUploadImages', ({ enabled }) => cloudApi.setUploadImages(enabled))
+  handle('cloud:setKeepImages', ({ count }) => cloudApi.setKeepImages(count))
+  handle('cloud:setCloudGen', ({ enabled }) => cloudApi.setCloudGen(enabled))
+  handle('cloud:pairing', () => cloudApi.pairing())
+  handle('cloud:devices', () => cloudApi.devices())
+  handle('cloud:revokeDevice', ({ id }) => cloudApi.revokeDevice(id))
+  handle('cloud:syncNow', () => cloudApi.syncNow())
+  handle('cloud:uploadRecent', ({ count }) => cloudApi.uploadRecent(count))
+  handle('cloud:rendererReady', () => cloudApi.rendererReady())
+  handle('cloud:workDone', (result) => cloudApi.workDone(result))
+  handle('cloud:prepared', (req) => cloudApi.prepared(req))
+  handle('cloud:driveRoot', () => cloudApi.driveRoot())
+  handle('cloud:pickDriveRoot', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const r = await dialog.showOpenDialog(win, {
+      title: '폰과 나눌 PC 폴더 선택',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (r.canceled || r.filePaths.length === 0) return cloudApi.driveRoot()
+    return cloudApi.setDriveRoot(r.filePaths[0])
+  })
+  handle('cloud:clearDriveRoot', () => cloudApi.setDriveRoot(''))
+  handle('scenes:listAllLite', () => ({ items: listAllScenesLite() }))
 
   handle('window:control', ({ action }) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

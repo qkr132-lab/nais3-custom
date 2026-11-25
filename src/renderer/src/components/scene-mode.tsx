@@ -35,11 +35,13 @@ import {
   RectangleVertical,
   RefreshCw,
   RotateCcw,
+  Scan,
   Scissors,
   Search,
   SlidersHorizontal,
   ShieldCheck,
   Shirt,
+  Wand2,
   Sparkles,
   Star,
   Trash2,
@@ -109,9 +111,13 @@ import { useResolutionsStore } from '../stores/resolutions-store'
 import { askConfirm, askText } from '../stores/dialog-store'
 import { toast } from '../stores/toast-store'
 import { cn } from '../lib/utils'
+import { useDragScroll, useIsPortraitMode } from '../lib/drag-scroll'
 import { ResolutionPicker } from './resolution-picker'
 import { R2SyncDialog } from './r2-sync-dialog'
 import { NudeStripMenu } from './nude-strip-menu'
+import { CardFitMenu } from './card-fit-menu'
+import { cardFitLabel, type CardFitChoice } from '../lib/card-fit-choice'
+import { useCardFitStore } from '../stores/card-fit-store'
 import { SceneDetail } from './scene-detail'
 import { AdditionDialog, SequenceDialog } from './scene-extras-dialogs'
 import { SortableList, SortableRow } from './sortable-list'
@@ -190,9 +196,29 @@ function PresetDropdown(): React.JSX.Element {
   const reorderPresets = useScenesStore((s) => s.reorderPresets)
   const duplicatePreset = useScenesStore((s) => s.duplicatePreset)
   const setPresetDefaultResolution = useScenesStore((s) => s.setPresetDefaultResolution)
+  // 카드 태그 씬 맞춤 — 세트별 값 (커스텀 · 없으면 설정 창의 전체 설정)
+  const cardFitPresets = useSceneExtrasStore((s) => s.cardFitPresets)
+  const setPresetCardFit = useSceneExtrasStore((s) => s.setPresetCardFit)
+  const cardFitGlobal = useCardFitStore((s) => s.enabled)
   const [open, setOpen] = useState(false)
+  const [folderCat, setFolderCat] = useState<'전체' | '단독' | '남캐' | '여캐' | '후타×후타' | '기타'>('전체')
+  const presetScrollRef = useRef<HTMLDivElement>(null)
+  useDragScroll(presetScrollRef, open)
   const [syncTarget, setSyncTarget] = useState<ScenePreset | null>(null)
   const [syncConfigs, setSyncConfigs] = useState<Record<number, R2SyncConfig>>({})
+
+  const classifyCat = (p: ScenePreset): '단독' | '남캐' | '여캐' | '후타×후타' | '기타' => {
+    const n = p.name.trim()
+    if (n.startsWith('단독')) return '단독'
+    if (n.includes('남캐')) return '남캐'
+    if (n.startsWith('[공]여캐')) return '여캐'
+    if (n.startsWith('[공]후타')) return '후타×후타'
+    return '기타'
+  }
+  const visiblePresets = useMemo(
+    () => (folderCat === '전체' ? presets : presets.filter((p) => classifyCat(p) === folderCat)),
+    [presets, folderCat]
+  )
 
   const active = presets.find((p) => p.id === activePresetId)
   const activeSyncConfig = active ? syncConfigs[active.id] : undefined
@@ -250,11 +276,11 @@ function PresetDropdown(): React.JSX.Element {
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
-            className="flex h-8 min-w-52 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 text-[13px] font-medium hover:bg-surface-2 max-[1000px]:min-w-40"
+            className="flex h-8 min-w-72 max-w-[420px] items-center gap-1.5 rounded-md border border-line bg-paper px-3 text-[13.5px] font-medium hover:bg-surface-2 max-[1000px]:min-w-44 max-[640px]:h-9 max-[640px]:w-full max-[640px]:min-w-0 max-[640px]:max-w-none"
             title={
               activeSyncConfig?.bucket
                 ? `클플 ${activeSyncConfig.enabled ? '연결됨' : '동기화 꺼짐'} · ${syncTargetLabel(activeSyncConfig)}`
-                : undefined
+                : active?.name
             }
           >
             <span className="min-w-0 flex-1 truncate text-left">{active?.name ?? '프리셋'}</span>
@@ -272,14 +298,42 @@ function PresetDropdown(): React.JSX.Element {
             <ChevronDown size={14} className="shrink-0 text-muted" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1">
-          <div className="max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar">
+        <PopoverContent align="start" className="w-[440px] min-w-[var(--radix-popover-trigger-width)] max-w-[90vw] p-1.5">
+          {presets.length > 5 && (
+            <div className="mb-1.5 flex flex-wrap gap-1 border-b border-line pb-1.5 px-1">
+              {(['전체', '단독', '남캐', '여캐', '후타×후타', '기타'] as const).map((cat) => {
+                const count =
+                  cat === '전체'
+                    ? presets.length
+                    : presets.filter((p) => classifyCat(p) === cat).length
+                if (cat !== '전체' && count === 0) return null
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setFolderCat(cat)}
+                    className={cn(
+                      'rounded-full px-2.5 py-0.5 text-[11.5px] font-medium transition-colors',
+                      folderCat === cat
+                        ? 'bg-accent text-accent-ink'
+                        : 'bg-surface-2 text-muted hover:text-ink'
+                    )}
+                  >
+                    📁 {cat} ({count})
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div ref={presetScrollRef} className="max-h-[70vh] touch-pan-y overflow-y-auto overflow-x-hidden pr-1">
             {/* 드래그로 순서 변경 */}
             <SortableList
-              ids={presets.map((p) => p.id)}
-              onReorder={(ids) => void reorderPresets(ids)}
+              ids={visiblePresets.map((p) => p.id)}
+              onReorder={(ids) => {
+                if (folderCat === '전체') void reorderPresets(ids)
+              }}
             >
-              {presets.map((p) => {
+              {visiblePresets.map((p) => {
                 const syncConfig = syncConfigs[p.id]
                 const targetLabel = syncTargetLabel(syncConfig)
                 return (
@@ -327,7 +381,7 @@ function PresetDropdown(): React.JSX.Element {
                             </span>
                           </div>
                           <button
-                            className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
+                            className="hidden shrink-0 rounded p-1.5 text-faint hover:text-fg group-hover:inline-flex max-[960px]:inline-flex"
                             onClick={async () => {
                               const name = await askText('프리셋 이름', p.name)
                               if (name) void renamePreset(p.id, name)
@@ -338,7 +392,7 @@ function PresetDropdown(): React.JSX.Element {
                           </button>
                           {/* 모듈 복제 — 씬 전부 포함, 클플 연결은 안전상 복제하지 않음 */}
                           <button
-                            className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-fg group-hover:opacity-100"
+                            className="hidden shrink-0 rounded p-1.5 text-faint hover:text-fg group-hover:inline-flex max-[960px]:inline-flex"
                             onClick={() => {
                               setOpen(false)
                               void duplicatePreset(p.id)
@@ -349,7 +403,7 @@ function PresetDropdown(): React.JSX.Element {
                           </button>
                           {presets.length > 1 && (
                             <button
-                              className="shrink-0 rounded p-1 text-faint opacity-0 hover:text-danger group-hover:opacity-100"
+                              className="hidden shrink-0 rounded p-1.5 text-faint hover:text-danger group-hover:inline-flex max-[960px]:inline-flex"
                               onClick={async () => {
                                 if (
                                   await askConfirm('프리셋 삭제', {
@@ -430,6 +484,25 @@ function PresetDropdown(): React.JSX.Element {
             >
               <Cloud size={14} /> 클플 즐겨찾기 동기화…
             </button>
+          )}
+          {/* 카드 태그 씬 맞춤 — 이 세트의 씬 전부 (씬에서 따로 정한 씬은 그 값이 이긴다) */}
+          {active && active.kind !== 'background' && (
+            <CardFitMenu
+              current={cardFitPresets[active.id]}
+              level="preset"
+              inherited={cardFitGlobal}
+              onPick={(value) => {
+                setPresetCardFit(active.id, value)
+                toast(`「${active.name}」 세트: 카드 맞춤 · ${cardFitLabel(value)}`, 'success')
+              }}
+            >
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted hover:bg-surface-2 hover:text-ink"
+                title="이 세트 씬들의 카드 태그 씬 맞춤 — 따름(설정 창) · 켬 · 끔 · 씬에서 따로 정한 씬은 그 값을 씀"
+              >
+                <Wand2 size={14} /> 카드 맞춤 (이 세트) · {cardFitLabel(cardFitPresets[active.id])}
+              </button>
+            </CardFitMenu>
           )}
           <div className="my-1 h-px bg-line" />
           <button
@@ -674,6 +747,7 @@ function SceneGrid(): React.JSX.Element {
   // 스크롤 위치 복원 — 마운트 직후, 프리셋을 바꾼 뒤, 씬 목록이 늦게 로드된 경우에 한 번씩
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  useDragScroll(scrollRef, !editMode)
   const [gridWidth, setGridWidth] = useState(0)
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -684,14 +758,7 @@ function SceneGrid(): React.JSX.Element {
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-  const effectiveColumns =
-    gridWidth > 0 && gridWidth < 520
-      ? 1
-      : gridWidth > 0 && gridWidth < 780
-        ? Math.min(columns, 2)
-        : gridWidth > 0 && gridWidth < 1100
-          ? Math.min(columns, 3)
-          : columns
+  const effectiveColumns = columns
   // 프리셋을 바꾸면 activePresetId가 먼저 바뀌고 새 씬 목록은 조금 뒤에 온다. 그 사이의 옛 목록과
   // 클램프로 생기는 scroll 이벤트가 새 열쇠 자리를 덮어쓰지 않게, 목록이 활성 프리셋 것일 때만
   // 복원하고 기록한다 (shownScrollKeyRef = 지금 화면에 자리를 맞춰 둔 열쇠)
@@ -1337,19 +1404,34 @@ function SceneGrid(): React.JSX.Element {
           tip={gridView === 'card' ? '카드 보기 (클릭: 이름 목록)' : '이름 목록 (클릭: 카드)'}
           onClick={toggleGridView}
         />
-        {/* 카드 비율: 세로/가로 (해상도와 무관하게 고정). 이름 목록에서는 쓰지 않는다 */}
+        {/* 카드 비율: 원본 비율(auto) / 세로 / 가로. 모든 모드에서 잘림 없이(object-contain) 전체 표시 */}
         <IconBtn
           icon={
-            cardOrientation === 'portrait' ? (
+            cardOrientation === 'auto' ? (
+              <Scan size={16} />
+            ) : cardOrientation === 'portrait' ? (
               <RectangleVertical size={16} />
             ) : (
               <RectangleHorizontal size={16} />
             )
           }
-          tip={cardOrientation === 'portrait' ? '세로 카드 (클릭: 가로)' : '가로 카드 (클릭: 세로)'}
+          tip={
+            cardOrientation === 'auto'
+              ? '원본 비율 전체 보기 — 해상도 무관 잘림 없음 (클릭: 세로 박스)'
+              : cardOrientation === 'portrait'
+                ? '세로 카드 박스에 전체 맞춤 (클릭: 가로 박스)'
+                : '가로 카드 박스에 전체 맞춤 (클릭: 원본 비율)'
+          }
+          active={cardOrientation === 'auto'}
           disabled={gridView === 'row'}
           onClick={() =>
-            setCardOrientation(cardOrientation === 'portrait' ? 'landscape' : 'portrait')
+            setCardOrientation(
+              cardOrientation === 'auto'
+                ? 'portrait'
+                : cardOrientation === 'portrait'
+                  ? 'landscape'
+                  : 'auto'
+            )
           }
         />
         {/* 열 수 (2~5) */}
@@ -1359,7 +1441,7 @@ function SceneGrid(): React.JSX.Element {
             gridView === 'row' && 'opacity-40'
           )}
         >
-          {[2, 3, 4, 5].map((n) => (
+          {[1, 2, 3, 4, 5].map((n) => (
             <button
               key={n}
               onClick={() => setColumns(n)}
@@ -1470,7 +1552,7 @@ function SceneGrid(): React.JSX.Element {
             restoredTopRef.current = null
             rememberScroll(scrollKey, captureScroll(e.currentTarget))
           }}
-          className="min-h-0 flex-1 overflow-y-auto p-3 no-scrollbar"
+          className="min-h-0 flex-1 touch-pan-y overflow-y-auto p-3 no-scrollbar"
         >
           <div ref={contentRef}>
             <DndContext
@@ -1487,7 +1569,7 @@ function SceneGrid(): React.JSX.Element {
                 strategy={gridView === 'row' ? verticalListSortingStrategy : rectSortingStrategy}
               >
                 <div
-                  className={cn('grid', gridView === 'row' ? 'gap-1' : 'gap-3')}
+                  className={cn('grid items-start', gridView === 'row' ? 'gap-1' : effectiveColumns >= 3 ? 'gap-2' : 'gap-3')}
                   style={{
                     gridTemplateColumns: `repeat(${gridView === 'row' ? 1 : effectiveColumns}, minmax(0, 1fr))`
                   }}
@@ -1522,7 +1604,7 @@ function SceneGrid(): React.JSX.Element {
                     <button
                       onClick={() => void create(isBackground ? '새 배경' : '새 씬')}
                       className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-faint transition hover:text-accent"
-                      style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
+                      style={{ aspectRatio: cardOrientation === 'landscape' ? CARD_ASPECT.landscape : CARD_ASPECT.portrait }}
                     >
                       <Plus size={22} />
                       <span className="text-[12px]">{isBackground ? '배경 추가' : '씬 추가'}</span>
@@ -1547,12 +1629,17 @@ function SceneGrid(): React.JSX.Element {
                 {dragScene && gridView === 'card' && (
                   <div
                     className="relative overflow-hidden rounded-lg border border-accent bg-surface-2 shadow-2xl"
-                    style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}
+                    style={{
+                      aspectRatio:
+                        cardOrientation === 'auto'
+                          ? `${dragScene.width || 832} / ${dragScene.height || 1216}`
+                          : CARD_ASPECT[cardOrientation]
+                    }}
                   >
                     {dragScene.thumbnail ? (
                       <img
                         src={`data:image/webp;base64,${dragScene.thumbnail}`}
-                        className="h-full w-full object-cover"
+                        className="h-full w-full bg-paper object-contain"
                         draggable={false}
                         alt=""
                       />
@@ -1917,6 +2004,11 @@ function BulkBar({
   const bulkAssignNumbers = useScenesStore((s) => s.bulkAssignNumbers)
   const setSceneNudeStrip = useSceneExtrasStore((s) => s.setSceneNudeStrip)
   const globalStripOnNude = useOutfitsStore((s) => s.stripOnNude)
+  const setSceneCardFit = useSceneExtrasStore((s) => s.setSceneCardFit)
+  const bulkCardFitInherited = useSceneExtrasStore((s) =>
+    activePresetId == null ? undefined : s.cardFitPresets[activePresetId]
+  )
+  const cardFitGlobal = useCardFitStore((s) => s.enabled)
   const moveScenesToEdge = useScenesStore((s) => s.moveScenesToEdge)
   const moveScenesToPosition = useScenesStore((s) => s.moveScenesToPosition)
   const total = useScenesStore((s) => s.scenes.length)
@@ -1944,6 +2036,12 @@ function BulkBar({
     if (activePresetId == null) return
     setSceneNudeStrip(activePresetId, [...selection], value)
     toast(`선택한 ${n}개 씬: 옷 벗기기 · ${nudeStripLabel(value)}`, 'success')
+  }
+  // 카드 태그 씬 맞춤 (커스텀) — 선택한 씬에만. 따름 = 씬에서 정한 값을 지움 (세트 → 설정 창)
+  const bulkCardFit = (value: CardFitChoice): void => {
+    if (activePresetId == null) return
+    setSceneCardFit(activePresetId, [...selection], value)
+    toast(`선택한 ${n}개 씬: 카드 맞춤 · ${cardFitLabel(value)}`, 'success')
   }
   const disabled = n === 0
 
@@ -2045,6 +2143,22 @@ function BulkBar({
           <Shirt size={13} /> 옷 벗기기
         </Button>
       </NudeStripMenu>
+      {/* 카드 태그 씬 맞춤 일괄 (커스텀) — 누르면 메뉴: 따름 / 켬 / 끔 */}
+      <CardFitMenu
+        current={null}
+        level="scene"
+        inherited={bulkCardFitInherited ?? cardFitGlobal}
+        onPick={bulkCardFit}
+      >
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={disabled}
+          title="선택한 씬의 카드 태그 씬 맞춤을 정함 — 따름(세트 → 설정 창) · 켬 · 끔"
+        >
+          <Wand2 size={13} /> 카드 맞춤
+        </Button>
+      </CardFitMenu>
       {/* 씬별 캐릭터 일괄 적용 (커스텀) — 선택한 씬 전체에 같은 추가 캐릭터/레퍼런스 설정 */}
       <Button
         size="sm"
@@ -2373,7 +2487,9 @@ const SceneCard = memo(function SceneCard({
   onBeginShiftSelection: (sceneId: number, pointerId: number) => void
 }): React.JSX.Element {
   const editMode = useScenesStore((s) => s.editMode)
+  const columns = useScenesStore((s) => s.columns)
   const cardOrientation = useScenesStore((s) => s.cardOrientation)
+  const [imgAspect, setImgAspect] = useState<string | null>(null)
   const selection = useScenesStore((s) => s.selection)
   const toggleSelected = useScenesStore((s) => s.toggleSelected)
   const selectRangeTo = useScenesStore((s) => s.selectRangeTo)
@@ -2388,7 +2504,8 @@ const SceneCard = memo(function SceneCard({
   const selectionActive = editMode || selection.size > 0
   // Shift/Ctrl 제스처는 아래 pointerdown에서 따로 가로채고, 일반 드래그는 편집 중에도 재정렬에 쓴다.
   // 고른 카드를 끌면 고른 전부가 함께 간다
-  const sortable = useSortable({ id: `scene-${scene.id}` })
+  const isPortrait = useIsPortraitMode()
+  const sortable = useSortable({ id: `scene-${scene.id}`, disabled: isPortrait && !editMode })
 
   // 씬별 캐릭터 추가 (NAIS2 Custom) — 선택 합계 배지
   const additionsEnabled = useSceneExtrasStore((s) => s.additionsEnabled)
@@ -2423,13 +2540,21 @@ const SceneCard = memo(function SceneCard({
   const isRow = variant === 'row'
   // 이미지 우선순위: 생성 중 스트리밍 > 저장 썸네일(가벼움, 드래그 렉 방지) > 원본 > 없음.
   // 카드는 작게 표시되므로 640 webp 썸네일이면 충분히 선명하고, 풀해상도 대신 써서 드래그가 부드럽다.
+  // 1장씩 보기(columns === 1)에서는 640px 썸네일 대신 원본 해상도 이미지를 우선 사용해 선명하게 표시
   const src = live
     ? `data:image/png;base64,${live}`
-    : scene.thumbnail
-      ? `data:image/webp;base64,${scene.thumbnail}`
-      : scene.thumbnailPath
-        ? imageUrl(scene.thumbnailPath)
-        : null
+    : columns === 1 && scene.thumbnailPath
+      ? imageUrl(scene.thumbnailPath)
+      : scene.thumbnail
+        ? `data:image/webp;base64,${scene.thumbnail}`
+        : scene.thumbnailPath
+          ? imageUrl(scene.thumbnailPath)
+          : null
+  const naturalOrSceneAspect = imgAspect ?? `${scene.width || 832} / ${scene.height || 1216}`
+  const cardAspect =
+    columns === 1 || cardOrientation === 'auto'
+      ? naturalOrSceneAspect
+      : CARD_ASPECT[cardOrientation]
 
   // 우클릭 메뉴/3-dot 공용 액션
   const renameScene = async (): Promise<void> => {
@@ -2610,7 +2735,7 @@ const SceneCard = memo(function SceneCard({
         onPointerDown={(e) => e.stopPropagation()}
       >
         <button
-          className="grid size-5 place-items-center rounded-full text-ink hover:bg-surface-2 disabled:opacity-30"
+          className="grid size-7 place-items-center rounded-full text-ink hover:bg-surface-2 disabled:opacity-30"
           // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (카드와 같다)
           disabled={scene.reserveCount + queueRemaining === 0}
           onClick={() => void adjustReserve(scene.id, -1)}
@@ -2621,7 +2746,7 @@ const SceneCard = memo(function SceneCard({
           {scene.reserveCount}
         </span>
         <button
-          className="grid size-5 place-items-center rounded-full text-ink hover:bg-surface-2"
+          className="grid size-7 place-items-center rounded-full text-ink hover:bg-surface-2"
           onClick={() => void adjustReserve(scene.id, 1)}
         >
           <Plus size={13} />
@@ -2645,8 +2770,9 @@ const SceneCard = memo(function SceneCard({
           }
           className={cn(
             isRow
-              ? 'group relative flex h-10 touch-none items-center gap-2 overflow-hidden rounded-md border bg-surface-2 px-2 transition'
-              : 'group relative touch-none overflow-hidden rounded-lg border bg-surface-2 transition',
+              ? 'group relative flex h-10 select-none items-center gap-2 overflow-hidden rounded-md border bg-surface-2 px-2 transition'
+              : 'group relative select-none overflow-hidden rounded-lg border bg-surface-2 transition',
+            !isPortrait || editMode ? 'touch-none' : 'touch-pan-y',
             selectionActive && checked ? 'border-accent ring-2 ring-accent/40' : 'border-line',
             found && 'border-accent ring-[3px] ring-accent ring-offset-2 ring-offset-surface',
             sortable.isDragging && 'shadow-xl',
@@ -2696,13 +2822,20 @@ const SceneCard = memo(function SceneCard({
             rowBody
           ) : (
             <>
-              <div className="relative" style={{ aspectRatio: CARD_ASPECT[cardOrientation] }}>
-                {/* 배경 이미지 (생성 중이면 스트리밍 프리뷰) */}
+              <div className="relative bg-paper/75" style={{ aspectRatio: cardAspect }}>
+                {/* 배경 이미지 (해상도 무관하게 절대 잘리지 않도록 object-contain 사용) */}
                 {src ? (
                   <img
                     src={src}
-                    className="h-full w-full cursor-pointer object-cover"
+                    className="h-full w-full cursor-pointer object-contain"
                     draggable={false}
+                    onLoad={(e) => {
+                      const el = e.currentTarget
+                      if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                        const next = `${el.naturalWidth} / ${el.naturalHeight}`
+                        if (next !== imgAspect) setImgAspect(next)
+                      }
+                    }}
                     alt=""
                   />
                 ) : (
@@ -2804,7 +2937,7 @@ const SceneCard = memo(function SceneCard({
                   <Popover>
                     <PopoverTrigger asChild>
                       <button
-                        className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100"
+                        className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/70 group-hover:opacity-100 max-[960px]:opacity-100"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
@@ -2841,72 +2974,90 @@ const SceneCard = memo(function SceneCard({
                   </Popover>
                 )}
 
-                {/* 하단 그라디언트 + 이름 + 예약 +/- */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-6">
-                  <div className="pointer-events-auto flex items-end justify-between gap-1">
-                    <div className="min-w-0">
-                      {editMode ? (
-                        <input
-                          className="w-full truncate rounded bg-white/15 px-1 py-0.5 text-[13px] font-medium text-white outline-none placeholder:text-white/50 focus:bg-white/25"
-                          value={scene.name}
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onChange={(e) => void update(scene.id, { name: e.target.value })}
-                        />
-                      ) : (
-                        <div className="truncate text-[13px] font-semibold text-white drop-shadow">
-                          {scene.name}
-                        </div>
-                      )}
-                      {/* 이미지 장수 + 내보내기 번호 (커스텀) */}
-                      {(scene.imageCount > 0 || scene.exportNo != null) && (
-                        <div className="mt-1 flex items-center gap-1">
-                          {scene.exportNo != null && (
-                            <button
-                              className="inline-flex items-center rounded-full bg-accent/85 px-2 py-0.5 font-mono text-[12px] font-bold text-white drop-shadow transition hover:bg-accent"
-                              title="클릭해서 씬 번호 수정"
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void editSingleSceneNumber()
-                              }}
-                            >
-                              {String(scene.exportNo).padStart(2, '0')}
-                            </button>
-                          )}
-                          {scene.imageCount > 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[12px] font-medium text-white drop-shadow">
-                              <ImageIcon size={12} />
-                              {scene.imageCount}장
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    {/* 예약 +/- */}
-                    <div
-                      className="flex shrink-0 items-center gap-0.5 rounded-full bg-black/55 p-0.5"
+              </div>
+              {/* 이미지 아래 전용 푸터 — 일러스트 하단을 가리지 않고 1~5열 어디서나 이름·장수·예약 버튼이 온전히 보이도록 분리 */}
+              <div
+                className={cn(
+                  'flex flex-col gap-1 border-t border-line/60 bg-surface-2',
+                  columns >= 3 ? 'px-1.5 py-1' : 'px-2.5 py-1.5'
+                )}
+              >
+                <div className="min-w-0">
+                  {editMode ? (
+                    <input
+                      className="w-full truncate rounded bg-paper px-1.5 py-0.5 text-[12.5px] font-medium text-ink outline-none ring-1 ring-line focus:ring-accent"
+                      value={scene.name}
                       onClick={(e) => e.stopPropagation()}
                       onPointerDown={(e) => e.stopPropagation()}
+                      onChange={(e) => void update(scene.id, { name: e.target.value })}
+                    />
+                  ) : (
+                    <div
+                      className={cn(
+                        'font-semibold leading-snug text-ink',
+                        columns === 1
+                          ? 'text-[14px]'
+                          : columns >= 3
+                            ? 'line-clamp-1 text-[11.5px]'
+                            : 'line-clamp-1 text-[12.5px]'
+                      )}
+                      title={scene.name}
                     >
-                      <button
-                        className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20 disabled:opacity-30"
-                        // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
-                        disabled={scene.reserveCount + queueRemaining === 0}
-                        onClick={() => void adjustReserve(scene.id, -1)}
-                      >
-                        <Minus size={13} />
-                      </button>
-                      <span className="min-w-4 text-center text-[12px] font-medium text-white">
-                        {scene.reserveCount}
-                      </span>
-                      <button
-                        className="grid size-5 place-items-center rounded-full text-white hover:bg-white/20"
-                        onClick={() => void adjustReserve(scene.id, 1)}
-                      >
-                        <Plus size={13} />
-                      </button>
+                      {scene.name}
                     </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <div className="flex min-w-0 items-center gap-1">
+                    {scene.exportNo != null && (
+                      <button
+                        className="inline-flex items-center rounded-full bg-accent/85 px-1.5 py-0.5 font-mono text-[11px] font-bold text-white transition hover:bg-accent"
+                        title="클릭해서 씬 번호 수정"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void editSingleSceneNumber()
+                        }}
+                      >
+                        {String(scene.exportNo).padStart(2, '0')}
+                      </button>
+                    )}
+                    {scene.imageCount > 0 && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-paper px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                        <ImageIcon size={11} />
+                        {scene.imageCount}
+                      </span>
+                    )}
+                  </div>
+                  {/* 예약 +/- */}
+                  <div
+                    className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full border border-line/70 bg-paper p-0.5"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      className={cn(
+                        'grid place-items-center rounded-full text-ink hover:bg-surface-2 disabled:opacity-30',
+                        columns >= 4 ? 'size-5' : 'size-6'
+                      )}
+                      // 생성 중엔 큐 대기분 취소가 가능해야 하므로 합산 기준 (커스텀)
+                      disabled={scene.reserveCount + queueRemaining === 0}
+                      onClick={() => void adjustReserve(scene.id, -1)}
+                    >
+                      <Minus size={12} />
+                    </button>
+                    <span className="min-w-4 text-center font-mono text-[11.5px] font-semibold text-ink">
+                      {scene.reserveCount}
+                    </span>
+                    <button
+                      className={cn(
+                        'grid place-items-center rounded-full text-ink hover:bg-surface-2',
+                        columns >= 4 ? 'size-5' : 'size-6'
+                      )}
+                      onClick={() => void adjustReserve(scene.id, 1)}
+                    >
+                      <Plus size={12} />
+                    </button>
                   </div>
                 </div>
               </div>

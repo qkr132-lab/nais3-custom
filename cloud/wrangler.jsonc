@@ -1,0 +1,31 @@
+{
+  // NAIS3 모바일 클라우드 워커 — 설계 cloud/DESIGN.md
+  // 계정 정보는 넣지 않는다 (wrangler 로그인 계정을 쓴다). PC_SECRET 은 비밀값이라 이 파일에 없다
+  // (`wrangler secret put PC_SECRET`, 로컬 실행은 cloud/.dev.vars).
+  "name": "nais3-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+
+  // 허브: /api/* 전부를 받는 단일 Durable Object (SQLite 저장)
+  "durable_objects": {
+    "bindings": [{ "name": "HUB", "class_name": "Hub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
+
+  // 그림 보관 — 공개 도메인이 없는 비공개 버킷
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "nais3-cloud" }],
+
+  // 폰 화면(정적 자산) — /api/* 만 워커 코드가 먼저 받는다
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "vars": {
+    "NAI_HOST": "https://image.novelai.net"
+  },
+
+  "observability": { "enabled": false }
+}

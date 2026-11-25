@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+# 로컬 비밀값 (wrangler dev) — 절대 커밋 금지
+.dev.vars
+.dev.vars.*
+.env
+# 빌드 결과 (deploy 때 다시 만든다)
+public/

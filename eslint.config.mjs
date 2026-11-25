@@ -6,7 +6,8 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out'] },
+  // cloud/ 는 별도 패키지(Cloudflare 워커 + Preact 폰 화면) — 자체 tsconfig 로 타입 검사한다
+  { ignores: ['**/node_modules', '**/dist', '**/out', 'cloud/**'] },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],

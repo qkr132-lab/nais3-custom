@@ -17,6 +17,7 @@ import {
   withCensorTags,
   withoutCensorDuplicates,
   withAnalSuppression,
+  withCensorNegative,
   type CensorKind,
   type CensorWeights
 } from './censor-tags'
@@ -114,9 +115,12 @@ export const appendPrompt = appendPromptPiece
 /** Always rebuild managed negatives from the raw fields so switching off restores them. */
 export function sceneNegativePrompt(
   base: string,
-  scene: { negativePrompt: string; suppressAnal?: boolean }
+  scene: { negativePrompt: string; suppressAnal?: boolean; censorKinds?: CensorKind[] }
 ): string {
-  return withAnalSuppression(appendPrompt(base, scene.negativePrompt), scene.suppressAnal)
+  return withCensorNegative(
+    withAnalSuppression(appendPrompt(base, scene.negativePrompt), scene.suppressAnal),
+    scene.censorKinds
+  )
 }
 
 /** NAI 상호작용(mutual) 태그 — 행위 태그 필드에 접두사 없이 쓰면 source#/target#을 자동으로 붙인다.

@@ -1,0 +1,19 @@
+{
+  "name": "nais3-cloud",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NAIS3 모바일 클라우드 — Cloudflare 워커 + Durable Object + 폰 전용 화면 (설계 DESIGN.md)",
+  "type": "module",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "dev": "npm run build:web && wrangler dev --local",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:dry": "node scripts/deploy.mjs --dry-run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.2",
+    "fflate": "0.8.3",
+    "preact": "10.29.8"
+  }
+}

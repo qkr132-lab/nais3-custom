@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import sharp from 'sharp'
 import icon from '../../resources/icon.png?asset'
 import { autoBackupIfDue, closeDb, initDb } from './db'
+import { watchExternalDbChanges } from './db/external-watch'
 import { getNaiToken } from './db/settings'
 import { accountToken } from './db/accounts'
 import { ensureQuotaAccount, refreshAccountUsage } from './nai/account-switch'
@@ -30,6 +31,14 @@ import type { FragmentPromptMetadata } from '../shared/types'
 import { fragmentSource } from './fragments/repo'
 import { isUnderImagesRoot, saveGeneratedImage } from './images/storage'
 import { broadcast, registerIpcHandlers } from './ipc'
+import {
+  onCloudImageSaved,
+  onCloudNaiInfo,
+  onNaiTokenChanged,
+  startCloud,
+  stopCloud,
+  updateCloudAccountBalance
+} from './cloud'
 import { shutdownTagSearch } from './tags'
 import { migrateFromSharedFolder, needsMigration } from './migrate-data'
 import { setupUpdater } from './updater'
@@ -72,8 +81,8 @@ function createWindow(): void {
     width: 1600,
     height: 900,
     // 작은 노트북/분할 화면에서도 사용 가능. 렌더러가 폭에 따라 패널을 세로 배치한다.
-    minWidth: 760,
-    minHeight: 520,
+    minWidth: 360,
+    minHeight: 480,
     show: false,
     autoHideMenuBar: true,
     frame: false,
@@ -178,8 +187,10 @@ app.whenReady().then(async () => {
     } else {
       // 한도가 바닥난 계정이면 여유 있는 계정으로 갈아탄다 (커스텀 — 계정 여러 개 등록 시)
       const swap = await ensureQuotaAccount(rawRequest.model)
-      if (swap.switched) broadcast('accounts:switched', { label: swap.label ?? '' })
-      else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
+      if (swap.switched) {
+        broadcast('accounts:switched', { label: swap.label ?? '' })
+        onNaiTokenChanged() // 모바일 클라우드 (커스텀) — 클라우드에 맡긴 토큰도 새 계정 것으로
+      } else if (swap.allExhausted) broadcast('accounts:allExhausted', undefined)
       token = getNaiToken()
       // 이 장의 계정이 정해졌다 — 고속 모드를 켜는 교대 구간에 그 계정의 작업자만 기다리게 (await 없이 바로)
       lane.claim?.()
@@ -294,11 +305,18 @@ app.whenReady().then(async () => {
     // saveGeneratedImage가 auto_save 설정을 읽어 처리한다 (씬 포함).
     // 씬 생성은 씬루트/<프리셋>/<씬 이름>/에 모아 저장 (NAIS2와 동일 계층)
     const scene = request.sceneId ? getScene(request.sceneId) : null
+    const savedKind = request.sceneId
+      ? 'scene'
+      : source
+        ? source.maskBase64
+          ? 'inpaint'
+          : 'i2i'
+        : 't2i'
     const saved = await saveGeneratedImage({
       png,
       sentPayload,
       seed: request.seed,
-      kind: request.sceneId ? 'scene' : source ? (source.maskBase64 ? 'inpaint' : 'i2i') : 't2i',
+      kind: savedKind,
       sceneId: request.sceneId,
       format: imageFormat,
       sceneName: scene?.name,
@@ -324,24 +342,40 @@ app.whenReady().then(async () => {
     if (request.sceneId)
       broadcast('scenes:changed', { sceneId: request.sceneId, filePath: saved.filePath })
 
+    // 모바일 클라우드 (커스텀) — 동기화가 켜져 있으면 새 그림을 클라우드에 올린다
+    onCloudImageSaved({
+      id: saved.id,
+      filePath: saved.filePath,
+      sceneId: request.sceneId,
+      seed: request.seed,
+      kind: savedKind,
+      width: request.width,
+      height: request.height
+    })
+
     // 생성 후 잔액 갱신 (실사용량 추적의 진실 공급원) — 실패해도 생성 흐름엔 영향 없음
     if (lane.accountId) {
       // 고속 모드: 이 계정의 한도 기록을 새로 맞춘다 (다음 장 판정이 이 값을 기다린다).
       // 잔액 기록·방송·게이지는 활성 계정 것만 — 다른 계정의 잔액이 섞이면 사용량 계산이 틀어진다.
-      // 활성 여부는 토큰으로 본다 (같은 토큰을 두 계정으로 넣어 두면 작업자 id 가 활성 id 와 다를 수 있다)
+      // 활성 여부는 토큰으로 본다 (같은 토큰을 두 계정으로 넣어 두면 작업자 id 가 활성 id 와 다를 수 있다).
+      // 모바일 클라우드에 알리는 계정 정보도 활성 계정 것만 (커스텀)
       const accountId = lane.accountId
       const sentToken = token
-      void refreshAccountUsage(accountId, sentToken).then(({ anlas, opusUsage }) => {
-        if (anlas !== null && sentToken === getNaiToken()) {
-          logBalance(anlas)
-          broadcast('anlas:balance', { anlas, opusUsage })
+      void refreshAccountUsage(accountId, sentToken).then(({ anlas, tier, opusUsage }) => {
+        if (anlas !== null) {
+          updateCloudAccountBalance(accountId, { tier, anlas, opusUsage })
+          if (sentToken === getNaiToken()) {
+            logBalance(anlas)
+            broadcast('anlas:balance', { anlas, opusUsage })
+          }
         }
       })
     } else {
-      void fetchAnlasBalance(token).then(({ anlas, opusUsage }) => {
+      void fetchAnlasBalance(token).then(({ anlas, tier, opusUsage }) => {
         if (anlas !== null) {
           logBalance(anlas)
           broadcast('anlas:balance', { anlas, opusUsage })
+          onCloudNaiInfo({ tier, anlas, opusUsage }) // 모바일 클라우드 (커스텀)
         }
       })
     }
@@ -354,6 +388,8 @@ app.whenReady().then(async () => {
   if (Number.isFinite(savedDelay) && savedDelay >= 0) queue.setDelayMs(savedDelay)
 
   registerIpcHandlers({ dbVersion, queue })
+  watchExternalDbChanges(() => broadcast('db:externalChange', {}))
+  startCloud({ queue }) // 모바일 클라우드 (커스텀) — 연결 파일 가져오기 + 동기화 시작
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -387,6 +423,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
+  stopCloud()
   shutdownTagSearch()
   closeDb()
 })

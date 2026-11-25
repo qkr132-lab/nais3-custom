@@ -14,6 +14,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Smartphone,
   Trash2,
   Upload
 } from 'lucide-react'
@@ -27,9 +28,11 @@ import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings
 import { THEME_PRESETS } from '../lib/theme-presets'
 import { useGenerationStore } from '../stores/generation-store'
 import { AccountsSection } from './accounts-section'
+import { CloudSection } from './cloud-section'
 import { useThemeStore } from '../stores/theme-store'
 import { useCharactersStore } from '../stores/characters-store'
 import { useOutfitsStore } from '../stores/outfits-store'
+import { useCardFitStore } from '../stores/card-fit-store'
 import { useFragmentsStore } from '../stores/fragments-store'
 import { useVibesStore, useCharRefsStore } from '../stores/refs-store'
 import { usePromptPresetsStore } from '../stores/prompt-presets-store'
@@ -54,7 +57,8 @@ import { Slider } from './ui/slider'
 import { Switch } from './ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 
-type SectionId = 'appearance' | 'generation' | 'storage' | 'shortcuts' | 'account' | 'about'
+type SectionId =
+  'appearance' | 'generation' | 'storage' | 'shortcuts' | 'account' | 'mobile' | 'about'
 
 const NAV: { id: SectionId; label: string; icon: typeof Info }[] = [
   { id: 'appearance', label: '모양', icon: Palette },
@@ -62,6 +66,7 @@ const NAV: { id: SectionId; label: string; icon: typeof Info }[] = [
   { id: 'storage', label: '저장', icon: FolderOpen },
   { id: 'shortcuts', label: '단축키', icon: Keyboard },
   { id: 'account', label: 'NAI 계정', icon: KeyRound },
+  { id: 'mobile', label: '모바일', icon: Smartphone },
   { id: 'about', label: '정보', icon: Info }
 ]
 
@@ -268,6 +273,7 @@ function GenerationSection(): React.JSX.Element {
           onCheckedChange={setEyesClosedStrip}
         />
       </Row>
+      <CardFitRow />
       <Row label="생성 완료 알림" hint="예약한 이미지가 다 뽑히면 Windows 알림 (소리 없음)">
         <Switch
           checked={notify}
@@ -280,6 +286,98 @@ function GenerationSection(): React.JSX.Element {
           }}
         />
       </Row>
+    </div>
+  )
+}
+
+/**
+ * 카드 태그 씬 맞춤 (커스텀) — 전체 설정 스위치 + 규칙표 파일 열기·다시 읽기·기본으로.
+ * 규칙표가 깨졌으면 오류를 빨갛게 띄운다 (그동안 카드는 고치지 않는다).
+ */
+function CardFitRow(): React.JSX.Element {
+  const enabled = useCardFitStore((s) => s.enabled)
+  const setEnabled = useCardFitStore((s) => s.setEnabled)
+  const rules = useCardFitStore((s) => s.rules)
+  const error = useCardFitStore((s) => s.error)
+  const warnings = useCardFitStore((s) => s.warnings)
+  const path = useCardFitStore((s) => s.path)
+  const on = rules?.rules.filter((r) => r.on).length ?? 0
+  const total = rules?.rules.length ?? 0
+  return (
+    <div className="py-2.5">
+      <div className="flex items-center justify-between gap-6">
+        <div className="min-w-0">
+          <p className="text-[13px] text-ink">카드 태그 씬 맞춤</p>
+          <p className="mt-0.5 text-[11.5px] text-faint">
+            생성 직전에 그 캐릭터에게 걸린 장면 태그를 읽고, 부딪히는 카드·입은 복장 태그를 보낼
+            때만 빼거나 가중치를 풂 (감은 눈·rolling eyes면 눈매·눈 색 · 얼굴이 안 보이면 얼굴 ·
+            뒷모습이면 앞면 · pov면 하는쪽 얼굴 · 실루엣이면 색 · 씬이 정한 표정·시선·구도·배경 ·
+            알몸이면 옷 벗기기) · 카드 원문은 그대로 · 뺀 것은 씬 상세의 「카드 맞춤」에서 확인 ·
+            세트·씬마다 따로 끌 수 있음 · 끄면 이 기능이 없을 때와 똑같이 나감
+          </p>
+        </div>
+        <div className="shrink-0">
+          <Switch aria-label="카드 태그 씬 맞춤" checked={enabled} onCheckedChange={setEnabled} />
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-[11.5px] text-faint">
+          {error ? '규칙표 오류 — 규칙을 쓰지 않음' : `규칙 ${total}개 중 ${on}개 켜짐`}
+        </span>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() => void useCardFitStore.getState().openFile()}
+        >
+          <FolderOpen size={13} /> 규칙표 열기
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() =>
+            void useCardFitStore
+              .getState()
+              .reloadRules()
+              .then((changed) => {
+                const st = useCardFitStore.getState()
+                if (st.error) toast(`규칙표 오류: ${st.error}`, 'error')
+                else toast(changed ? '규칙표를 다시 읽음' : '바뀐 게 없음', 'success')
+              })
+          }
+        >
+          <RefreshCw size={13} /> 다시 읽기
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() =>
+            void (async () => {
+              const ok = await askConfirm('규칙표를 기본으로 되돌릴까요?', {
+                message: '지금 규칙표는 같은 폴더에 card-fit-rules.bak-시각.json 으로 남깁니다.',
+                confirmLabel: '되돌리기'
+              })
+              if (!ok) return
+              const r = await useCardFitStore.getState().resetFile()
+              toast(
+                r.backup ? '기본 규칙표로 되돌림 (예전 것은 백업)' : '기본 규칙표로 되돌림',
+                'success'
+              )
+            })()
+          }
+        >
+          <RotateCcw size={13} /> 기본으로
+        </Button>
+      </div>
+      {path && <p className="mt-1 break-all text-[11px] text-faint">{path}</p>}
+      {error && <p className="mt-1 text-[11.5px] text-danger">{error}</p>}
+      {!error && warnings.length > 0 && (
+        <ul className="mt-1 list-disc pl-4 text-[11.5px] text-amber-500">
+          {warnings.slice(0, 6).map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+          {warnings.length > 6 && <li>그 밖에 {warnings.length - 6}개</li>}
+        </ul>
+      )}
     </div>
   )
 }
@@ -1120,6 +1218,9 @@ export function SettingsDialog({
               </TabsContent>
               <TabsContent value="account" className="m-0 h-full">
                 <AccountSection />
+              </TabsContent>
+              <TabsContent value="mobile" className="m-0">
+                <CloudSection />
               </TabsContent>
               <TabsContent value="about" className="m-0">
                 <AboutSection />

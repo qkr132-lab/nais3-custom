@@ -134,14 +134,23 @@ interface GenerationState {
   setBatchCount: (count: number) => void
   setPromptSplitEnabled: (enabled: boolean) => void
   patchPromptParts: (patch: Partial<PromptParts>) => void
+  /** 저장된 설정 복원(hydrate)이 끝났는가 — 모바일 클라우드가 덜 읽은 설정을 올리거나 덮지 않게 (커스텀) */
+  hydrated: boolean
   hydrate: () => Promise<void>
   generate: () => Promise<void>
   /**
-   * 메인 탭 생성 요청 한 건 조립 (커스텀) — 시드 포함, 배치 수와 무관.
-   * 스토어·저장 설정을 바꾸지 않는 순수 조립이라, 메인 탭의 자동 젖힘 메모를 미리 계산할 때도 쓴다.
-   * ignoreSource 를 주면 PC에 불러 둔 i2i 소스를 무시한다.
+   * 메인 탭 생성 요청 한 건 조립 (커스텀 · 모바일 클라우드) — 시드 포함, 배치 수와 무관.
+   * 스토어·저장 설정을 바꾸지 않는 순수 조립이라, 클라우드용 완성 요청을 만들 때도 쓴다.
+   * ignoreSource 를 주면 PC에 불러 둔 i2i 소스를 무시한다 — 클라우드는 i2i를 만들지 않고(무료 조건 밖)
+   * 소스 해상도로 해상도가 덮이지도 않아야 해서, 클라우드용 계산은 늘 이 옵션을 켠다.
    */
   buildMainRequest: (options?: { ignoreSource?: boolean }) => Promise<GenerationRequest>
+  /**
+   * 메인 탭 생성을 count장 큐에 넣고 큐 id들을 돌려준다 — 시드 정책·저장은 generate()와 같다 (커스텀).
+   * 폰 작업 전용이라 PC에 불러 둔 i2i 소스는 늘 무시한다(폰 사용자가 모르게 i2i 요청이 나가지 않게).
+   * cloudJobId(폰 작업 id)를 주면 큐에 넣는 요청에만 달린다 — 저장본(main_params)에는 넣지 않는다.
+   */
+  generateMain: (count: number, cloudJobId?: string) => Promise<string[]>
   cancelAll: () => Promise<void>
   refreshHistory: () => Promise<void>
   view: (filePath: string | null) => void
@@ -239,6 +248,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     get().patchRequest({ promptParts, prompt: mergePromptParts(promptParts) })
   },
 
+  hydrated: false,
   hydrate: async () => {
     const { value: tier } = await window.nais.invoke('settings:get', { key: 'nai_tier' })
     if (tier) set({ subscriptionTier: tier })
@@ -260,6 +270,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       }
     }
     syncModelLimits(get().request.model)
+    set({ hydrated: true })
     const queue = await window.nais.invoke('queue:status', undefined)
     // 진행 이벤트가 먼저 와서 따라갈 장을 정해 두었으면 그 장을 그대로 — 미리보기 그림과 씬이 어긋나지 않게
     if (!queue.items.some((i) => i.id === previewFollowId && i.state === 'generating')) {
@@ -277,15 +288,18 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     await enqueueMain(batchCount)
   },
   buildMainRequest: async (options) => (await assembleMainRequest(options)).finalRequest,
+  generateMain: (count, cloudJobId) => enqueueMain(count, cloudJobId, { ignoreSource: true }),
 
   cancelAll: async () => {
     const queue = get().queue
     if (!queue) return
     const active = queue.items.filter((i) => i.state === 'pending' || i.state === 'generating')
-    // 씬의 "아직 시작 안 한" 항목들은 취소 후 예약으로 되돌린다 (남은 개수 유실 방지)
+    // 씬의 "아직 시작 안 한" 항목들은 취소 후 예약으로 되돌린다 (남은 개수 유실 방지).
+    // 폰 작업 항목(cloudJobId)은 예약 수를 쓰지 않고 만든 것이라 되돌리지 않는다 — 되돌리면
+    // 취소한 장수가 씬 예약에 남아 다음 예약 생성 때 다시 만들어진다 (커스텀)
     const bySceneId = new Map<number, number>()
     for (const i of active) {
-      if (i.state === 'pending' && i.sceneId != null) {
+      if (i.state === 'pending' && i.sceneId != null && !i.cloudJobId) {
         bySceneId.set(i.sceneId, (bySceneId.get(i.sceneId) ?? 0) + 1)
       }
     }
@@ -340,11 +354,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
 }))
 
 /**
- * 메인 탭 생성 요청 조립 (커스텀) — generate()와 메인 탭의 자동 젖힘 메모(buildMainRequest)가 함께 쓴다.
+ * 메인 탭 생성 요청 조립 (커스텀) — generate()와 모바일 클라우드(buildMainRequest)가 함께 쓴다.
  * baseRequest = 저장·화면 반영용(시드 포함, i2i 소스 제외), finalRequest = 큐에 넣는 완성 요청
  * (캐릭터·복장·상대 태그·캐릭레퍼·i2i 소스 반영). 스토어·저장 설정은 바꾸지 않는다.
  * 읽는 시점과 순서는 예전 generate() 본문 그대로다.
- * ignoreSource: PC에 불러 둔 i2i 소스를 읽지 않는다(소스도, 소스 해상도로 덮는 것도 없다).
+ * ignoreSource: PC에 불러 둔 i2i 소스를 읽지 않는다(소스도, 소스 해상도로 덮는 것도 없다) — 모바일 클라우드용.
  */
 async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promise<{
   baseRequest: GenerationRequest
@@ -602,9 +616,16 @@ async function assembleMainRequest(options?: { ignoreSource?: boolean }): Promis
   return { baseRequest, finalRequest, seedLocked }
 }
 
-/** 메인 탭 생성 요청을 count장 큐에 넣는다 (커스텀) — 시드 정책·저장은 예전 generate()와 같다. */
-async function enqueueMain(count: number): Promise<void> {
-  const { baseRequest, finalRequest, seedLocked } = await assembleMainRequest()
+/**
+ * 메인 탭 생성 요청을 count장 큐에 넣는다 — generate()와 generateMain()의 공통 몸통 (커스텀).
+ * cloudJobId 는 큐에 넣는 완성 요청에만 단다 — 화면 상태·저장본(baseRequest)에는 남기지 않는다.
+ */
+async function enqueueMain(
+  count: number,
+  cloudJobId?: string,
+  options?: { ignoreSource?: boolean }
+): Promise<string[]> {
+  const { baseRequest, finalRequest, seedLocked } = await assembleMainRequest(options)
   if (!seedLocked) useGenerationStore.setState({ request: baseRequest })
 
   void window.nais.invoke('settings:set', {
@@ -612,10 +633,11 @@ async function enqueueMain(count: number): Promise<void> {
     value: JSON.stringify(baseRequest)
   })
   useGenerationStore.setState({ previewPng: null, progress: null, viewingFilePath: null })
-  await window.nais.invoke('queue:enqueue', {
-    request: finalRequest,
+  const { ids } = await window.nais.invoke('queue:enqueue', {
+    request: cloudJobId ? { ...finalRequest, cloudJobId } : finalRequest,
     count
   })
+  return ids
 }
 
 /** 히스토리/파일에서 i2i 소스 설정 (마스크 없이). filePath 또는 base64+크기 */

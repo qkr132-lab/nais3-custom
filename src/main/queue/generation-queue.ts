@@ -247,10 +247,25 @@ export class GenerationQueue extends EventEmitter {
       id: i.id,
       state: i.state,
       sceneId: i.request.sceneId,
+      // 폰 작업에서 온 항목이면 그 작업 id (커스텀) — 「모두 취소」가 씬 예약 수로 되돌리지 않게
+      cloudJobId: i.request.cloudJobId,
       error: i.error,
       filePath: i.filePath
     }))
     return { items, running: this.lanes.size > 0, delayMs: this.delayMs }
+  }
+
+  /**
+   * 폰(모바일 클라우드) 작업 하나에 딸린 큐 항목 id 전부 (커스텀) — 요청의 cloudJobId 가 같은 항목,
+   * 상태 무관(끝난 것·취소된 것 포함). 렌더러가 새로고침돼 같은 작업을 다시 받아도 두 번 넣지 않게
+   * 메인이 넘기기 직전에 이걸로 확인한다.
+   */
+  idsByCloudJob(jobId: string): string[] {
+    const ids: string[] = []
+    for (const item of this.items.values()) {
+      if (item.request.cloudJobId === jobId) ids.push(item.id)
+    }
+    return ids
   }
 
   /** 대기 항목의 전체 request — 재구성(생성 중 편집 반영) 등 상세가 필요할 때만 조회 */

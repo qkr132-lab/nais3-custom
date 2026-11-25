@@ -5,9 +5,11 @@ import {
   Infinity as InfinityIcon,
   Loader2,
   Minus,
+  Monitor,
   PanelLeft,
   PanelRight,
   Settings,
+  Smartphone,
   Square,
   X
 } from 'lucide-react'
@@ -41,7 +43,7 @@ function ctrl(action: 'minimize' | 'maximize' | 'close'): void {
 }
 
 /** 업데이트 발견 시 나타나는 다운로드 버튼 (신호등·패널토글 옆). 클릭 시 자동 업데이트 진행 */
-function UpdateButton(): React.JSX.Element | null {
+function UpdateButton({ compact }: { compact?: boolean }): React.JSX.Element | null {
   const status = useUpdateStore((s) => s.status)
   const percent = useUpdateStore((s) => s.percent)
   const version = useUpdateStore((s) => s.version)
@@ -50,6 +52,7 @@ function UpdateButton(): React.JSX.Element | null {
   if (status === 'available') {
     return (
       <BarButton
+        compact={compact}
         onClick={start}
         className="text-accent hover:text-accent"
         title={`업데이트 ${version ?? ''} 다운로드 후 자동 설치`}
@@ -60,14 +63,14 @@ function UpdateButton(): React.JSX.Element | null {
   }
   if (status === 'downloading') {
     return (
-      <BarButton className="text-accent" title={`업데이트 다운로드 중 ${percent}%`} disabled>
+      <BarButton compact={compact} className="text-accent" title={`업데이트 다운로드 중 ${percent}%`} disabled>
         <Loader2 size={15} className="animate-spin" />
       </BarButton>
     )
   }
   if (status === 'downloaded') {
     return (
-      <BarButton className="text-accent" title="업데이트 설치 — 재시작 중" disabled>
+      <BarButton compact={compact} className="text-accent" title="업데이트 설치 — 재시작 중" disabled>
         <Loader2 size={15} className="animate-spin" />
       </BarButton>
     )
@@ -80,7 +83,8 @@ function AnlasChips({
   balance,
   cost,
   uncertain,
-  lastDelta
+  lastDelta,
+  compact
 }: {
   balance: number | null
   cost: number
@@ -88,25 +92,36 @@ function AnlasChips({
   uncertain?: boolean
   /** 직전 생성에서 실제로 빠져나간 Anlas (추정 아님) */
   lastDelta?: number | null
+  compact?: boolean
 }): React.JSX.Element | null {
   if (balance === null) return null
   const lastText =
     lastDelta === null || lastDelta === undefined
       ? ''
-      : `
-직전 생성 실제 차감: ${lastDelta === 0 ? '0 (무료로 나감)' : `-${lastDelta}`}`
+      : `\n직전 생성 실제 차감: ${lastDelta === 0 ? '0 (무료로 나감)' : `-${lastDelta}`}`
   return (
-    <div className="no-drag mx-1 flex items-center gap-1.5 max-[900px]:hidden">
+    <div
+      className={cn(
+        'no-drag mx-1 flex items-center gap-1',
+        !compact && 'gap-1.5 max-[900px]:hidden'
+      )}
+    >
       <span
-        className="flex items-center gap-1.5 rounded-lg bg-[#c9a34f]/15 px-2.5 py-1 font-mono text-[14px] font-semibold text-[#9a7c2e] dark:text-[#e0c169]"
+        className={cn(
+          'flex items-center gap-1 rounded-lg bg-[#c9a34f]/15 font-mono font-semibold text-[#9a7c2e] dark:text-[#e0c169]',
+          compact ? 'px-2 py-0.5 text-[12px]' : 'gap-1.5 px-2.5 py-1 text-[14px]'
+        )}
         title={`Anlas 잔액 (생성할 때마다 갱신)${lastText}`}
       >
-        <Coins size={15} className="text-[#c9a34f]" />
+        <Coins size={compact ? 13 : 15} className="text-[#c9a34f]" />
         {balance.toLocaleString()}
       </span>
       {cost > 0 && (
         <span
-          className="rounded-lg bg-danger px-2.5 py-1 font-mono text-[14px] font-bold text-white"
+          className={cn(
+            'rounded-lg bg-danger font-mono font-bold text-white',
+            compact ? 'px-1.5 py-0.5 text-[12px]' : 'px-2.5 py-1 text-[14px]'
+          )}
           title={`이번 생성에 소모될 Anlas (고해상도 · 캐릭터 레퍼런스 · 미인코딩 바이브 포함)${lastText}`}
         >
           -{cost}
@@ -114,9 +129,8 @@ function AnlasChips({
       )}
       {cost === 0 && uncertain && (
         <span
-          className="rounded-lg bg-[#c9a34f]/15 px-2 py-1 text-[11.5px] font-medium text-[#9a7c2e] dark:text-[#e0c169]"
-          title={`Opus 무료분이 0%로 보이지만 소수점 이하가 남아 있을 수 있습니다.
-무료로 나갈 수도, Anlas가 빠질 수도 있어 단정하지 않습니다.${lastText}`}
+          className="rounded-lg bg-[#c9a34f]/15 px-2 py-0.5 text-[11px] font-medium text-[#9a7c2e] dark:text-[#e0c169]"
+          title={`Opus 무료분이 0%로 보이지만 소수점 이하가 남아 있을 수 있습니다.\n무료로 나갈 수도, Anlas가 빠질 수도 있어 단정하지 않습니다.${lastText}`}
         >
           무료?
         </span>
@@ -131,11 +145,23 @@ function AnlasChips({
  * 누르면 충전 아이템 작은 창이 열린다 (커스텀).
  * 열림 상태는 안쪽 칩이 갖는다 — 한도 정보가 잠깐 사라지면 상태도 함께 버려져, 돌아왔을 때 저절로 열리지 않는다.
  */
-export function OpusUsageChip({ usage }: { usage: OpusUsage | null }): React.JSX.Element | null {
-  return usage ? <OpusUsageChipPopover usage={usage} /> : null
+export function OpusUsageChip({
+  usage,
+  compact
+}: {
+  usage: OpusUsage | null
+  compact?: boolean
+}): React.JSX.Element | null {
+  return usage ? <OpusUsageChipPopover usage={usage} compact={compact} /> : null
 }
 
-export function OpusUsageChipPopover({ usage }: { usage: OpusUsage }): React.JSX.Element {
+export function OpusUsageChipPopover({
+  usage,
+  compact
+}: {
+  usage: OpusUsage
+  compact?: boolean
+}): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const percent = usagePercent(usage)
   const extra = usagePurchasedPercent(usage)
@@ -160,14 +186,18 @@ export function OpusUsageChipPopover({ usage }: { usage: OpusUsage }): React.JSX
         <button
           type="button"
           aria-label="Opus 한도와 충전 아이템"
-          className="no-drag mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-2 max-[900px]:hidden"
+          className={cn(
+            'no-drag mx-0.5 flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-surface-2',
+            !compact && 'mx-1 gap-1.5 max-[900px]:hidden'
+          )}
           title={open ? undefined : title}
         >
-          <InfinityIcon size={15} className={low ? 'text-danger' : 'text-accent'} />
-          <UsageGauge usage={usage} className="h-1.5 w-16" />
+          <InfinityIcon size={compact ? 13 : 15} className={low ? 'text-danger' : 'text-accent'} />
+          <UsageGauge usage={usage} className={compact ? 'h-1.5 w-10' : 'h-1.5 w-16'} />
           <span
             className={cn(
-              'font-mono text-[12.5px] font-semibold',
+              'font-mono font-semibold',
+              compact ? 'text-[11.5px]' : 'text-[12.5px]',
               low ? 'text-danger' : 'text-muted'
             )}
           >
@@ -188,13 +218,15 @@ export function OpusUsageChipPopover({ usage }: { usage: OpusUsage }): React.JSX
 function BarButton({
   className,
   active,
+  compact,
   ...props
-}: React.ComponentProps<'button'> & { active?: boolean }): React.JSX.Element {
+}: React.ComponentProps<'button'> & { active?: boolean; compact?: boolean }): React.JSX.Element {
   return (
     <button
       className={cn(
-        'no-drag grid h-7 w-8 place-items-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none',
-        active && 'text-ink',
+        'no-drag grid place-items-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none',
+        compact ? 'h-9 w-9' : 'h-7 w-8',
+        active && 'bg-accent/15 text-accent',
         className
       )}
       {...props}
@@ -202,12 +234,14 @@ function BarButton({
   )
 }
 
-export function Titlebar(): React.JSX.Element {
+export function Titlebar({ portrait = false }: { portrait?: boolean } = {}): React.JSX.Element {
   const leftOpen = useLayoutStore((s) => s.leftOpen)
   const rightOpen = useLayoutStore((s) => s.rightOpen)
   const toggleLeft = useLayoutStore((s) => s.toggleLeft)
   const toggleRight = useLayoutStore((s) => s.toggleRight)
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen)
+  const mobileModeOverride = useLayoutStore((s) => s.mobileModeOverride)
+  const cycleMobileMode = useLayoutStore((s) => s.cycleMobileMode)
   const anlasBalance = useGenerationStore((s) => s.anlasBalance)
   const opusUsage = useGenerationStore((s) => s.opusUsage)
 
@@ -243,21 +277,38 @@ export function Titlebar(): React.JSX.Element {
   })
   const anlasCost = anlasEstimate.total
 
+  const modeLabel =
+    mobileModeOverride === 'portrait'
+      ? '세로(모바일) UI 고정됨 — 클릭 시 가로(데스크톱) 고정'
+      : mobileModeOverride === 'desktop'
+        ? '가로(데스크톱) UI 고정됨 — 클릭 시 자동 감지'
+        : `화면 비율 자동 감지 (${portrait ? '현재: 세로/모바일 UI' : '현재: 가로/데스크톱 UI'}) — 클릭 시 세로 UI 고정`
+
   return (
     <header
-      className="drag relative flex h-14 shrink-0 select-none items-center gap-1 bg-paper px-2 max-[760px]:h-12 max-[760px]:px-1"
+      className={cn(
+        'drag relative flex shrink-0 select-none items-center gap-1 bg-paper',
+        portrait ? 'h-11 border-b border-line/60 px-1.5' : 'h-14 px-2 max-[760px]:h-12 max-[760px]:px-1'
+      )}
       style={{ paddingLeft: isMac ? 90 : undefined }}
     >
-      {/* 네비게이션 — 타이틀바 중앙 (컨테이너는 pointer-events-none, PageNav만 클릭 가능) */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <PageNav />
-      </div>
+      {/* 데스크톱 모드에서만 네비게이션을 타이틀바 중앙에 배치 (세로 모드에서는 아래 전용 탭 바로 분리) */}
+      {!portrait && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <PageNav />
+        </div>
+      )}
 
-      <BarButton onClick={toggleLeft} active={leftOpen} title="프롬프트 패널 접기/펴기">
-        <PanelLeft size={15} />
+      <BarButton
+        compact={portrait}
+        onClick={toggleLeft}
+        active={leftOpen}
+        title="프롬프트·캐릭터 패널 열기/닫기"
+      >
+        <PanelLeft size={portrait ? 17 : 15} />
       </BarButton>
 
-      <UpdateButton />
+      <UpdateButton compact={portrait} />
 
       {/* Windows는 우측에 창 컨트롤(─ □ ✕)이 있어 테마·Anlas를 좌측에 배치 */}
       {!isMac && (
@@ -265,12 +316,13 @@ export function Titlebar(): React.JSX.Element {
           <div className="no-drag mx-0.5">
             <ThemeToggle />
           </div>
-          <OpusUsageChip usage={opusUsage} />
+          <OpusUsageChip usage={opusUsage} compact={portrait} />
           <AnlasChips
             balance={anlasBalance}
             cost={anlasCost}
             uncertain={anlasEstimate.uncertain}
             lastDelta={lastAnlasDelta}
+            compact={portrait}
           />
         </>
       )}
@@ -279,38 +331,70 @@ export function Titlebar(): React.JSX.Element {
 
       {isMac && (
         <>
-          <OpusUsageChip usage={opusUsage} />
+          <OpusUsageChip usage={opusUsage} compact={portrait} />
           <AnlasChips
             balance={anlasBalance}
             cost={anlasCost}
             uncertain={anlasEstimate.uncertain}
             lastDelta={lastAnlasDelta}
+            compact={portrait}
           />
         </>
       )}
 
-      <BarButton onClick={toggleRight} active={rightOpen} title="히스토리 패널 접기/펴기">
-        <PanelRight size={15} />
+      {/* 세로(휴대폰)/가로(데스크톱) 레이아웃 전환 버튼 */}
+      <BarButton
+        compact={portrait}
+        onClick={cycleMobileMode}
+        active={mobileModeOverride === 'portrait' || portrait}
+        title={modeLabel}
+        aria-label="세로/모바일 UI 모드 전환"
+      >
+        {mobileModeOverride === 'desktop' ? (
+          <Monitor size={portrait ? 17 : 15} />
+        ) : (
+          <Smartphone size={portrait ? 17 : 15} />
+        )}
+      </BarButton>
+
+      <BarButton
+        compact={portrait}
+        onClick={toggleRight}
+        active={rightOpen}
+        title="히스토리 패널 열기/닫기"
+      >
+        <PanelRight size={portrait ? 17 : 15} />
       </BarButton>
       {isMac && (
         <div className="no-drag mx-0.5">
           <ThemeToggle />
         </div>
       )}
-      <BarButton onClick={() => setSettingsOpen(true)} title="설정">
-        <Settings size={15} />
+      <BarButton compact={portrait} onClick={() => setSettingsOpen(true)} title="설정">
+        <Settings size={portrait ? 17 : 15} />
       </BarButton>
 
       {!isMac && (
-        <div className="no-drag ml-1 flex items-center">
-          <BarButton className="w-9" onClick={() => ctrl('minimize')} aria-label="최소화">
+        <div className="no-drag ml-0.5 flex items-center">
+          <BarButton
+            compact={portrait}
+            className="w-8"
+            onClick={() => ctrl('minimize')}
+            aria-label="최소화"
+          >
             <Minus size={15} />
           </BarButton>
-          <BarButton className="w-9" onClick={() => ctrl('maximize')} aria-label="최대화">
+          <BarButton
+            compact={portrait}
+            className="w-8"
+            onClick={() => ctrl('maximize')}
+            aria-label="최대화"
+          >
             <Square size={12} />
           </BarButton>
           <BarButton
-            className="w-9 hover:bg-danger hover:text-white"
+            compact={portrait}
+            className="w-8 hover:bg-danger hover:text-white"
             onClick={() => ctrl('close')}
             aria-label="닫기"
           >

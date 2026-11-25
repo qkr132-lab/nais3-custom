@@ -96,6 +96,66 @@ export function CompositionBoard(): React.JSX.Element {
                 <span className="text-[12.5px] font-medium">
                   {label(selected, chars.indexOf(selected))}
                 </span>
+                <button
+                  type="button"
+                  title={
+                    selected.slotNo
+                      ? `${selected.slotNo}번 자리 (클릭: 다음 번호 · 우클릭: 해제)`
+                      : '자리 번호 없음 (클릭: 1번) — 씬에 잡아둔 번호 자리로 자동 배치'
+                  }
+                  onClick={() =>
+                    updateCard(selected.id, {
+                      slotNo:
+                        selected.slotNo == null
+                          ? 1
+                          : selected.slotNo >= 8
+                            ? null
+                            : selected.slotNo + 1
+                    })
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    updateCard(selected.id, { slotNo: null })
+                  }}
+                  className={cn(
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors',
+                    selected.slotNo
+                      ? 'bg-emerald-500 text-white'
+                      : 'border border-line bg-surface-2 text-faint hover:text-muted'
+                  )}
+                >
+                  {selected.slotNo ? `${selected.slotNo}번` : '번호'}
+                </button>
+                <button
+                  type="button"
+                  title={
+                    selected.role === 'source'
+                      ? '하는쪽 (클릭: 당하는쪽으로)'
+                      : selected.role === 'target'
+                        ? '당하는쪽 (클릭: 없음으로)'
+                        : '행위 역할 없음 (클릭: 하는쪽으로)'
+                  }
+                  onClick={() =>
+                    updateCard(selected.id, {
+                      role:
+                        selected.role === 'source'
+                          ? 'target'
+                          : selected.role === 'target'
+                            ? null
+                            : 'source'
+                    })
+                  }
+                  className={cn(
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors',
+                    selected.role === 'source'
+                      ? 'bg-accent text-white'
+                      : selected.role === 'target'
+                        ? 'bg-violet-500 text-white'
+                        : 'border border-line bg-surface-2 text-faint hover:text-muted'
+                  )}
+                >
+                  {selected.role === 'source' ? '하' : selected.role === 'target' ? '당' : '역할'}
+                </button>
                 <span className="flex items-center gap-1 font-mono text-[11px] text-faint">
                   <Crosshair size={12} />
                   <span className="inline-block w-[86px] tabular-nums">
@@ -128,18 +188,74 @@ export function CompositionBoard(): React.JSX.Element {
               />
               <div className="flex flex-wrap gap-1">
                 {chars.map((c, i) => (
-                  <button
+                  <div
                     key={c.id}
                     className={cn(
-                      'rounded-md border px-2 py-1 text-[11.5px] transition-colors',
+                      'flex items-center gap-1 rounded-md border px-2 py-1 text-[11.5px] transition-colors',
                       c.id === selected.id
                         ? 'border-accent bg-accent-soft text-accent'
                         : 'border-line text-muted hover:bg-surface-2'
                     )}
-                    onClick={() => setSelectedId(c.id)}
                   >
-                    {i + 1}. {label(c, i)}
-                  </button>
+                    <button
+                      type="button"
+                      className="truncate"
+                      onClick={() => setSelectedId(c.id)}
+                    >
+                      {i + 1}. {label(c, i)}
+                    </button>
+                    <button
+                      type="button"
+                      title={
+                        c.slotNo
+                          ? `${c.slotNo}번 자리 (클릭: 다음 번호 · 우클릭: 해제)`
+                          : '자리 번호 지정 (클릭: 1번)'
+                      }
+                      onClick={() =>
+                        updateCard(c.id, {
+                          slotNo: c.slotNo == null ? 1 : c.slotNo >= 8 ? null : c.slotNo + 1
+                        })
+                      }
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        updateCard(c.id, { slotNo: null })
+                      }}
+                      className={cn(
+                        'rounded px-1 py-0.5 text-[10px] font-medium tabular-nums transition-colors',
+                        c.slotNo
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-paper text-faint hover:text-muted'
+                      )}
+                    >
+                      {c.slotNo ? `${c.slotNo}번` : '번호'}
+                    </button>
+                    <button
+                      type="button"
+                      title={
+                        c.role === 'source'
+                          ? '하는쪽 (클릭: 당하는쪽으로)'
+                          : c.role === 'target'
+                            ? '당하는쪽 (클릭: 없음으로)'
+                            : '역할 없음 (클릭: 하는쪽으로)'
+                      }
+                      onClick={() =>
+                        updateCard(c.id, {
+                          role:
+                            c.role === 'source' ? 'target' : c.role === 'target' ? null : 'source'
+                        })
+                      }
+                      className={cn(
+                        'rounded px-1 py-0.5 text-[10px] font-medium transition-colors',
+                        c.role === 'source'
+                          ? 'bg-accent text-white'
+                          : c.role === 'target'
+                            ? 'bg-violet-500 text-white'
+                            : 'bg-paper text-faint hover:text-muted'
+                      )}
+                    >
+                      {c.role === 'source' ? '하' : c.role === 'target' ? '당' : '역할'}
+                    </button>
+                  </div>
                 ))}
               </div>
             </>

@@ -11,6 +11,10 @@ Synchronization check: `node tests/ui/prompt-state-qa.cjs`. It renders actual sp
 preset selection and generation stores with in-memory queue/settings adapters;
 all enqueue calls are captured locally and never sent to an image service.
 
+Auto-censor tab: open `/auto-censor.html` (`?empty=1` for no folder). It renders
+the actual `CensorMode` with a fake IPC that simulates progress, previews and a
+failed list. Nothing is detected, downloaded or sent to NAI.
+
 Model-aware token UI: run `node tests/ui/token-count-qa.cjs` or open
 `/token-count.html` (`?mode=panel` or `?mode=scene` for final totals). It renders
 the actual editor, prompt panel, character overlay and scene detail with
@@ -94,6 +98,11 @@ boundary evidence; no actual image generation is performed.
 
 All harness files live under `tests/ui`, already excluded by the installer's
 `!tests/*` packaging rule. No production entry point imports this directory.
+
+Mobile cloud settings: open `/cloud-section.html` (the real `SettingsDialog`; `?bare=1` for the
+section alone). It renders the actual `CloudSection` with an in-memory fake `window.nais`, so no
+network, file or NAI call is made. The query parameters (connection state, device count, free-quota
+state, pairing expiry) are listed at the top of `tests/ui/cloud-section.tsx`.
 
 Scene grid navigation: open `/scene-grid.html` (`?kind=background` for the background library,
 `?count=300` for more scenes per preset, `?busy=5` to mark the 5th scene as generating, `?panels=1`

@@ -79,9 +79,9 @@ export function OutfitMode(): React.JSX.Element {
   const selected = items.find((o) => o.id === selectedId) ?? items[0] ?? null
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-hidden p-4">
+    <div className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-hidden p-4 max-[768px]:flex-col max-[768px]:gap-2.5 max-[768px]:p-2.5">
       {/* 복장 목록 */}
-      <div className="flex w-60 shrink-0 flex-col gap-2">
+      <div className="flex w-60 shrink-0 flex-col gap-2 max-[768px]:max-h-44 max-[768px]:w-full">
         <Button
           size="sm"
           className="gap-1.5"

@@ -27,12 +27,47 @@ const PAGES: { id: CenterMode; label: string; icon: LucideIcon }[] = [
 ]
 
 /**
- * 상단 중앙 페이지 네비게이션 (NAIS2 AnimatedNavBar 이식).
- * 활성 탭에 layoutId 슬라이딩 pill이 부드럽게 이동한다.
+ * 상단 페이지 네비게이션 (NAIS2 AnimatedNavBar 이식).
+ * - 데스크톱(compact=false): 타이틀바 중앙 플로팅 pill
+ * - 세로/모바일(compact=true): 타이틀바 아래 전용 가로 스크롤 탭 바 (라벨 항상 표시 + 36px 터치 타겟)
  */
-export function PageNav(): React.JSX.Element {
+export function PageNav({ compact = false }: { compact?: boolean } = {}): React.JSX.Element {
   const centerMode = useLayoutStore((s) => s.centerMode)
   const setCenterMode = useLayoutStore((s) => s.setCenterMode)
+
+  if (compact) {
+    return (
+      <nav
+        aria-label="페이지 이동"
+        className="no-drag flex w-full shrink-0 items-center gap-1 overflow-x-auto border-b border-line/70 bg-surface/95 px-2 py-1 no-scrollbar"
+      >
+        {PAGES.map((page) => {
+          const active = centerMode === page.id
+          return (
+            <button
+              key={page.id}
+              onClick={() => setCenterMode(page.id)}
+              title={page.label}
+              className={cn(
+                'relative z-0 flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition-colors',
+                active ? 'text-ink font-semibold' : 'text-muted hover:text-ink'
+              )}
+            >
+              {active && (
+                <motion.div
+                  layoutId="pageNavActiveCompact"
+                  className="absolute inset-0 -z-10 rounded-full border border-accent/30 bg-accent/15 shadow-sm"
+                  transition={{ type: 'spring', bounce: 0.2, duration: 0.5 }}
+                />
+              )}
+              <page.icon className={cn('size-4 shrink-0', active && 'text-accent')} />
+              <span className="whitespace-nowrap">{page.label}</span>
+            </button>
+          )
+        })}
+      </nav>
+    )
+  }
 
   return (
     <nav className="no-drag pointer-events-auto flex items-center gap-1 rounded-full border border-line/70 bg-surface/95 p-1 shadow-md backdrop-blur max-[760px]:gap-0.5 max-[760px]:p-0.5">

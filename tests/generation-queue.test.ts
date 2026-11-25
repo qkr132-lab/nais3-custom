@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { GenerationQueue } from '../src/main/queue/generation-queue'
 import { RateLimitError } from '../src/main/nai/client'
+import type { GenerationRequest } from '../src/shared/types'
 
 // GenerationRequest를 흉내낸 최소 객체 (큐는 seed 외 필드를 건드리지 않는다)
 const mk = (label: string): any => ({ __label: label, seed: 0 })
@@ -140,5 +141,118 @@ describe('GenerationQueue — 큐 밖 요청 잡아두기(exclusive)', () => {
     gate.resolve()
     await waitIdle(q)
     expect(q.status().items.every((i) => i.state === 'done')).toBe(true)
+  })
+})
+
+describe('GenerationQueue — 폰 작업 묶기(idsByCloudJob)', () => {
+  // 큐는 cloudJobId·seed 외 필드를 건드리지 않으므로 라벨만 단 최소 요청으로 시험한다
+  const mkJob = (label: string, cloudJobId?: string): GenerationRequest =>
+    ({
+      __label: label,
+      seed: 0,
+      ...(cloudJobId ? { cloudJobId } : {})
+    }) as unknown as GenerationRequest
+  const labelOf = (req: GenerationRequest): string =>
+    (req as unknown as { __label: string }).__label
+
+  it('요청의 cloudJobId 가 같은 항목 id 를 상태와 무관하게(끝난 것·실패·취소 포함) 돌려준다', async () => {
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req) => {
+      if (labelOf(req) === 'A') await gate.p
+      if (labelOf(req) === 'B') throw new Error('생성 실패')
+      return `/img/${labelOf(req)}.png`
+    })
+    q.setDelayMs(0)
+    const [a, b, c, d] = q.enqueueMany([
+      mkJob('A', 'j1'),
+      mkJob('B', 'j1'),
+      mkJob('C', 'j2'),
+      mkJob('D')
+    ])
+    await tick() // A 가 generating
+    expect(q.idsByCloudJob('j1')).toEqual([a, b])
+    expect(q.idsByCloudJob('j2')).toEqual([c])
+    expect(q.idsByCloudJob('없는 작업')).toEqual([])
+    expect(q.idsByCloudJob('')).toEqual([]) // cloudJobId 가 없는 항목(d)은 어느 작업에도 묶이지 않는다
+
+    q.cancel([c])
+    gate.resolve()
+    await waitIdle(q)
+    const states = Object.fromEntries(q.status().items.map((i) => [i.id, i.state]))
+    expect(states).toEqual({ [a]: 'done', [b]: 'failed', [c]: 'cancelled', [d]: 'done' })
+    // 다 끝난 뒤에도 그대로 찾는다
+    expect(q.idsByCloudJob('j1')).toEqual([a, b])
+    expect(q.idsByCloudJob('j2')).toEqual([c])
+  })
+
+  it('enqueue(count) 배치·enqueueNext 로 넣어도 장마다 같은 작업에 묶인다', async () => {
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req) => {
+      if (labelOf(req) === 'hold') await gate.p
+      return `/img/${labelOf(req)}.png`
+    })
+    q.setDelayMs(0)
+    const [hold] = q.enqueueMany([mkJob('hold')])
+    await tick()
+    const batch = q.enqueue(mkJob('E', 'j3'), 3)
+    const next = q.enqueueNext([mkJob('F', 'j3')])
+    expect(batch).toHaveLength(3)
+    expect(new Set(q.idsByCloudJob('j3'))).toEqual(new Set([...batch, ...next]))
+    expect(q.idsByCloudJob('j3')).toHaveLength(4)
+    expect(q.idsByCloudJob('j3')).not.toContain(hold)
+    gate.resolve()
+    await waitIdle(q)
+  })
+
+  it('대기 항목의 요청을 교체해도(updatePending) 새 요청의 cloudJobId 를 따른다', async () => {
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req) => {
+      if (labelOf(req) === 'hold') await gate.p
+      return '/img/x.png'
+    })
+    q.setDelayMs(0)
+    const [, p] = q.enqueueMany([mkJob('hold'), mkJob('P', 'j4')])
+    await tick()
+    expect(q.idsByCloudJob('j4')).toEqual([p])
+    q.updatePending([{ id: p, request: mkJob('P', 'j5') }])
+    expect(q.idsByCloudJob('j4')).toEqual([])
+    expect(q.idsByCloudJob('j5')).toEqual([p])
+    gate.resolve()
+    await waitIdle(q)
+  })
+})
+
+describe('GenerationQueue — 요약 상태(statusLite)에 폰 작업 id', () => {
+  const mkJob = (label: string, extra: object = {}): GenerationRequest =>
+    ({ __label: label, seed: 0, ...extra }) as unknown as GenerationRequest
+
+  it('폰 작업에서 온 항목에는 cloudJobId 를 싣고, 그 밖의 항목에는 싣지 않는다 (씬 id 는 그대로)', async () => {
+    const gate = deferred<void>()
+    const q = new GenerationQueue(async (req) => {
+      if ((req as unknown as { __label: string }).__label === 'hold') await gate.p
+      return '/img/x.png'
+    })
+    q.setDelayMs(0)
+    const [hold, phone, own] = q.enqueueMany([
+      mkJob('hold'),
+      mkJob('P', { cloudJobId: 'j1', sceneId: 7 }),
+      mkJob('O', { sceneId: 8 })
+    ])
+    await tick()
+    const lite = Object.fromEntries(q.statusLite().items.map((i) => [i.id, i]))
+    expect(lite[phone]).toMatchObject({ state: 'pending', sceneId: 7, cloudJobId: 'j1' })
+    expect(lite[own]).toMatchObject({ sceneId: 8 })
+    expect(lite[own].cloudJobId).toBeUndefined()
+    expect(lite[hold].cloudJobId).toBeUndefined()
+    // 대기 항목의 요청을 바꿔도 요약이 따라간다
+    q.updatePending([{ id: phone, request: mkJob('P', { cloudJobId: 'j2', sceneId: 7 }) }])
+    expect(q.statusLite().items.find((i) => i.id === phone)?.cloudJobId).toBe('j2')
+    gate.resolve()
+    await waitIdle(q)
+    // 끝난 뒤에도 남는다
+    expect(q.statusLite().items.find((i) => i.id === phone)).toMatchObject({
+      state: 'done',
+      cloudJobId: 'j2'
+    })
   })
 })

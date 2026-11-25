@@ -76,8 +76,11 @@ search/history; user-confirmed insertion retains native undo and an undo toast.
 Censor option rows contain a checkbox and, once a part is applied, a per-part weight
 control (minus / number / plus / reset; default 1.0, range 0.1 to 5). A part left at
 1.0 is added without a weight; any other value wraps only that part's tag as
-`1.3::...::`. Suppression tags and the old default weight (2.0) are not used; keep
-the footer visible while the settings body scrolls.
+`1.3::...::`. The old default weight (2.0) is not used. A scene with any censored
+part also gets the other censor styles (bar, mosaic, steam and so on —
+`CENSOR_NEGATIVE_SUPPRESS_TAGS`) appended to its negative prompt, skipping tags already
+there; this has no control of its own. Keep the footer visible while the settings body
+scrolls.
 Tag suggestions use a single list: relevance first, then recent/frequent history,
 deduplicated by canonical tag. Remove the search/recent/frequent tab navigation.
 
@@ -92,3 +95,14 @@ Use the existing text dialog to name the folder; cancel makes no changes.
 Creation opens the parent and clears the search so the new row is visible.
 Retain the current two-level hierarchy; subfolder rows do not offer a third level.
 No new colors, animation, font family or decorative assets.
+
+## Portrait and Mobile Remote-Desktop Responsive Layout (2026-10-31)
+Support portrait monitors and phone remote-desktop viewports down to 360px width:
+- Window minimum size: `minWidth: 360`, `minHeight: 480`.
+- Portrait mode activates automatically when `viewport.width < 960` or `viewport.height > viewport.width * 1.05`, or manually via the Titlebar `Smartphone` mode toggle (`auto` / `portrait` / `desktop`).
+- In Portrait mode:
+  - `PageNav` moves from `Titlebar` absolute center into a dedicated full-width horizontal tab bar with `36px` touch targets and visible Korean labels.
+  - `Titlebar` keeps Anlas and Opus quota chips visible in compact form and enlarges icon buttons to `36px` (`size-9`).
+  - `PromptPanel` opens as a `75dvh` overlay sheet with backdrop so character/fragment/ref overlays and prompt editors have full vertical room.
+  - A sticky bottom action bar (`48px` height, `40px` controls) provides one-thumb access to `프롬프트/캐릭터`, `캐릭터 선택`, `파라미터`, batch stepper, `고속 모드`, and primary `생성 / 씬 생성 / 취소`.
+  - `SceneMode` and `SceneDetail` support `1~5` column selection (`1열` and `2열` selectable on narrow screens), `28px` (`size-7`) reserve `-/+` buttons, and always-visible `MoreVertical` / favorite / delete buttons on `<960px` viewports where hover is unavailable.

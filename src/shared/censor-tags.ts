@@ -91,6 +91,35 @@ export function withAnalSuppression(prompt: string, enabled: unknown): string {
   return `${base}${commentStart(base.slice(base.lastIndexOf('\n') + 1)) !== -1 ? '\n' : ', '}anal`
 }
 
+/** 흰색 통검열(blank/white censor)이 깨지지 않도록 바·모자이크·반투명 검열을 네거티브에서 자동 억제 */
+export const CENSOR_NEGATIVE_SUPPRESS_TAGS = [
+  'bar censor',
+  'censor bar',
+  'black bars',
+  'mosaic censoring',
+  'pointillism censor',
+  'glitch censor',
+  'heart censor',
+  'light censor',
+  'steam censor',
+  'partially censored',
+  'transparent censor'
+] as const
+
+export function withCensorNegative(prompt: string, censorKinds: unknown): string {
+  if (normalizeCensors(censorKinds).length === 0) return prompt
+  const existing = new Set(
+    removeComments(prompt)
+      .replace(/-?\d+(?:\.\d+)?::|::|[{}[\]]/g, '')
+      .split(/[,\n]/)
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const missing = CENSOR_NEGATIVE_SUPPRESS_TAGS.filter((t) => !existing.has(t))
+  if (missing.length === 0) return prompt
+  return appendPromptPiece(prompt, missing.join(', '))
+}
+
 /** Accept legacy missing data and reject unknown options. Stable order, no duplicates. */
 export function normalizeCensors(value: unknown): CensorKind[] {
   if (typeof value === 'string') {

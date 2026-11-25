@@ -244,6 +244,56 @@ export function listScenes(presetId: number): Scene[] {
   return rows.map(toScene)
 }
 
+/**
+ * 모든 프리셋의 살아 있는 씬 (커스텀 · 모바일 클라우드 동기화용) — 썸네일 없이 가볍게.
+ * 휴지통 프리셋·휴지통 씬은 뺀다. 프리셋 순서 → 씬 순서.
+ * thumbnail·thumbnailPath 는 늘 '', imageCount 도 늘 0 — 씬마다 그림 수를 세지 않는다
+ * (그림 수는 listSceneImageCounts 로 따로 한 번에 센다).
+ * sortOrder = DB 의 sort_order 그대로 — 목록 위치가 아니라서, 가운데 씬 하나를 지워도 뒤 씬들의 값이 안 바뀐다
+ * (클라우드는 이 값으로 정렬하고 같은 값이면 id 순 — 여기 ORDER BY 와 같다).
+ */
+export function listAllScenesLite(): (Scene & { sortOrder: number })[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT s.id, s.preset_id, s.name, s.prompt, s.negative_prompt, s.width, s.height, s.sort_order, s.reserve_count, s.variety_plus, s.source_tags, s.target_tags, s.source_pos, s.target_pos, s.export_no, s.censor_kinds, s.censor_tag_weights, s.suppress_anal, s.background, p.kind AS kind
+       FROM gen_scenes s JOIN scene_presets p ON p.id = s.preset_id
+       WHERE s.deleted_at IS NULL AND p.deleted_at IS NULL
+       ORDER BY p.sort_order, p.id, s.sort_order, s.id`
+    )
+    .all() as (Row & { sort_order: number })[]
+  return rows.map((r) => ({ ...toScene({ ...r, image_count: 0 }), sortOrder: r.sort_order }))
+}
+
+/**
+ * 살아 있는 씬마다 지우지 않은 그림 수 (커스텀 · 모바일 클라우드 그림 수 동기화용).
+ * 휴지통 씬·휴지통 프리셋의 씬은 뺀다. 그림이 없는 씬도 0 으로 싣는다. 키는 씬 id(글자열).
+ */
+export function listSceneImageCounts(): Record<string, number> {
+  const rows = getDb()
+    .prepare(
+      `SELECT s.id AS id, COUNT(i.id) AS c
+       FROM gen_scenes s JOIN scene_presets p ON p.id = s.preset_id
+       LEFT JOIN images i ON i.scene_id = s.id AND i.deleted_at IS NULL
+       WHERE s.deleted_at IS NULL AND p.deleted_at IS NULL
+       GROUP BY s.id`
+    )
+    .all() as { id: number; c: number }[]
+  const out: Record<string, number> = {}
+  for (const r of rows) out[String(r.id)] = r.c
+  return out
+}
+
+/** 씬이 휴지통에 있지 않고 그 프리셋도 휴지통에 있지 않은가 (커스텀 · 폰 작업 실행 전 확인용) */
+export function isSceneLive(id: number): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 AS ok FROM gen_scenes s JOIN scene_presets p ON p.id = s.preset_id
+       WHERE s.id = ? AND s.deleted_at IS NULL AND p.deleted_at IS NULL`
+    )
+    .get(id) as { ok: number } | undefined
+  return row != null
+}
+
 /** 휴지통에 있는(소프트삭제된) 씬 목록 — 최근 삭제 순. 프리셋 무관 전체.
  *  휴지통 프리셋의 씬은 프리셋 항목으로만 보인다 (여기선 제외) */
 export function listTrashedScenes(
@@ -1378,6 +1428,34 @@ function buildManifest(items: { file: string; scene: string }[]): string {
   return lines.join('\n') + '\n'
 }
 
+/** 기존 _이미지목록.md가 있으면 병합하여 일부 씬만 내보낼 때도 전체 목록 보존 */
+function mergeAndBuildManifest(
+  existingPath: string,
+  newItems: { file: string; scene: string }[]
+): string {
+  const map = new Map<string, string>()
+  if (existsSync(existingPath)) {
+    try {
+      const content = readFileSync(existingPath, 'utf-8')
+      for (const line of content.split(/\r?\n/)) {
+        const m = line.match(/^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$/)
+        if (m && m[1] !== '파일' && !m[1].startsWith('---')) {
+          map.set(m[1], m[2])
+        }
+      }
+    } catch {
+      // 기존 파일 파싱 실패 시 무시
+    }
+  }
+  for (const it of newItems) {
+    map.set(it.file, it.scene)
+  }
+  const merged = Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([file, scene]) => ({ file, scene }))
+  return buildManifest(merged)
+}
+
 // ── 폴더로 내보내기 (커스텀 — ZIP 대신 파일 그대로 복사) ──────────────
 export interface ExportConflict {
   /** 대상 폴더 기준 상대 경로 (씬별 폴더면 "씬이름/파일명") */
@@ -1570,7 +1648,8 @@ export async function exportToFolder(
   // 번호로 내보낸 경우: 번호 ↔ 씬 이름 설명서 동봉 (AI 지침 작성용, 커스텀)
   if (manifest.length > 0) {
     try {
-      writeFileSync(join(dir, '_이미지목록.md'), buildManifest(manifest), 'utf-8')
+      const manifestPath = join(dir, '_이미지목록.md')
+      writeFileSync(manifestPath, mergeAndBuildManifest(manifestPath, manifest), 'utf-8')
     } catch {
       // 설명서 실패는 치명적이지 않음
     }
