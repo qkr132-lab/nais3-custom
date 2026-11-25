@@ -36,6 +36,7 @@ import { useOutfitsStore } from '../stores/outfits-store'
 import { useExposeWorn } from '../lib/use-expose-worn'
 import { useFutaReassembly, useFutaViewFix } from '../lib/use-futa-settings'
 import { useEyesClosedStrip, useNudePinkNipples } from '../lib/use-body-settings'
+import { completionEdit, completionRange, type CompletionRange } from '../lib/prompt-completion'
 import { cn } from '../lib/utils'
 import { PositionPicker } from './position-picker'
 import { ScenePlacementDialog } from './scene-placement-dialog'
@@ -1652,24 +1653,17 @@ function RoleTagTextarea({
     },
     []
   )
-  const tokenRef = useRef<{ start: number; end: number; prefix: string }>({
-    start: 0,
-    end: 0,
-    prefix: ''
-  })
+  // 고를 때 바꿀 자리 — 메인 입력칸과 같은 규칙(prompt-completion.ts)으로 잡는다
+  const rangeRef = useRef<CompletionRange | null>(null)
 
   const queryAt = (text: string, caret: number): void => {
-    // 커서 앞의 현재 토큰 (쉼표/줄바꿈 기준)
-    const m = /[^,\n]*$/.exec(text.slice(0, caret))
-    let token = m?.[0] ?? ''
-    const lead = token.length - token.replace(/^\s+/, '').length
-    token = token.slice(lead)
-    const start = caret - token.length
-    const prefix = /^(source#|target#)/i.exec(token)?.[0] ?? ''
-    const q = token.slice(prefix.length).trim()
-    tokenRef.current = { start, end: caret, prefix }
+    // 커서 앞 태그 — 가중치(-2::)·괄호·source#/target# 뒤의 글자만 찾고, 고르면 그 글자만 바꾼다
+    const range = completionRange(text, caret)
+    const q = range?.kind === 'tag' ? range.query.trim() : ''
+    rangeRef.current = range
     clearTimeout(timer.current)
-    if (q.length < 1) {
+    // 숫자만 있으면(가중치를 치는 중: -2, 1.5) 찾지 않는다
+    if (!q || /^-?[\d.]+$/.test(q)) {
       setOpen(false)
       return
     }
@@ -1683,11 +1677,11 @@ function RoleTagTextarea({
   }
 
   const accept = (tag: string): void => {
-    const { start, end, prefix } = tokenRef.current
-    const next = `${value.slice(0, start)}${prefix}${tag}, ${value.slice(end)}`
+    const range = rangeRef.current
+    if (!range) return
+    const { next, cursor: caret } = completionEdit(range, tag)
     change(next)
     setOpen(false)
-    const caret = start + prefix.length + tag.length + 2
     requestAnimationFrame(() => {
       ref.current?.focus()
       ref.current?.setSelectionRange(caret, caret)

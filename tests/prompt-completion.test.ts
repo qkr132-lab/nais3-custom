@@ -24,6 +24,19 @@ describe('completion replacement boundaries', () => {
     expect(completionEdit(completionRange('3::smi::', 6)!, 'smile').next).toBe('3::smile::')
     expect(completionEdit(completionRange('{smi}', 4)!, 'smile').next).toBe('{smile}')
   })
+  it('searches only the tag after a negative weight and keeps the weight', () => {
+    // 하는쪽·당하는쪽 태그 칸도 이 규칙을 쓴다 — 검색어에 -2:: 가 섞이면 영어 검색이 비고, 고르면 -2:: 가 지워졌다
+    const range = completionRange('blush, -2::sm', 13)!
+    expect(range.query).toBe('sm')
+    expect(completionEdit(range, 'smirk').next).toBe('blush, -2::smirk, ')
+    expect(completionRange('-2::웃는', 6)!.query).toBe('웃는')
+    expect(completionEdit(completionRange('-2::source#se', 13)!, 'sex').next).toBe(
+      '-2::source#sex, '
+    )
+    expect(completionEdit(completionRange('-1.5::smi::, sky', 9)!, 'smile').next).toBe(
+      '-1.5::smile::, sky'
+    )
+  })
   it('preserves already-present fragment close and commas', () => {
     expect(completionEdit(completionRange('<flow>, sky', 5)!, 'flowers').next).toBe(
       '<flowers>, sky'
